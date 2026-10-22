@@ -1,0 +1,65 @@
+---
+import Base from '../layouts/Base.astro';
+import '../styles/home.css';
+---
+
+<Base title="nomicon" section="home">
+  <main class="home">
+    <section class="intro">
+      <h1>Things you can poke at</h1>
+      <p>
+        Interactive explainers for game programmers: engine fundamentals, a real ECS running in your browser, game AI, and labs for
+        pathfinding and tactical analysis. Every example runs live, so change it and see what happens.
+      </p>
+    </section>
+    <div class="cards">
+      <a class="card" href="/engine/">
+        <span class="kicker">Foundations</span>
+        <h2>engine</h2>
+        <p>
+          What the hardware and the engine underneath actually do: cache lines and data layout, handles and allocators, fixed
+          timesteps, determinism, spatial partitioning from grids to octrees, job systems, threads and fibers, and profiling. The "why" under
+          the flecs lessons.
+        </p>
+        <span class="go">Start here →</span>
+      </a>
+      <a class="card" href="/flecs/">
+        <span class="kicker">Lessons</span>
+        <h2>flecs</h2>
+        <p>
+          The flecs entity component system, explained with a live world in every lesson. Add components and watch archetypes form, see
+          which tables a query matches and what it caches, step systems, and fire observers.
+        </p>
+        <span class="go">Start the lessons →</span>
+      </a>
+      <a class="card" href="/ai/">
+        <span class="kicker">Lessons</span>
+        <h2>game ai</h2>
+        <p>
+          How game agents choose what to do, move and read the map: utility scoring, behaviour trees, goal-oriented planning,
+          steering and context steering, avoidance from separation to ORCA, formations and terrain analysis, all live so you can
+          watch them think.
+        </p>
+        <span class="go">Start the lessons →</span>
+      </a>
+      <a class="card" href="/pathing-lab/">
+        <span class="kicker">Lab</span>
+        <h2>pathing lab</h2>
+        <p>
+          Paint a map and watch A*, HPA*, navmeshes, roadmaps and vehicle planners search it, step by step, side by side. With concept
+          notes for each idea.
+        </p>
+        <span class="go">Open the lab →</span>
+      </a>
+      <a class="card" href="/tactics-lab/">
+        <span class="kicker">Lab</span>
+        <h2>tactics lab</h2>
+        <p>
+          Terrain analysis for AI on a 2.5D map: clearance, choke points for movement and for sight, openness, cover generation by
+          scanning and by sampling, exposure to threats, and picking the best cover. With concept notes for each idea.
+        </p>
+        <span class="go">Open the lab →</span>
+      </a>
+    </div>
+  </main>
+</Base>

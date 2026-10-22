@@ -1,0 +1,48 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Systems and the pipeline
+order: 8
+part: Systems, commands and reactions
+summary: 'A system is a query, a function and a phase. What order systems run in, why the function is called once per table rather than once per entity, and what writing through a field does and doesn''t do.'
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A **system** is three things: a query, a function, and a place in the frame. `world.progress()` walks through the systems in order, and for each one iterates its query and calls the function. Like everything else in flecs, a system is an entity, so it can be named, looked up, disabled and inspected.
+
+## The pipeline decides the order
+
+Systems are grouped by **phase**, and phases run in a fixed order each frame:
+
+`OnLoad` → `PostLoad` → `PreUpdate` → `OnUpdate` → `OnValidate` → `PostUpdate` → `PreStore` → `OnStore`
+
+In C++ a system without a phase goes in `OnUpdate` (in C, a system without a phase isn't part of the pipeline, and only runs when you call `ecs_run`). Within a phase, systems run in the order they were created. That's the whole rule: it doesn't matter which file a system lives in, only its phase and, within the phase, when the system entity was created. Module import order matters only because importing a module is what creates its systems. (You can add your own phases with `DependsOn`, to slot them between the built-in ones.)
+
+## Watch a frame
+
+`Render` is declared first but lives in `OnStore`. `Input` is declared last but lives in `PreUpdate`. `Teleport` matches nothing yet. Step through the first `world.progress()`, then add `Teleporting` to Rock and run another frame.
+
+<FlecsDebugger scenario="systems" />
+
+What to look for:
+
+- **Phase first, then declaration order.** `Input` runs first, then `Move` and `Teleport` (both `OnUpdate`, in creation order), then `Render`.
+- **One call per table, not per entity.** `Move` matches two tables, `[Position, Velocity, Player]` and `[Position, Velocity]`, so its function is called twice, with three entities in total. `Render` matches every table with `Position`. With `.each()` flecs loops over the rows for you, but underneath it's still one batch per table.
+- **No matching tables, no call.** In the first frame `Teleport`'s function doesn't run at all. After `rock.add<Teleporting>()` Rock moves to a new table, the query matches it, and the next frame calls `Teleport` once. Rock's old table is now empty, and empty tables are skipped.
+- **Writes go straight into the column.** `Input` and `Move` change values in place: no command, no move, no event. The locals panel is the iterator: `it.table`, `it.count` and each field's values, as a debugger would show the `ecs_iter_t` in your callback.
+
+<Tip kind="warn" title="Writing a field doesn't fire OnSet">
+Writing through a field or a `T&` in `.each()` is just a memory write. Observers for `OnSet` don't see it, and nothing records that the value changed. If something needs to know (a network layer, an `OnSet` observer, a cached derived value), call `modified<T>()` on the entity after writing, or use `set()` instead. The [networking lesson](/flecs/networking/) leans on this.
+</Tip>
+
+## Say what you read and write
+
+Declare fields you only read as `const` in C++ (or `[in]` in the query language). It documents the system, and it's information flecs uses: the pipeline needs to know what each system reads and writes to insert sync points in the right places (next lesson). It has nothing to do with threading: a `multi_threaded` system splits its own rows across the worker threads, and systems still run one after another. A system that writes everything it touches gives the pipeline nothing to work with.
+
+<Tip>
+Watch the "callbacks this line" counter in the debugger. One callback per table is the normal shape of a system. When the counter climbs while the entity count stays the same, your entities are spread over many small tables. [The fragmentation lesson](/flecs/fragmentation/) is about why that happens.
+</Tip>
+
+<Tip kind="note" title="Get data through the query, not inside the loop">
+`e.get<T>()` inside `.each()` looks the entity up, finds its table and finds the column, for every entity. A query term hands you the same data as an array per table. If a system needs a component from the entity itself, a parent or a singleton, add a term for it (`Position(up ChildOf)`, `Time($)`) and let the query do the lookup once per table instead of once per entity.
+</Tip>

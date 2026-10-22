@@ -1,0 +1,223 @@
+.spg {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin: 20px 0;
+  font-size: 13px;
+}
+.spg-muted {
+  color: var(--muted);
+  margin: 4px 0;
+}
+.spg-err {
+  color: var(--alert);
+  white-space: pre-wrap;
+  font-family: var(--f-mono);
+  margin: 6px 0 0;
+}
+.spg-err:empty {
+  display: none;
+}
+.spg-game summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.spg-game pre {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px;
+  overflow-x: auto;
+  margin: 8px 0 0;
+}
+.spg-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.spg-preset {
+  font: inherit;
+  font-size: 12px;
+  color: var(--body);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.spg-preset:hover {
+  border-color: var(--accent);
+}
+.spg-note {
+  color: var(--body);
+  margin: 8px 0;
+  min-height: 1.4em;
+}
+.spg-ed {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--f-mono);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+.spg-ed:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.spg-ctrls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 8px 0;
+}
+.spg-run,
+.spg-btn {
+  font: inherit;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.spg-run {
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+}
+.spg-btn {
+  color: var(--body);
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.spg-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 10px;
+}
+@media (max-width: 760px) {
+  .spg-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.spg-h {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 4px 0 6px;
+}
+.spg-ent {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: var(--bg);
+}
+.spg-ent.prefab {
+  border-style: dashed;
+}
+.spg-ent-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spg-ent-n {
+  font-family: var(--f-mono);
+  color: var(--ink);
+  font-weight: 500;
+}
+.spg-tag {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.spg-x {
+  margin-left: auto;
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+.spg-x:hover {
+  color: var(--alert);
+  border-color: var(--alert);
+}
+.spg-ent pre {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  color: var(--body);
+}
+.spg-bodies table {
+  border-collapse: collapse;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.spg-bodies td {
+  padding: 2px 12px 2px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.spg-log {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 6px 8px;
+}
+.spg-l {
+  padding: 1px 0;
+  color: var(--body);
+}
+.spg-l.sys {
+  color: var(--muted);
+  margin-top: 4px;
+}
+.spg-l.obs::before {
+  content: '▸ ';
+  color: var(--accent);
+}
+.spg-l.err {
+  color: var(--alert);
+}
+/* Keep the lesson's prose styles for pre/table out of the widget. */
+.spg .spg-ent pre {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.spg .spg-bodies table {
+  display: table;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+.spg .spg-bodies td {
+  padding: 2px 12px 2px 0;
+}
+.spg .spg-game pre {
+  margin: 8px 0 0;
+}

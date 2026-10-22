@@ -1,0 +1,77 @@
+---
+/** Mounts one of the AI lesson widgets (src/ai/). */
+interface Props {
+  kind: 'curve' | 'inspector' | 'utility-sim' | 'bt' | 'goap' | 'compare' | 'steer' | 'crowd' | 'formation' | 'course' | 'recast' | 'party' | 'influence' | 'knowledge';
+  /** Starting settings for the steering course (kind="course"). */
+  map?: 'bends' | 'pillars' | 'deadend';
+  sense?: 'none' | 'feeler' | 'whiskers' | 'query' | 'context';
+  follow?: 'waypoint' | 'carrot' | 'goal';
+  motion?: 'point' | 'spot' | 'car';
+  crates?: boolean;
+  /** Which scenario the shared-knowledge widget starts with (kind="knowledge"). */
+  scenario?: 'simple' | 'full';
+}
+const { kind, map, sense, follow, motion, crates, scenario } = Astro.props;
+const preset = JSON.stringify({ ...(map && { course: map }), ...(sense && { sense }), ...(follow && { follow }), ...(motion && { motion }), ...(crates && { crates }), ...(scenario && { scenario }) });
+---
+
+<ai-widget data-kind={kind} data-preset={preset}><p class="ll-loading">Loading…</p></ai-widget>
+
+<script>
+  import '../engine/engine.css';
+  import '../ai/ai.css';
+
+  class AiWidget extends HTMLElement {
+    async connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const k = this.dataset.kind;
+      if (k === 'knowledge') {
+        const { KnowledgeViz } = await import('../knowledge/viz');
+        new KnowledgeViz(this, { preset: JSON.parse(this.dataset.preset || '{}').scenario });
+        return;
+      }
+      if (k === 'influence') {
+        const { InfluenceViz } = await import('../influence/viz');
+        new InfluenceViz(this);
+        return;
+      }
+      if (k === 'party') {
+        const { PartyViz } = await import('../party/viz');
+        new PartyViz(this);
+        return;
+      }
+      if (k === 'recast') {
+        const { RecastStagesViz } = await import('../recast/viz');
+        new RecastStagesViz(this);
+        return;
+      }
+      if (k === 'course') {
+        const { CourseLab } = await import('../ai/courseLab');
+        new CourseLab(this, JSON.parse(this.dataset.preset || '{}'));
+        return;
+      }
+      if (k === 'steer' || k === 'crowd' || k === 'formation') {
+        const s = await import('../ai/steer');
+        if (k === 'steer') new s.SteerLab(this);
+        else if (k === 'crowd') new s.CrowdLab(this);
+        else new s.FormationLab(this);
+        return;
+      }
+      const w = await import('../ai/widgets');
+      if (k === 'curve') new w.CurveWidget(this);
+      else if (k === 'inspector') new w.Inspector(this);
+      else if (k === 'utility-sim') new w.UtilitySim(this);
+      else if (k === 'bt') new w.TreeSim(this);
+      else if (k === 'goap') new w.GoapViz(this);
+      else if (k === 'compare') new w.Compare(this);
+    }
+  }
+  if (!customElements.get('ai-widget')) customElements.define('ai-widget', AiWidget);
+</script>
+
+<style>
+  ai-widget {
+    display: block;
+  }
+</style>

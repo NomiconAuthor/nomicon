@@ -1,0 +1,78 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Local avoidance
+order: 7
+part: Movement
+summary: 'Agents avoiding each other, where rays are the wrong tool: every position and velocity is already known. A separation force, social forces, velocity obstacles, RVO and ORCA, measured on the same three crowd scenes, with what each agent is weighing drawn live.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[Steering](/ai/steering/) handled walls: things that don't move and that the agent has to discover. Other agents are different on both counts. They move, so avoiding where they are now isn't enough; and the game already knows exactly where each one is and how fast it's going, so there's nothing to discover. Local avoidance uses that knowledge: query the neighbours from the [spatial index](/engine/spatial-partitioning/), and choose a velocity that won't hit any of them soon.
+
+Every method here gets the same input, a **preferred velocity** (straight for the goal at full speed, as a path follower would ask for), and returns the velocity to actually use.
+
+<AiWidget kind="crowd" />
+
+The highlighted agent draws its **velocity space**: every velocity it could choose, with its top speed as the circle round it.
+
+## The methods
+
+**Separation**: push away from neighbours that are too close, as in [flocking](/ai/steering/). It only reacts once agents are already close, and it pushes them apart *sideways to their goals*, fighting the preferred velocity head on. In a crowd heading different ways, everyone bunches in the middle and shoves.
+
+**Social forces** (Helbing and Molnár, 1995) are the standard model of pedestrian dynamics, used for evacuation and crowd-flow studies. Each agent relaxes towards its preferred velocity, while every neighbour pushes it away with a force that falls off exponentially with distance, a bit harder when the neighbour is ahead. The motion is smooth (it turns less than any other method that avoids anything) and looks human at a distance. But it's still a sum of pushes, and in a perfectly symmetric jam the pushes balance.
+
+**Velocity obstacles** (Fiorini and Shiller, 1998) reason about the future. For one neighbour, the velocity obstacle is the set of velocities that would bring the two into contact within a time horizon (here 1.5 s): a cone in velocity space pointing at the neighbour. Choose a velocity outside every neighbour's cone, as close to the preferred one as possible. This widget, like Detour's crowd, *samples*: it tries 50 candidate velocities, scores each by how soon it would collide and how far it is from the preferred velocity, and keeps the cheapest. The dots in the inset are the candidates.
+
+**RVO**, reciprocal velocity obstacles (van den Berg, Lin and Manocha, 2008), fixes a flaw in plain VO. Each agent assumes the other won't move, so both swerve fully; next frame each sees the other swerving, and both swerve back. RVO assumes each agent takes half the responsibility, by testing `2·candidate − own velocity` against the neighbour instead of the candidate itself.
+
+**ORCA**, optimal reciprocal collision avoidance (van den Berg, Guy, Lin and Manocha, 2011), is what the RVO2 library implements. Instead of a cone, each neighbour contributes a **half-plane** of allowed velocities: the agent's share of the smallest change that avoids that neighbour for the time horizon. The allowed velocities are where all the half-planes overlap, a convex region, and the best one (closest to the preferred velocity) is found exactly with a small 2D linear program. If the half-planes leave nothing (a dense crowd), a second program finds the velocity that violates them least. The red lines in the inset are the half-plane edges.
+
+## Measured
+
+24 agents in each scene; *overlap* is total penetration depth over time (lower is better), and *detour* is the distance walked divided by the straight-line distance.
+
+| Avoidance | Circle swap | Two groups head-on | Crossing streams | Wobble (circle) |
+|---|---|---|---|---|
+| None | 6.5 s, overlap 1,091 | 6.0 s, overlap 68 | 5.4 s, overlap 71 | 2°/s |
+| Separation | 15.5 s, overlap 1,981 | 13.8 s, overlap 68 | 9.1 s, overlap 80 | 30°/s |
+| Social forces | 36.7 s, overlap 357 | 11.0 s, overlap 57 | 9.2 s, overlap 32 | 9°/s |
+| Velocity obstacles | 9.9 s, overlap 0 | 8.2 s, overlap 0 | 8.0 s, overlap 0 | 59°/s |
+| RVO | 10.6 s, overlap 9 | 10.0 s, overlap 1 | 8.9 s, overlap 0 | 70°/s |
+| ORCA | 10.3 s, overlap 0 | 7.1 s, overlap 0 | 6.5 s, overlap 0 | 51°/s |
+
+- **No avoidance** is fastest because agents walk through each other.
+- **Separation** is slower than doing nothing and still overlaps. In the circle it's worse than nothing, because agents spend longer in the crush.
+- **Social forces** flow nicely in the two-group and crossing scenes, and jam in the circle, where everyone meets in the middle at once. With 48 agents in the circle, nobody gets across at all.
+- **The velocity-obstacle family** keeps agents apart almost perfectly, at the cost of more turning. ORCA is the fastest of the three in every scene but the circle, where all three are within a second of each other.
+- **Cost.** In this widget, ORCA costs about 6 µs per agent per step and the sampled methods 15–20 µs, because each of their 50 candidates is tested against every neighbour. ORCA does one small calculation per neighbour, then one linear program.
+
+<Tip kind="note" title="Plain VO did fine here">
+The textbook says plain VO oscillates and RVO fixes it, but in this widget VO is no worse. The oscillation is sharpest when each agent takes the closest velocity outside the cone, which flips as soon as both have swerved. Sampling with a cost that grows gradually as a collision gets closer already damps much of it. With exact selection, as in ORCA, reciprocity is what stops two agents dancing in front of each other.
+</Tip>
+
+## In engines
+
+Detour's crowd (part of Recast) samples velocities adaptively: a coarse ring of candidates, then finer rings round the best one, with the navmesh's nearby boundary edges as obstacles alongside the agents. RVO2 implements ORCA, including static obstacles as extra half-planes. Unreal offers both an RVO-style avoidance on character movement and a Detour-based crowd manager; Unity's navmesh agents also use a velocity-obstacle style of avoidance.
+
+<Tip kind="warn" title="Avoidance doesn't replace pathfinding">
+Local avoidance only looks a second or two ahead and only knows about nearby agents. It can't get anyone out of a dead end or round a long wall; it keeps agents from colliding while they follow paths. Crowds also need a little randomness to break symmetry: in a perfectly symmetric head-on meeting, both agents can choose to sidestep the same way forever. Every method here adds a tiny random turn to the preferred velocity, as RVO2's own examples do.
+</Tip>
+
+## In an ECS
+
+Avoidance is a system that reads `Position`, `Velocity`, `Radius` and the preferred velocity from path following, finds neighbours through the spatial index, and writes a new velocity. Three things make it work at scale:
+
+- **Cap the neighbours.** The nearest 8–10 within a radius is typical; beyond that, more neighbours cost time without changing the answer.
+- **Read last frame's velocities.** Every agent computes its new velocity from everyone's *previous* velocities, then all are written at once. The result doesn't depend on update order, and the system parallelises with no locks.
+- **Update the spatial index first**, once per frame, before the avoidance system runs.
+
+ORCA suits this well: per agent, the work is a fixed-size loop over capped neighbours and a tiny linear program, with no allocation.
+
+## Takeaways
+
+- **Other agents aren't walls.** Their positions and velocities are known, so use them, not rays.
+- **Separation and social forces push**; pushes are smooth but can balance into a jam.
+- **Velocity obstacles look ahead** and choose a velocity that stays clear for a while; RVO and ORCA share the avoiding between the two agents.
+- **ORCA** is exact, cheap and smooth, which is why RVO2 and many engines build on it; sampling (Detour) is simpler to extend with extra costs.
+- **Avoidance is local.** It keeps agents apart while they follow paths; it doesn't find the way.

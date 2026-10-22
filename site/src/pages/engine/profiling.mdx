@@ -1,0 +1,135 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Profiling: finding where the time goes'
+order: 9
+part: Measuring
+summary: 'Every lesson here ends with "measure it". This one is how: frames rather than averages, sampling against instrumentation and what each gets wrong, reading a call tree and a flame graph, doing it in Visual Studio, and which other tools to reach for (Superluminal, Tracy, VTune, PIX, RenderDoc) and when.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Programmers are bad at guessing where time goes. The function that looks expensive is called twice a frame; the one-line accessor is called forty thousand times; the stutter everyone blames on the renderer is a hash map rehashing inside the AI. Profiling replaces the guess with a measurement, and it's the habit that makes every other lesson on this site pay off: the [cache](/engine/memory-and-cache/), [job sizes](/engine/jobs-and-task-graphs/), [waiting threads](/engine/threads-pools-and-fibers/), how big a [steering](/ai/steering/) ring needs to be. The loop is always the same: **measure, find the biggest cost, change one thing, measure again.**
+
+## Frames, not averages
+
+A game is judged frame by frame. At 60 Hz every frame has 16.7 ms, and one that takes 17 ms isn't a little late: with vsync on, it misses its slot and shows for two refreshes, which the player sees as a hitch. So:
+
+- **Think in milliseconds, not frames per second.** Frame rate is the reciprocal of frame time, so it hides scale: 60 → 50 fps is 3.3 ms, while 200 → 150 fps is 1.7 ms. Budgets, savings and regressions add up in milliseconds.
+- **Look at the worst frames**, not the mean. The 99th percentile (or "1% lows") is what players feel.
+- **Measure CPU work, not frame time, when vsync is on.** A frame that finishes its work in 11 ms still takes 16.7, so a speed-up from 11 to 9 ms changes nothing on the frame counter, and you'd conclude it didn't work.
+
+The widget below profiles 120 frames of a made-up game: 200 agents thinking, physics, animation, streaming and render prep, then a wait for vsync. Its average CPU work is **10.97 ms**, comfortably inside the budget. Yet **7 of 120 frames** miss vsync, and the worst takes **25.1 ms**. In the chart, red bars are frames whose work ran past 16.7 ms; the grey above each bar is time spent waiting for vsync.
+
+<EngineWidget kind="profiler" />
+
+## Two ways to see inside a program
+
+**Sampling.** A timer interrupts the thread at a fixed rate and records its call stack: which function it was in, and who called it. Count the samples, and a function's time is roughly its samples multiplied by the interval. Nothing changes in your code, the overhead is tiny and spread evenly, and over enough samples it's accurate. Visual Studio's CPU Usage tool, Superluminal, Linux's `perf` and Instruments on macOS all work this way.
+
+**Instrumentation.** Code is added at the start and end of functions (by the compiler, a tool that rewrites the binary, or your own macros) to read the clock. Times and call counts are exact, and because it measures elapsed time, it sees time spent waiting too. But every probe costs something on every call.
+
+Try both in the widget:
+
+- **Sampling, all 120 frames.** About **1,311 samples** at 1 kHz, and every function within about a tenth of a millisecond of the truth (tick **Show the true times** to compare). The hot path is `AI::Think` (**26%** of CPU time), and inside it `AI::ScoreBehaviours`. `Streaming::Decompress` looks harmless at **3.3%**.
+- **The worst frame.** Now `Streaming::Decompress` is **15.0 ms** of a 25 ms frame. It only runs every 40th frame, so averaged over all of them it's noise, and in the frame that stutters it's everything. This is why you profile the spike, not the session.
+- **The worst frame at 1 kHz** has only **25 samples**. Each is a millisecond, so anything shorter than that is either missing or rounded up to a whole sample. Sampling is a statistical tool: it needs many frames, or a much higher rate (**200 samples** at 8 kHz).
+- **Instrument every function.** Every number is exact except for the probes' own cost, and that cost lands where calls are most frequent. `Physics::Raycast`, called 800 times a frame, measures **1.28 ms** against a true **0.96**, and the probes add **0.51 ms** to every frame. Instrumenting tiny, frequent functions makes them look like the problem.
+- **Hand-placed zones.** A dozen zones around whole systems: exact, nearly free, and they show the frame's **6.67 ms** of waiting for vsync, which sampling can't see because a blocked thread isn't running. Below a zone, though, there's no detail.
+
+| | Sampling | Instrumenting everything | Hand-placed zones |
+|---|---|---|---|
+| Changes to your code | none | rebuilt or rewritten binary | a macro per zone |
+| Cost | small and even | per call, worst on tiny functions | almost none |
+| Accuracy | statistical: good over many samples, poor for short events | exact, plus probe overhead | exact |
+| Call counts | no | yes | for zones |
+| Time spent waiting | not seen (CPU tools) | seen | seen |
+| Best for | "where does the time go?" | exact counts in a small area | a frame timeline you keep in the build |
+
+That's why the tools games use most combine them: zones for the frame's structure and timeline, sampling for everything in between.
+
+## Reading a profile
+
+- **Total** (inclusive) time is the function and everything it calls. **Self** (exclusive) time is the function's own code only. A function with a big total and a small self is a manager: look at its callees. A function with a big self time is where the instructions actually are.
+- **The call tree** follows totals from the root downwards. **Expand hot path** opens the most expensive child at each level, which is usually the first thing to read.
+- **Functions by self time** flattens the tree. It finds leaf hotspots that are spread across many callers, like a maths routine or an allocator called from everywhere, which in the tree are split into small pieces.
+- **The flame graph** draws the call tree as nested bars, each as wide as its total time. Wide bars at the bottom are where the time is; wide plateaus at the top are where the work happens.
+- **Calls** turn a total into a story. `Physics::Raycast` at 0.96 ms isn't slow code, it's 800 calls of 1.2 µs: the fix is fewer calls (batch them, skip what can't have changed), not a faster raycast.
+
+<Tip title="Amdahl, at the level of one frame">
+Halving a function that takes 3% of the frame saves 1.5%. Before optimising anything, check its share of the frame you care about, and whether that frame is even CPU-bound.
+</Tip>
+
+## In Visual Studio
+
+Visual Studio ships everything needed for the first passes.
+
+**1. Build what you ship.** Profile the Release configuration (optimised, with debug information so the profiler can name functions: `/Zi` for the compiler and `/DEBUG` for the linker, which Release has by default in modern project templates). A Debug build's profile describes a different program. Expect heavily inlined functions not to appear on their own: their time shows up in their caller.
+
+**2. Run the Performance Profiler, not the debugger.** **Debug › Performance Profiler** (Alt+F2), choose **CPU Usage**, and **Start**. It launches the program without the debugger attached. The Diagnostic Tools window you see while debugging measures a debug session, with the debugger's own overhead included.
+
+**3. Collect around the problem.** Play to the part that's slow, then stop collection. In the report's CPU graph, **drag to select the time range** of the hitch, exactly like dragging across the frame chart above. Everything below then describes only that range.
+
+**4. Read it.** The summary lists the top functions by total and self time. **Open details** for the **Call tree** (with **Expand hot path**), **Functions**, **Caller/callee** (who calls this, and what does it call) and the **Flame graph**. **Show Just My Code** folds system and library code into a single *[External Call]* node; untick it when the time disappears into one.
+
+**5. Go deeper only when needed.**
+
+- The **Instrumentation** tool (C and C++ since Visual Studio 2022 17.6) gives exact call counts and times by instrumenting the binary. Point it at a small part of the program: everything it instruments pays the probe cost, as the widget shows.
+- The **Concurrency Visualizer** (a free extension) shows every thread over time: running, blocked on a lock, waiting on I/O, or preempted, and which thread unblocked which. It's the view that answers "why are my workers idle?" from [threads, pools and fibers](/engine/threads-pools-and-fibers/).
+- **Memory Usage** takes heap snapshots and compares them, for leaks and for allocation-heavy frames.
+- For system-wide problems (stutters caused by the disk, the OS or another process), **Windows Performance Recorder** and **Windows Performance Analyzer** record ETW traces of the whole machine. It's the heaviest tool here and the one that sees everything.
+
+## Other tools, and when
+
+| Tool | What it is | Reach for it when |
+|---|---|---|
+| **Superluminal** | Sampling plus optional instrumentation, built for games, on Windows, Xbox, PlayStation and Linux | You want Visual Studio's view but faster to navigate, with thread timelines and per-frame selection |
+| **Tracy** | Open-source frame profiler: hand-placed zones on a timeline, plus sampling, locks, allocations and GPU zones | You want a live per-frame timeline of every thread, kept in the build |
+| **Unreal Insights**, **Optick** | Engine-integrated timelines | You're in Unreal, or want Tracy's style with engine integration |
+| **Intel VTune**, **AMD uProf** | Sampling with hardware counters: cache misses, branch mispredictions, memory bandwidth | You know which function is hot and need to know *why*: the [cache lesson](/engine/memory-and-cache/) in numbers |
+| **PIX** | Microsoft's profiler and debugger for Direct3D 12 on Windows and Xbox: CPU timing captures and GPU captures | The frame is GPU-bound, or CPU and GPU interact badly |
+| **RenderDoc** | A frame debugger: capture one frame and inspect every draw call, its state and its output | Something renders wrong, or you need to see what a frame actually draws. It's not a timing tool |
+| **Nsight Graphics / Systems**, **Radeon GPU Profiler** | Vendor GPU profilers | You need to know why the GPU is slow on that vendor's hardware |
+
+<Tip kind="note" title="CPU-bound or GPU-bound?">
+Check this first. If the CPU finishes its frame early and then waits in Present (the grey in the chart above), the frame is limited by the GPU or by vsync, and no CPU optimisation will help. If the GPU idles waiting for commands, the CPU is the bottleneck. GPU timestamps (PIX, Tracy's GPU zones, the vendor tools) tell you how long the GPU really took.
+</Tip>
+
+## Zones you keep in the build
+
+Sampling answers questions you didn't know to ask; zones give every build a timeline you can open in seconds. Most engines keep a handful of named zones around their systems and a marker at the end of each frame, compiled out of shipping builds:
+
+```cpp
+#include <tracy/Tracy.hpp>
+
+void Physics::Step(float dt) {
+    ZoneScoped;                       // a zone named after this function, ended at scope exit
+    broadphase();
+    { ZoneScopedN("Narrowphase"); narrowphase(); }
+}
+
+void Game::tick() {
+    update();
+    render();
+    FrameMark;                        // the frame boundary: the timeline groups zones by frame
+}
+```
+
+Wrap these in your own macro (`PROFILE_SCOPE("Physics")`) so the same markers can feed Tracy, PIX events or Superluminal's API, or nothing. Put zones on systems and jobs, not on functions called thousands of times a frame: the widget's **Instrument every function** shows what that costs.
+
+<Tip kind="warn" title="Ways to measure the wrong thing">
+- Profiling a Debug build, or under the debugger.
+- Profiling in the editor when the problem is in the packaged game.
+- One run: timings vary between runs. Repeat, and compare like with like.
+- A laptop on battery, or a CPU that's throttling: clocks change under you.
+- Measuring frame time with vsync on, and concluding an optimisation didn't help.
+- Optimising the average when the complaint is a hitch.
+</Tip>
+
+## Takeaways
+
+- **Measure, change one thing, measure again.** Guesses about performance are usually wrong.
+- **Frames, not averages:** milliseconds, worst frames and percentiles, and CPU work rather than frame time when vsync is on.
+- **Sampling** is cheap and broad but statistical and blind to waiting; **instrumentation** is exact but costs per call; **zones** are exact and cheap but only see what you marked. Use them together.
+- **Total time** finds the expensive branch; **self time** finds where the instructions are; **call counts** tell you whether to make it faster or do it less.
+- **In Visual Studio:** Release build, Alt+F2, CPU Usage, select the spike, read the call tree, hot path and flame graph; then the Instrumentation tool, the Concurrency Visualizer or WPA when you need them.
+- **Then the specialists:** Superluminal or Tracy for frame timelines, VTune or uProf for why code is slow, PIX and the GPU vendors' tools for the GPU, RenderDoc for what was drawn.

@@ -1,0 +1,145 @@
+---
+import '../styles/site.css';
+import '../styles/themes/nomicon.css';
+import '../styles/themes/vs.css';
+import { BUILD_ID, THEMES } from '../themes';
+import Search from '../components/Search.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Which navbar entry is current. */
+  section?: 'engine' | 'flecs' | 'ai' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'home';
+}
+const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
+const fullTitle = section === 'home' ? title : `${title} · nomicon`;
+const nav = [
+  { id: 'engine', label: 'engine', href: '/engine/' },
+  { id: 'flecs', label: 'flecs', href: '/flecs/' },
+  { id: 'ai', label: 'ai', href: '/ai/' },
+  { id: 'labs', label: 'labs', href: '/labs/' },
+];
+// Both labs live under the one "labs" tab.
+const current = section === 'pathing-lab' || section === 'tactics-lab' ? 'labs' : section;
+const themes = THEMES;
+---
+
+<!doctype html>
+<html lang="en" data-theme="nomicon">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content={description} />
+    <title>{fullTitle}</title>
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#120f1b" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Cinzel:wght@500;600;700&display=swap"
+    />
+    <!-- Which themes are on (editable on the server), then pick one before first paint. -->
+    <script is:inline src={`/themes.js?v=${BUILD_ID}`}></script>
+    <script is:inline define:vars={{ themes }}>
+      const cfg = window.SITE_THEMES || {};
+      const ids = themes.map((t) => t.id);
+      let enabled = (cfg.enabled || ids).filter((id) => ids.includes(id));
+      if (!enabled.length) enabled = ['nomicon'];
+      let pick = null;
+      try {
+        pick = localStorage.getItem('site-theme');
+      } catch (e) {}
+      if (!enabled.includes(pick)) pick = enabled.includes(cfg.default) ? cfg.default : enabled[0];
+      document.documentElement.dataset.theme = pick;
+      window.__siteThemes = { enabled, themes };
+    </script>
+    <slot name="head" />
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="brand" href="/">
+        <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+  <circle cx="16" cy="16" r="15" fill="#1c1430" stroke="#a77bff" stroke-width="1.6"/>
+  <path d="M1 16 L2.6 14.4 L4.2 16 L2.6 17.6 Z M31 16 L29.4 14.4 L27.8 16 L29.4 17.6 Z" fill="#f0c25e"/>
+  <path d="M15.6 26 C12.4 24 8.9 23.5 5.4 24.3 L5.4 16.6 C8.9 15.8 12.5 16.4 15.6 18.6 Z M16.4 26 C19.6 24 23.1 23.5 26.6 24.3 L26.6 16.6 C23.1 15.8 19.5 16.4 16.4 18.6 Z" fill="#8a5cf0"/>
+  <path d="M15.4 24.6 C12.4 22.7 9.3 22.2 6.5 22.8 L6.5 15.3 C9.4 14.6 12.6 15.2 15.4 17.2 Z M16.6 24.6 C19.6 22.7 22.7 22.2 25.5 22.8 L25.5 15.3 C22.6 14.6 19.4 15.2 16.6 17.2 Z" fill="#f4e9d0"/>
+  <path d="M8.4 17.6 C10.4 17.3 12.2 17.7 13.8 18.6 M8.4 19.9 C10.4 19.6 12.2 20 13.8 20.9 M23.6 17.6 C21.6 17.3 19.8 17.7 18.2 18.6 M23.6 19.9 C21.6 19.6 19.8 20 18.2 20.9" fill="none" stroke="#c9b48e" stroke-width="0.7" stroke-linecap="round"/>
+  <path d="M16 3.4 L17.25 8.7 L21.4 10 L17.25 11.3 L16 17.6 L14.75 11.3 L10.6 10 L14.75 8.7 Z" fill="#f0c25e"/>
+        </svg>
+        <span class="brand-name">nomicon</span>
+      </a>
+      <nav aria-label="Site">
+        <ul class="links">
+          {
+            nav.map((n) => (
+              <li>
+                <a href={n.href} aria-current={current === n.id ? 'page' : undefined}>
+                  {n.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+      <div class="nav-end">
+        <Search />
+        <div class="slot" data-nav-slot></div>
+        <label class="theme-pick" hidden>
+          <span class="theme-pick-l">Theme</span>
+          <select aria-label="Theme"></select>
+        </label>
+        <time class="clock" aria-hidden="true"></time>
+      </div>
+    </header>
+    <!-- The frame is invisible in Dusk; other themes draw it as a window or an editor tab. -->
+    <div class="frame">
+      <div class="frame-bar" aria-hidden="true">
+        <span class="frame-title">{fullTitle}</span>
+        <span class="frame-caps">
+          <i class="min"></i>
+          <i class="max"></i>
+          <i class="close"></i>
+        </span>
+      </div>
+      <div class="frame-client">
+        <slot />
+      </div>
+    </div>
+    <footer class="statusbar" aria-hidden="true">
+      <span class="sb-left">Ready</span>
+      <span class="sb-right"><span>{section === 'home' ? 'index' : section}</span><span>UTF-8</span><time class="clock"></time></span>
+    </footer>
+    <script is:inline>
+      (() => {
+        const st = window.__siteThemes;
+        const label = document.querySelector('.theme-pick');
+        const sel = label.querySelector('select');
+        for (const t of st.themes) {
+          if (!st.enabled.includes(t.id)) continue;
+          const o = document.createElement('option');
+          o.value = t.id;
+          o.textContent = t.name;
+          sel.append(o);
+        }
+        sel.value = document.documentElement.dataset.theme;
+        label.hidden = st.enabled.length < 2;
+        sel.addEventListener('change', () => {
+          document.documentElement.dataset.theme = sel.value;
+          try {
+            localStorage.setItem('site-theme', sel.value);
+          } catch (e) {}
+        });
+        const clocks = document.querySelectorAll('.clock');
+        const tick = () => {
+          const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          clocks.forEach((c) => (c.textContent = t));
+        };
+        tick();
+        setInterval(tick, 15000);
+      })();
+    </script>
+  </body>
+</html>

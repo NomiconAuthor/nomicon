@@ -1,0 +1,220 @@
+.lesson-layout {
+  max-width: 1500px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
+  padding-bottom: 80px;
+}
+@media (max-width: 960px) {
+  .lesson-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+.lesson-nav {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  font-size: 0.9rem;
+  /* Long lesson lists scroll on their own instead of running off short screens. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ln-mobile {
+  display: none;
+}
+@media (max-width: 960px) {
+  .lesson-nav {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .lesson-nav .ln-list {
+    display: none;
+  }
+  .ln-mobile {
+    display: block;
+    margin: 6px 0 4px;
+    border: 1px solid var(--line-soft);
+    border-radius: 10px;
+    background: var(--paper);
+  }
+  .ln-mobile summary {
+    cursor: pointer;
+    padding: 8px 12px;
+    color: var(--body);
+  }
+  .lesson-nav .ln-mobile ol {
+    padding: 0 6px 8px;
+  }
+}
+.ln-home {
+  display: block;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+.lesson-nav ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lesson-nav li a {
+  display: flex;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--body);
+  text-decoration: none;
+}
+.lesson-nav li a:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+.lesson-nav li a[aria-current='page'] {
+  background: var(--raised);
+  color: var(--ink);
+}
+.ln-n {
+  color: var(--muted);
+  font-family: var(--f-mono);
+  font-size: 0.8rem;
+  padding-top: 2px;
+}
+.ln-ver {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 16px;
+}
+.lesson {
+  min-width: 0;
+}
+.lesson > :is(p, ul, ol, h2, h3, blockquote, pre, .callout, table) {
+  max-width: 76ch;
+}
+.lesson .kicker {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+.lesson h1 {
+  font-size: clamp(1.7rem, 3vw, 2.3rem);
+  margin: 4px 0 8px;
+  letter-spacing: -0.01em;
+}
+.lesson .lede {
+  font-size: 1.1rem;
+  color: var(--body);
+  margin-top: 0;
+}
+.lesson h2 {
+  font-size: 1.35rem;
+  margin: 40px 0 10px;
+}
+.lesson h3 {
+  font-size: 1.08rem;
+  margin: 28px 0 8px;
+}
+.lesson p,
+.lesson li {
+  color: var(--body);
+}
+.lesson strong {
+  color: var(--ink);
+}
+.lesson code {
+  font-family: var(--f-mono);
+  font-size: 0.88em;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  padding: 0 4px;
+  color: var(--ink);
+}
+.lesson pre {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.lesson pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.lesson table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  margin: 12px 0;
+}
+.lesson th,
+.lesson td {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 6px 12px 6px 0;
+  text-align: left;
+  vertical-align: top;
+}
+.lesson th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.callout {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--good);
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 18px 0;
+}
+.callout.note {
+  border-left-color: var(--accent);
+}
+.callout.warn {
+  border-left-color: var(--warn);
+}
+.callout-t {
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.callout p {
+  margin: 4px 0;
+}
+.pn {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-soft);
+}
+.pn a {
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 500;
+}
+.pn a span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+.pn-next {
+  text-align: right;
+  margin-left: auto;
+}

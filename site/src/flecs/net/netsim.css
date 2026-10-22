@@ -1,0 +1,180 @@
+.net {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin: 20px 0;
+  font-size: 13px;
+}
+.net-muted {
+  color: var(--muted);
+  margin: 4px 0;
+}
+.net-err {
+  color: var(--alert);
+}
+.net-code summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.net .net-code pre {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px;
+  overflow-x: auto;
+  margin: 8px 0 0;
+}
+.net-top,
+.net-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.net-btn,
+.net-toggle,
+.net-send {
+  font: inherit;
+  font-size: 12.5px;
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: var(--body);
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.net-btn:hover,
+.net-toggle:hover {
+  border-color: var(--accent);
+}
+.net-toggle {
+  color: var(--good);
+  border-color: var(--good);
+}
+.net-toggle.off {
+  color: var(--alert);
+  border-color: var(--alert);
+}
+.net-send {
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  font-weight: 500;
+  padding: 6px 12px;
+  width: 100%;
+}
+.net-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 820px) {
+  .net-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.net-h {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 6px 0;
+}
+.net-wire {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--body);
+  display: grid;
+  gap: 8px;
+}
+.net-pending div:not(.net-h) {
+  margin: 2px 0;
+}
+.net-list {
+  display: grid;
+  gap: 6px;
+}
+.net-ent {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  font-family: var(--f-mono);
+  font-size: 12px;
+}
+.net-ent.local {
+  border-style: dashed;
+}
+.net-ent.collision {
+  border-color: var(--alert);
+}
+.net-ent-h {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 3px;
+}
+.net-id {
+  color: var(--ink);
+  font-weight: 600;
+}
+.net-kind,
+.net-tag {
+  font-family: var(--f-sans, inherit);
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.net-ent.collision .net-kind {
+  color: var(--alert);
+  border-color: var(--alert);
+}
+.net-c {
+  color: var(--body);
+  overflow-wrap: anywhere;
+}
+.net-c.local {
+  color: var(--muted);
+}
+.net-note {
+  font-style: italic;
+}
+.net-log {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 6px 8px;
+}
+.net-l {
+  padding: 1px 0;
+  color: var(--body);
+}
+.net-l.sys {
+  color: var(--muted);
+}
+.net-l.wire {
+  color: var(--accent);
+}
+.net-l.warn {
+  color: var(--alert);
+}
+
+.net-lose {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}

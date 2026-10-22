@@ -1,0 +1,145 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Shared knowledge, and reading it late
+order: 15
+part: Reading the world
+summary: 'What goes on a guild’s, a party’s and an adventurer’s blackboard when parties can only read and post the guild board at waystones. A troll moves, the guild updates its notice, and a party that hasn’t passed a waystone keeps walking to the old place. A versioned log with one watermark per party instead of a copy per party, stale sightings with an age, flushing up and catching up, merging by when things were true, and capping history with snapshots.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[Threat maps](/ai/influence-maps/) are built from what an agent *knows*, not where the monsters really are. But an agent's memory of what it has seen is only part of what it knows. It also knows what it's trying to do, which group it belongs to, and what everyone else has found out.
+
+In most RPGs and strategy games, much of that is shared. Agents write what they learn to a common store, and read what others wrote. That store is a **blackboard**: anyone at its level can read it and write to it. This lesson is about what goes on each blackboard, how entries move between them, and what happens when an agent can only read the shared one now and then.
+
+## Three blackboards
+
+The setting: an adventurers' guild in a small town keeps a **guild board** of quests. Parties go out into the countryside to do them. A party can only read the board, and post to it, at the guild hall or at a **waystone** on the road. Between waystones, it goes on what it last read.
+
+| Level | What's on it | Written by |
+|---|---|---|
+| **Guild** | Quests, as posted, updated and withdrawn. Claims ("Party B has taken this quest"). Every sighting and progress report that reached it. | The guild clerk, and every party at a waystone |
+| **Party** | The quest it's on, as of the last time it read the board. What its own adventurers have seen. Its progress. | The guild log (read at waystones), and its own adventurers |
+| **Adventurer** | Its task in the party ("Scout ahead to the old bridge", "Keep the map", "Carry the packs"). What it has seen itself. | Its party, and its own eyes |
+
+A party's adventurers travel together, so the party board is always up to date for them. What a party between waystones lacks is everyone else: what it learns stays with it, and what others learn doesn't reach it. Here the reason is a waystone; in another game it's a messenger, a beacon's range, or a party far from the player that the game only updates every few seconds.
+
+Nobody hands out work. The clerk only edits notices when reports change the picture. Each party picks its own quest from its own board, and heads for the newest place that board puts its quarry.
+
+## The troll moves
+
+The parties' routes are planned on the map, but where they head is decided by what their boards say. Press **Play**, or **Step** a second at a time; click any adventurer to read its boards.
+
+<AiWidget kind="knowledge" scenario="simple" />
+
+What happens:
+
+1. At 0:00 the board holds two quests: **Slay the troll at the old bridge · 60 gold**, for parties of level 3 and up, and **Drive the goblins off the south farms · 30 gold**. Both parties are at the guild hall. A isn't strong enough for the troll, so it claims the goblins; B claims the troll.
+2. From 0:04 the troll wanders south along the east bank. Nobody sees it go.
+3. At 0:40 A reaches the south ford waystone and posts the goblins it has spotted. At 0:42 one of its adventurers sees the troll across the river; A posts that too, and the clerk moves the notice: **Slay the troll last seen near the east bank · 80 gold**.
+4. B is on the north road. It has passed no waystone since the guild hall, so its board still says "the old bridge", and that's where it goes.
+5. At 1:05 B reaches the old bridge waystone, reads the board, finds the moved notice and turns south.
+
+Party B spends **23 s** heading for a notice the guild had already moved. Set **Party B reads the board** to **Anywhere** and the same story takes **0 s**: B reads the new notice at 0:42 and turns where it stands.
+
+The rest plays out the same way. B slays the troll at 1:32, but the board doesn't hear until B reaches the south ford at 1:44; then the clerk withdraws the quest.
+
+### Stale sightings
+
+A sighting is a fact about the past: what was where, *when*. Every row on a board keeps its time, and the map rings show how old each one is.
+
+At 1:04, a second before B reads the board, the newest thing it knows about the troll is the notice from 0:00: **64 s old**. Reading anywhere, the same knowledge is **22 s old**: A's sighting from 0:42.
+
+Old isn't useless, if the AI treats it as old:
+
+- **Spread it.** The [threat map](/ai/influence-maps/) turns an old sighting into everywhere the monster could have walked since, faded by its age. That's how uncertainty reaches decisions.
+- **Extrapolate briefly**, along the last known velocity, and cap it: a minute ahead is guessing.
+- **Age is a factor.** "Time since we last saw it" is a utility consideration in its own right: a party whose picture is stale should scout, or head for the nearest waystone.
+
+## A versioned log and a watermark per party
+
+The tempting implementation is a copy of the guild board per party (or per adventurer), refreshed at each waystone. With a thousand agents and a few hundred entries, that's hundreds of thousands of records copied, nearly all identical. The usual trick is to share one store and **version** it.
+
+The guild board is an append-only **log**. Every write (a quest, a claim, a sighting, a report) gets the next **version** number and a key ("quest:troll", "sighting:troll"). Reading the board means taking the newest entry for each key. A party at a waystone reads at the **head**. Every party keeps one integer, its **watermark**: the last version it read. Between waystones it reads the board *as of* that version, then lays its own adventurers' entries on top, newest wins.
+
+That's all being between waystones is: the watermark stops while the head moves on. In the widget, B's watermark stays at **v4** after it leaves the guild hall. At 1:04 the log is at **v9**, so B is **5 versions behind**, and one of those 5 is the moved notice. At 1:05 it reads **5 versions** in one go, and the changed notice comes down as a diamond.
+
+Nothing is copied. The only cost is history: the log must keep every entry newer than the **oldest** watermark (plus the newest one below it, per key), because some party may still need to read the board as it was. At 1:04 the log keeps **9 records**: all of them, because B still reads as of v4. A second later it keeps **8**. The one it drops is v1, the old troll notice: replaced, and no longer visible to anyone.
+
+At a waystone, two things happen, in this order:
+
+1. **Flush up.** Whatever the party has that the board doesn't goes into the log as new versions.
+2. **Catch up.** Its watermark jumps to the head, and the party re-plans if its quest's notice changed.
+
+Merge by **when it was true**, not when it arrived. At 1:47 A reaches the crossroads carrying a sighting of the troll from 1:27. The board already says B slew it at 1:32, so A's sighting isn't posted. Posting it would put the troll back on everyone's board just because A's news arrived later.
+
+## The big version
+
+Two parties make the story easy to follow. Here's the same morning with more going on: party C waits at the guild hall for work, party D comes in from the edge of town, and there are two more waystones, one on the north road and one at the mill.
+
+<AiWidget kind="knowledge" scenario="full" />
+
+D reaches the hall at 0:15 and claims the goblins in the north woods. When the clerk moves the troll notice at 0:42, it also posts **Warn the mill that the troll is heading south · 10 gold**, and C claims it the same second: a party at the hall reads at the head. B passes the north road waystone at 0:49, so it spends **7 s** on the old notice instead of 23. The board is the same; more places to read it make knowledge less stale.
+
+### Cap the history
+
+A party that passes no waystone for ten minutes would make the log keep ten minutes of everything. So set a limit. A party whose watermark falls off the end gets a one-off **snapshot**: its board at its watermark, one record per key, and from then on it reads that instead of the log. It's the only copy anyone ever makes, and only for parties that need it.
+
+Set **The guild log keeps history** to **For 20 s**. B's watermark falls more than 20 seconds behind at 0:35, and it gets a 5-record snapshot. At 1:35 the log keeps **17 records plus a 14-record snapshot**, against **25** without the cap. That's more, not less. A snapshot costs one record per key; history costs one record per change, and this small log has few changes per key. The cap pays off when a party is many changes behind, in a busy log where sightings update every second. Either way it bounds the worst case. B's board is exactly the same with or without it; only the memory changes.
+
+## Implementing it
+
+```cpp
+enum class Kind : uint8_t { Quest, Claim, Sighting, Report };
+
+struct Entry {
+    Key      key;        // "quest:troll", "sighting:troll", ...
+    Kind     kind;
+    Tick     time;       // when it was true: posted, seen, done
+    uint64_t version;
+    Payload  data;       // place, bounty, open or withdrawn, text id...
+};
+
+struct GuildLog {
+    std::vector<Entry> entries;  // version order
+    uint64_t head = 0;
+
+    void publish(Entry e) { e.version = ++head; entries.push_back(e); }
+
+    // The newest entry for `k` that a reader at `watermark` may see.
+    const Entry* read(Key k, uint64_t watermark) const;
+
+    // Drop history no watermark can reach any more.
+    void prune(uint64_t oldest_watermark);
+};
+
+struct PartyBoard {
+    uint64_t watermark = 0;           // jumps to head at each waystone
+    std::vector<Entry> local;         // newest per key, from the party's own adventurers
+    uint64_t quest_version = 0;       // re-plan when this changes
+};
+
+struct AdventurerBoard {
+    Task task;                        // from the party
+    std::vector<Entry> seen;          // what it has seen itself
+};
+```
+
+- **Per guild, per party, per adventurer.** One `GuildLog` per guild (or per faction, or per hive), a `PartyBoard` per party, an `AdventurerBoard` per adventurer. In an ECS, the log is a resource on the guild's entity, and parties and adventurers hold theirs as components. A `MemberOf` [relationship](/flecs/relationships/) says which party an adventurer reads.
+- **Being able to read is data.** An `AtWaystone` tag on the party lets its watermark advance. It flips often, so make it `DontFragment` (see [choosing storage](/flecs/storage-traits/)). Nothing else changes.
+- **Notices are just entries.** A party notices a changed quest when the version of its quest's key changes after a read; that's the moment it re-plans. Nothing pushes anything to anyone.
+- **Readers go through one function.** "What does this party know about this key?" lives in one place, so every consumer (threat maps, route choice, utility factors) sees the same rules for watermarks, ages and precedence.
+- **Deterministic.** Versions come from a single counter in a fixed order (parties processed in entity order each tick), so a replay rebuilds the same log ([determinism](/engine/determinism/)). The fixed order also settles races: when two parties at the hall want the same quest, the first claim is on the board before the second party reads.
+
+<Tip kind="note" title="Copy-on-write is the same idea">
+A persistent (immutable) map that shares structure between versions gives each party "its own snapshot" for the price of the changes since. The versioned log is the simple, cache-friendly special case: the history is a list, a snapshot is a number, and pruning is one pass.
+</Tip>
+
+## Takeaways
+
+- **A blackboard holds intent as well as observations.** Quests and claims sit next to sightings and progress reports.
+- **Three levels**: guild (shared, read when a party can), party (always current for its members), adventurer (its task and its own eyes).
+- **A party that can't read the board keeps doing what it last read.** That's correct behaviour, and it's why "the guild changed the notice" isn't the same as "the party changed where it's going".
+- **Version the shared board; don't copy it.** A party keeps a watermark, one integer, and reads the log as of that version.
+- **History is the cost**: keep what the oldest watermark needs, cap it, and snapshot parties gone too long.
+- **At a waystone, flush up, then catch up**, merging by when things were true. Old knowledge has an age; let decisions read it.

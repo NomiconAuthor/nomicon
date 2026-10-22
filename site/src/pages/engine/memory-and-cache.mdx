@@ -1,0 +1,100 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Memory, cache lines and data layout
+order: 1
+part: Memory
+summary: 'The CPU never reads one variable from memory: it reads a 64-byte cache line. Why that makes data layout the biggest performance lever you have, measured in your browser, plus false sharing and the access patterns prefetchers love.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A modern CPU can do a few billion simple operations a second. Main memory can't keep up: a read that has to go all the way to RAM takes around 80–100 nanoseconds, long enough for the core to have run hundreds of instructions. Caches hide that gap by keeping recently used memory close to the core:
+
+| Where the data is | Roughly | In cycles at ~3 GHz |
+|---|---|---|
+| L1 cache (per core, ~32–64 KB) | ~1 ns | ~4 |
+| L2 cache (per core, ~0.5–2 MB) | ~4 ns | ~12 |
+| L3 cache (shared, ~8–64 MB) | ~12 ns | ~40 |
+| Main memory | ~80–100 ns | ~300 |
+
+Exact numbers vary by chip, but the shape doesn't: each level is several times slower than the one above.
+
+The detail that matters most for game code is the unit of transfer. Memory never moves one `float` at a time. It moves a whole **cache line**, 64 bytes on x86 and most ARM chips (128 on Apple's M-series). Read one byte and you've paid for its 63 neighbours. Whether those neighbours were useful is decided by how you laid out your data.
+
+## Watch the cache lines
+
+Sixteen units, each a 48-byte struct: position, velocity, health, armour, colour, an id and 16 bytes of AI state. Pick a layout and a loop, then step or play. Each row is one cache line. A line lights up the first time the loop touches it (a miss, assuming a cold cache), solid cells are bytes the loop used, and dashed cells came along for free and were never read.
+
+<EngineWidget kind="cache" />
+
+Things to try:
+
+- **Move, array of structs:** the loop wants 16 of each unit's 48 bytes, so a third of every line is useful and twelve lines come in for four lines' worth of data.
+- **Move, struct of arrays:** `x`, `y`, `vx` and `vy` each live in their own packed array. Four lines, every byte used.
+- **Damage:** in the array of structs this is the worst case, since one float per unit means about 8% of the fetched bytes are used. As a struct of arrays it's a single line.
+- **AI tick, which reads everything:** now the array of structs is perfectly efficient, and the struct of arrays is no better. Layout only pays off when loops touch a subset of the fields, which in games they nearly always do.
+- **Hot / cold split** is the pragmatic middle: the fields the per-frame loops use go in one tight struct, everything else in another. Move is perfect; Render pays for a trip into the cold array for `colour`.
+
+<Tip title="This is what an archetype table is">
+An ECS table stores each component in its own column, one array per component per table, which makes it a struct of arrays. A system asking for `Position, Velocity` walks two packed columns and never touches `Health`. That's the whole reason [archetype storage](/flecs/archetypes/) is fast, and why the [cost of moving between tables](/flecs/archetypes/) is worth paying.
+</Tip>
+
+## Measure it
+
+The same experiment at real scale, in JavaScript typed arrays (the JIT compiles these loops to plain machine code). A million 48-byte units is 48 MB, far bigger than any cache, so every pass streams from memory:
+
+<EngineWidget kind="bench-layout" />
+
+The array-of-structs loops typically come out two to four times slower than the struct of arrays, for identical arithmetic, and the hot/cold split lands in between. In native code with SIMD the gap is usually larger still, because the struct of arrays also vectorises cleanly.
+
+## Order matters as much as layout
+
+Caches work best when you use a line fully before moving on. CPUs also have **prefetchers**, hardware that spots sequential and evenly strided access and starts fetching the next lines before you ask. Random access defeats both:
+
+<EngineWidget kind="bench-order" />
+
+- **In order** is the best case: every line is used completely, and the prefetcher keeps ahead of the loop.
+- **Random blocks** still uses each 64-byte line fully, but jumps between lines unpredictably, so most of the prefetcher's help is lost.
+- **Fully random** pays a miss for nearly every single int.
+
+This is why a linked list, or an array of pointers to objects scattered across the heap, can be dramatically slower than the same data in a flat array. Each hop is a dependent load the prefetcher can't predict.
+
+<EngineWidget kind="bench-stride" />
+
+Every run does the same four million reads; only the gap between them grows. At stride 1, sixteen consecutive reads share each cache line, so most of them are hits, and the cost per read climbs as fewer reads share a line. Past 64 bytes every read needs a line of its own, and the cost keeps rising more slowly for a while: many CPUs fetch lines in adjacent pairs, and prefetchers stop at 4 KB page boundaries, so very wide strides lose that help too. The cost tracks how many lines you touch, not how many bytes you asked for.
+
+## False sharing
+
+Caches work per line, and that includes keeping cores in agreement. When one core writes to a line, every other core's copy of that line is invalidated. If two threads write to *different* variables that happen to share a line, they still fight over it, and the line ping-pongs between their caches on every write. This is **false sharing**: no data is actually shared, but the line is.
+
+<EngineWidget kind="falseshare" />
+
+With the counters side by side, almost every write is a transfer. Padded to a line each, after the first touch every write is a cheap hit.
+
+```cpp
+// Per-thread data written in a hot loop: give each one its own cache line.
+struct alignas(std::hardware_destructive_interference_size) WorkerStats {
+    uint64_t processed = 0;
+    uint64_t skipped = 0;
+};
+WorkerStats stats[MaxWorkers];
+
+// Better still: accumulate in a local and write once at the end.
+uint64_t processed = 0;
+for (auto& job : my_jobs) processed += run(job);
+stats[worker].processed = processed;
+```
+
+`std::hardware_destructive_interference_size` (C++17) is 64 on most targets. Some compilers warn when it's used in a header, because the value can differ between compilation units. Writing `alignas(64)` is the usual fallback.
+
+<Tip kind="warn" title="Where false sharing hides">
+Per-thread counters or stats in one array, a job queue's head and tail indices next to each other, a "done" flag beside data another thread is writing, small per-worker structs packed into a `std::vector`. Look for anything that several threads write in a hot loop.
+</Tip>
+
+## Takeaways
+
+- **Lay data out by how it's iterated, not by what it "is".** Group the fields that hot loops read together; keep rarely used fields out of their way.
+- **Prefer flat arrays and indices** to pointers into the heap, in both data structures and object graphs.
+- **Iterate in memory order.** Sorting work by address (or by archetype table) is often worth more than micro-optimising the loop body.
+- **Keep per-thread writes on separate lines**, or better, in locals until the end.
+- **Measure.** Cache behaviour is predictable in principle and surprising in practice. Profilers that show cache misses (VTune, AMD uProf, `perf stat -e cache-misses`) tell you where it actually bites.

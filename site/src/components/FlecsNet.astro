@@ -1,0 +1,25 @@
+---
+/** Server and client flecs worlds side by side (src/flecs/net/netsim.ts). */
+---
+
+<flecs-net><p>Loading the server and client worlds…</p></flecs-net>
+
+<script>
+  import '../flecs/net/netsim.css';
+  import { NetSim } from '../flecs/net/netsim';
+
+  class FlecsNetElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      void new NetSim(this).init();
+    }
+  }
+  if (!customElements.get('flecs-net')) customElements.define('flecs-net', FlecsNetElement);
+</script>
+
+<style>
+  flecs-net {
+    display: block;
+  }
+</style>

@@ -1,0 +1,116 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Game loops, fixed timesteps and running faster than real time
+order: 3
+part: Time
+summary: 'Why simulating with the frame''s delta time causes jitter, instability and replays that don''t replay. How a fixed step with an accumulator fixes it, how interpolation keeps rendering smooth, how to avoid the spiral of death, and how decoupling the simulation from rendering lets it run at any speed.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Every game has a loop that reads input, advances the world, and draws it. The interesting question is how far to advance the world each time round. Frames don't take a constant amount of time: the frame rate varies with the scene, other programs, vsync, loading hitches and the player's hardware.
+
+## The obvious loop, and its problems
+
+The obvious answer is to measure how long the last frame took and simulate that much time:
+
+```cpp
+while (running) {
+    double now = now_seconds();
+    double dt = now - last; last = now;
+    simulate(state, dt);
+    render(state);
+}
+```
+
+It looks right, and for simple movement it mostly is. But simulation code is rarely linear in `dt`:
+
+- **Results depend on the frame rate.** Numerical integration with a step of 1/30 s gives different trajectories from a step of 1/144 s. Jumps reach different heights on different machines, and a replay recorded at one frame rate doesn't reproduce at another.
+- **Long frames break things.** After a 250 ms hitch, one huge step can push objects through walls (tunnelling), make springs explode, or skip triggers entirely.
+- **No determinism.** Lockstep networking, replays, and "same input gives same result" tests all need the simulation to advance in identical steps every time.
+
+## A fixed step with an accumulator
+
+The fix (best known from Glenn Fiedler's article *Fix Your Timestep!*) is to always advance the simulation in steps of the same size, and let frame time pile up in an **accumulator** until there's enough for a step:
+
+```cpp
+const double dt = 1.0 / 60.0;
+double acc = 0;
+while (running) {
+    double now = now_seconds();
+    acc += now - last; last = now;
+    while (acc >= dt) {
+        previous = current;
+        simulate(current, dt);
+        acc -= dt;
+    }
+    double alpha = acc / dt;                 // how far into the next step we are
+    render(lerp(previous, current, alpha));  // draw between the last two states
+}
+```
+
+A slow frame runs several steps; a fast one may run none. The simulation always sees the same `dt`, so it behaves the same at 20 fps and at 240.
+
+## Play with it
+
+The scene is three balls bouncing under gravity, simulated like real game physics, with semi-implicit Euler integration. The timeline below the scene shows the last second: each frame as a block on top, and the sim steps that ran inside it underneath. The faint dots are where ball 1 was drawn on recent frames: evenly spaced means smooth motion, uneven means judder.
+
+<EngineWidget kind="loop" />
+
+Things to try:
+
+1. **Variable dt, then tick "jittery frames".** Every frame is a different-sized step. Watch the last stat: ball 1 drifts away from where a steady run would have it, and the drift depends on the frame times you happened to get.
+2. **Fixed dt at 10 Hz, frame rate 60.** Several frames in a row show the same state, then the balls jump. That's the cost of a fixed step without interpolation: rendering can only show states the simulation has produced.
+3. **Fixed dt + interpolation, same settings.** Smooth again. Each frame draws a blend of the last two states, weighted by how full the accumulator is. The price is up to one step of visual latency, because you're always drawing slightly in the past.
+4. **Hitch.** One 250 ms frame. With a fixed step the next frame simply runs several steps to catch up, each one normal-sized, and nothing tunnels. (With the clamp on, it runs at most 5 and drops the rest; untick it to see the full catch-up.)
+5. **The spiral of death.** Untick the clamp and raise "cost per sim step" above the step length (33 ms at 30 Hz). Now each step takes longer to compute than the time it simulates. A slow frame adds more time to the accumulator than its steps used up, so the next frame has to run more steps, which makes it slower still. Watch "steps last frame" climb and the frame rate collapse: in a real game that's a freeze that never recovers.
+6. **Turn the clamp back on.** With at most 5 steps per frame, the backlog is dropped instead ("time dropped" counts it), so simulated time falls behind wall time: the game runs in slow motion, but frames keep coming and it recovers as soon as the load drops. That's almost always the better failure.
+
+<Tip kind="warn" title="Pick a step the sim can afford">
+A fixed step only works if one step costs less than `dt` on the slowest hardware you support, with room left for rendering. If simulation cost spikes (an explosion spawning hundreds of bodies), the clamp is what keeps the game alive. Measure the worst case, not the average.
+</Tip>
+
+## Running faster (or slower) than real time
+
+Once the simulation only ever advances in fixed steps, nothing in it depends on the wall clock, so it doesn't have to run at the speed of the clock. That opens up a lot:
+
+- **Fast-forward and slow motion:** feed the accumulator `frame_time × time_scale` instead of `frame_time`.
+- **Headless runs:** servers, bots, AI training, automated tests and replay scrubbing can step the simulation as fast as the CPU allows, without rendering at all.
+- **Catch-up:** a client that was paused or backgrounded can run a batch of steps to rejoin the timeline.
+
+Try **Sim speed** in the widget. At ×4 and ×16 the same loop simply gets more time per frame. *As fast as possible* drops frames from the loop entirely: the simulation runs in a tight loop for a slice of each real frame, and rendering just shows the latest state.
+
+```cpp
+// time_scale: 1 = real time, 8 = eight times faster, 0 = as fast as possible.
+while (running) {
+    double now = now_seconds();
+    double frame = now - last; last = now;
+    if (time_scale > 0) {
+        acc += frame * time_scale;
+        int steps = 0;
+        while (acc >= dt && steps++ < max_steps) { simulate(current, dt); acc -= dt; tick++; }
+        if (acc >= dt) acc = 0;           // still behind after max_steps: drop the backlog
+    } else {
+        double budget_end = now_seconds() + 0.012;  // spend ~12 ms per frame simulating
+        while (now_seconds() < budget_end) { simulate(current, dt); tick++; }
+    }
+    render(current);  // or skip rendering entirely when headless
+}
+```
+
+For this to work, the simulation must be truly separate from presentation:
+
+- **The sim never reads the wall clock** or the frame's delta. Time inside the simulation is `tick × dt`.
+- **Input is sampled per tick, not per frame.** Record which tick each command applies to; that's also what makes replays and lockstep networking possible.
+- **Render-only state lives outside the simulation:** camera smoothing, particles that don't affect gameplay, UI animation. These can use the real frame time.
+- **Randomness is seeded and owned by the simulation**, and advanced only by simulation steps (or, better, derived from the tick and what is being decided; see [determinism](/engine/determinism/)).
+
+<Tip kind="note" title="Bit-for-bit determinism is harder">
+A fixed step makes the simulation *repeatable on one build on one machine*. Matching results across compilers, CPUs or platforms (which lockstep multiplayer needs) also requires consistent floating-point behaviour (no fast-math, careful with SIMD and transcendental functions, or fixed-point maths) and deterministic iteration order everywhere, including containers like `std::unordered_map`. The [determinism lesson](/engine/determinism/) goes through all of it.
+</Tip>
+
+## Takeaways
+
+- **Simulate with a fixed step**, accumulate real time, and render with interpolation.
+- **Clamp the steps per frame** so an overloaded sim slows down instead of spiralling.
+- **Keep wall-clock time out of the simulation.** Then running it at ×16, headless, or tick by tick in a debugger costs nothing extra.

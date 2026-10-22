@@ -1,0 +1,47 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Archetypes, and entities moving between them
+order: 2
+part: Storage and identity
+summary: Where flecs actually keeps your components, what happens to that storage when you add or remove one, and why row numbers can't be trusted.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+import TryIt from '../../components/lesson/TryIt.astro';
+
+An **entity** in flecs is just an id. A **component** is a type that can be attached to an entity, usually with data (`Position`, `Velocity`). A **tag** is a component with no data (`Frozen`). Pairs, like `(ChildOf, Ship)`, get [their own lesson](/flecs/relationships/).
+
+flecs is an *archetype* ECS. Every entity with exactly the same set of components, its **type**, lives in the same **table** (also called an archetype). A table stores one array per component with data, called a column. Row *n* of every column belongs to the entity in row *n*. This is why iterating is fast: a system that wants `Position` and `Velocity` gets two plain arrays, one table at a time.
+
+The catch is that the type decides the table. When you add or remove a component, the entity's type changes, so its row has to move to a different table.
+
+## Watch it happen
+
+The debugger below runs a real flecs world (current master, compiled to WebAssembly) and records what flecs does internally. Press **Step** to go through it one action at a time. Each step shows the flecs function responsible. **Line** finishes the current line of code, and **Continue** runs to the next kind of event ticked under "Stop at". Once you've clicked inside the debugger, the ← and → keys step too.
+
+<FlecsDebugger scenario="archetypes" />
+
+Things to notice as you step:
+
+- **Setting `Velocity` on Ship creates a table.** No table had the type `[Position, Velocity]` yet, so `flecs_table_init` makes one. Tree gets `Velocity` next and lands in the same table, which costs no new table this time.
+- **A move is append, copy, delete.** The row is appended at the end of the destination table, the shared component values are copied across, and the old row is removed. On current flecs, `OnRemove` observers for removed components run *before* the append, while the old row is intact, so they never see a half-initialised row (the `on_remove` hook comes later; [hooks and observers](/flecs/observers/) has the exact order).
+- **Deleting a row swaps the last row into the hole.** When Ship leaves `[Position]` from row 0, Tree jumps from row 2 to row 0. Tables are always packed, which keeps removal O(1). The price is that an entity's row changes whenever a neighbour leaves.
+- **Tags move entities too.** `Frozen` has no data and no column, but it is part of the type, so adding it moves Ship to `[Position, Velocity, Frozen]`. Removing it moves Ship back.
+- **Names are components.** Every table here has a `name` chip. An entity's name is stored as the pair `(Identifier, Name)`, so named and unnamed entities with the same components live in different tables.
+- **Creating an entity one component at a time walks through tables.** The last line creates `Probe` and sets two components. Step through it and you'll see it pass through the intermediate tables on the way.
+
+<Tip title="Never hold on to a row">
+Row indices are an implementation detail that changes whenever any entity in the table moves or is deleted. Refer to entities by id (or by a `flecs::ref` for repeated component access), and let queries hand you rows.
+</Tip>
+
+<TryIt preset="basics">Make your own entities, add and remove components, and watch rows move between the tables.</TryIt>
+
+## What this means for your code
+
+**New tables are a one-off cost, moves are the running cost.** A table is created once per unique type and then reused, but every cached query and system is told about it (you'll see that in [the caching lesson](/flecs/query-caching/)). Games settle into a fixed set of tables quickly. What keeps costing time is moving entities between them.
+
+**Don't flip a tag every frame to mean "this frame".** Each add or remove of a tag moves the entity, copying all of its components. For state that changes constantly, a field inside a component (or a `DontFragment` or `CanToggle` component, see [choosing storage](/flecs/storage-traits/)) avoids the moves. Tags work well for state that changes rarely and that you query for often, because queries then skip whole tables.
+
+**Prefer setting up an entity's full type in one go.** Each separate add is its own move. Instantiating a prefab adds its whole set of components at once, which is one reason to use prefabs for things you spawn often.
+
+Inside the debugger, the **Try it** controls under the code let you make your own moves: pick an entity, add or remove `Frozen` or `Velocity`, and step through what flecs does.

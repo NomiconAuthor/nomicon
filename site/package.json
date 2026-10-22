@@ -1,0 +1,27 @@
+{
+  "name": "nomicon",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "ai-batch": "npx esbuild@0.24.0 test/ai-batch.ts --bundle --platform=node --format=esm --outfile=test/.ai.mjs --log-level=warning && node test/.ai.mjs",
+    "steer-batch": "npx esbuild@0.24.0 test/steer-batch.ts --bundle --platform=node --format=esm --outfile=test/.steer.mjs --log-level=warning && node test/.steer.mjs",
+    "avoid-batch": "npx esbuild@0.24.0 test/avoid-batch.ts --bundle --platform=node --format=esm --outfile=test/.avoid.mjs --log-level=warning && node test/.avoid.mjs",
+    "jobs-batch": "npx esbuild@0.24.0 test/jobs-batch.ts --bundle --platform=node --format=esm --outfile=test/.jobs.mjs --log-level=warning && node test/.jobs.mjs",
+    "wait-batch": "npx esbuild@0.24.0 test/wait-batch.ts --bundle --platform=node --format=esm --outfile=test/.wait.mjs --log-level=warning && node test/.wait.mjs",
+    "party-batch": "npx esbuild@0.24.0 test/party-batch.ts --bundle --platform=node --format=esm --outfile=test/.party.mjs --log-level=warning && node test/.party.mjs",
+    "test": "npx esbuild@0.24.0 test/runtime-check.ts --bundle --platform=node --format=esm --outfile=test/.rt.mjs --log-level=warning && node test/.rt.mjs && npx esbuild@0.24.0 test/debugger-check.ts --bundle --platform=node --format=esm --outfile=test/.dbg.mjs --log-level=warning && node test/.dbg.mjs && npm run -s check-lessons",
+    "check-lessons": "npx esbuild@0.24.0 test/lesson-claims.ts --bundle --platform=node --format=esm --outfile=test/.claims.mjs --log-level=warning && node test/.claims.mjs"
+  },
+  "dependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/mdx": "8.1.0",
+    "astro": "7.4.0",
+    "recast-navigation": "0.43.1",
+    "typescript": "5.6.3"
+  },
+  "private": true,
+  "type": "module"
+}

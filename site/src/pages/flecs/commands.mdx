@@ -1,0 +1,40 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Commands and sync points
+order: 9
+part: Systems, commands and reactions
+summary: Why operations inside a system don't happen straight away, what the command queue does with them, and where they finally land.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A system's function runs while flecs is iterating a table (see [systems and the pipeline](/flecs/systems/)). If that function adds a component to the entity it's looking at, the entity would move to another table mid-iteration. As the archetypes lesson showed, the last row would be swapped into its place. The system would skip an entity or see one twice, and the arrays it holds could be reallocated.
+
+flecs solves this by not applying the operation yet. Inside a system you work through the **stage** (`it->stage` in C; in C++ the entity handles `.each()` gives you already use it). Operations on the stage are **enqueued as commands** and applied later, at a **sync point**.
+
+## Watch it happen
+
+`Move` writes `Position` directly. `MarkMoving` adds a `Moving` tag and sets `Velocity` for each entity it finds without one. Step through the first `world.progress()`.
+
+<FlecsDebugger scenario="commands" />
+
+What to look for:
+
+- **Writes still go straight into the column.** `Move` writing `Position` is not a command; only structural changes and `set`s through the stage are queued.
+- **Adds are enqueued.** `MarkMoving`'s `add<Moving>` and `set<Velocity>` show up as *Enqueue* lines, and the command queue panel fills up. The tables don't change.
+- **The queue is applied at the sync point.** After the systems run, flecs applies the queue in order. Commands for the same entity are **batched**: the first command for Ship applies everything queued for Ship, so it moves once, straight to its final table. That's why the later commands for Ship do nothing new.
+- **The next frame is different.** In frame 2, Ship and Probe already have `Moving`, so `MarkMoving` matches no tables and its function isn't called at all.
+
+Now switch the setup at the top to **Immediate (it->world)**. Here the system uses `it->world`, the real world instead of the stage, and the operations are applied on the spot. Step through `MarkMoving`: Ship leaves the table *while it is being iterated*, and Probe is swapped from row 1 into row 0 under the system's feet. In C, a loop over `it->count` would now read stale rows. Avoiding exactly this is what the command queue is for.
+
+<Tip kind="warn" title="it->world vs it->stage">
+On current flecs, deferral depends on what you pass. Operations on a stage (`it->stage`) are enqueued, while operations on the world itself are applied immediately. In C, mutate through `it->stage` inside systems and observers. In C++, the `flecs::entity` handles the iterator gives you (`it.entity(i)`, the entity in `.each()`) and `it.stage()` are deferred, but `it.world()` is the real world, so an operation through it is applied immediately, just like `it->world` in C.
+</Tip>
+
+## Sync points
+
+By default, commands are applied at the end of the frame, after the last system. If a later system needs to *see* a change an earlier one enqueued, tell the pipeline. Annotate the writing system with the component it may write through commands (an `[out]` term with no source, such as `[out] Velocity()`, or `.write<T>()` in C++). The pipeline then inserts a sync point before the first system that reads that component. Sync points are only inserted where they're needed, and several systems' commands are merged in one go.
+
+<Tip>
+Commands applied at a sync point still trigger observers and hooks, just later than the line of code that queued them. If a system needs its own changes to be visible straight away (the classic example is handing out tasks: once a worker is assigned, the next iteration must see it as busy), mark it **immediate** (`.immediate()` in C++, `.immediate = true` in C). It runs while the world is writable: operations through `it.world()` apply at once, operations through the stage are still queued, and changes that would move the entities being iterated must still go through the stage. Immediate systems always run single-threaded, so keep them few.
+</Tip>

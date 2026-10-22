@@ -1,0 +1,29 @@
+---
+/** A benchmark that runs natively in the flecs WebAssembly module (src/flecs/bench/bench.ts). */
+interface Props {
+  kind: 'ladder' | 'spatial';
+}
+const { kind } = Astro.props;
+---
+
+<flecs-bench data-kind={kind}><p>Loading the benchmark…</p></flecs-bench>
+
+<script>
+  import '../flecs/bench/bench.css';
+  import { Bench } from '../flecs/bench/bench';
+
+  class FlecsBenchElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      void new Bench(this, this.dataset.kind === 'spatial' ? 'spatial' : 'ladder').init();
+    }
+  }
+  if (!customElements.get('flecs-bench')) customElements.define('flecs-bench', FlecsBenchElement);
+</script>
+
+<style>
+  flecs-bench {
+    display: block;
+  }
+</style>

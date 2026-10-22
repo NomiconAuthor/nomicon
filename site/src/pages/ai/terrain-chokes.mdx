@@ -1,0 +1,103 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Reading terrain, clearance and chokes
+order: 11
+part: Terrain analysis
+summary: 'Before an AI can use terrain it has to describe it. How wide every place is (a distance transform), how space divides into areas joined by narrow openings (a watershed flood), which openings matter (sampled traffic), and why movement and line of sight need separate answers.'
+---
+import TacticsWidget from '../../components/TacticsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The decision lessons gave the agent numbers to reason with: health, distance, whether it's in cover. Terrain analysis produces the numbers about the *map*: where the narrow places are, which areas connect to which, where cover is, how exposed a spot is. Almost all of it depends only on the static world, so it can be computed once, before play, and looked up.
+
+It's not only for shooters. StarCraft bots (the BWTA and BWEM libraries) split every map into regions joined by chokes and use them to decide where to build defences and where to expand; stealth games post guards on chokes; crowd and evacuation simulations measure how much flow a choke can take; level-design tools flag them for review.
+
+These lessons use the [tactics lab](/tactics-lab/)'s 2.5D grid: one-metre cells, each with a height and two properties, *can you walk through it* and *can you see through it*. A low wall blocks movement and hides a crouching unit; a ravine blocks movement but not sight; a building blocks both.
+
+## How wide is it here?
+
+The first question is width. For every cell you can move through, how far is it to the nearest thing you can't? That is a **distance transform**, and the exact Euclidean version (Felzenszwalb and Huttenlocher's) runs as two linear passes: one down every column, one along every row. Press play and watch both passes:
+
+<TacticsWidget preset="ravine" layer="chokes" mode="move" />
+
+Each pass is the same one-dimensional routine: the lower envelope of a set of parabolas, one rooted at every cell.
+
+```cpp
+// One pass of the exact squared distance transform (Felzenszwalb & Huttenlocher).
+// f[i] is 0 on obstacles and BIG (say 1e20f) on free cells for the first pass,
+// and the first pass's output for the second. v and z are scratch arrays of size n and n + 1.
+void edt_1d(const float* f, float* d, int n, int* v, float* z) {
+    auto cross = [&](int q, int p) { return ((f[q] + q * q) - (f[p] + p * p)) / float(2 * q - 2 * p); };
+    int k = 0;
+    v[0] = 0; z[0] = -INFINITY; z[1] = INFINITY;
+    for (int q = 1; q < n; q++) {
+        float s = cross(q, v[k]);
+        while (s <= z[k]) s = cross(q, v[--k]);   // the new parabola hides the last one
+        v[++k] = q; z[k] = s; z[k + 1] = INFINITY;
+    }
+    for (int q = 0, j = 0; q < n; q++) {
+        while (z[j + 1] < q) j++;
+        d[q] = float((q - v[j]) * (q - v[j])) + f[v[j]];
+    }
+}
+```
+
+The transform turns shape into numbers. Corridors become ridges of high clearance along their middles; open fields become broad peaks; the narrowest point of a route is where its ridge dips lowest.
+
+<Tip kind="warn" title="Width, not polygon area">
+It's tempting to use navmesh polygon area as a measure of how open a place is. It doesn't work: Recast cuts polygons for its own convenience, so a long narrow bridge can be one large polygon. Clearance measures width directly. If you start from a navmesh, compute clearance from its boundary edges, not from polygon sizes.
+</Tip>
+
+## Regions and chokes: a watershed flood
+
+A choke is a narrow opening between two wider areas. Both halves of that matter: narrow alone describes every alley. The lab finds chokes with a **watershed flood** over the clearance field (keep stepping through the widget above):
+
+1. Sort every free cell from widest to narrowest.
+2. Add them in that order. A cell with no flooded neighbour is a local maximum and starts a new region; otherwise it joins its neighbours' region. Regions grow outwards from the middles of open spaces.
+3. When two regions meet, look at the meeting cell. If it's nearly as wide as the regions are, they're really one space and merge. If it's much narrower (below a ratio of the smaller region's widest point, 60% by default), they stay apart and the meeting cell is a choke. The first meeting cell of a pair is the *saddle*: the widest point of the narrowest crossing, which is exactly the opening's half-width.
+
+As code, with a union-find over regions:
+
+```cpp
+for (int c : cells_widest_first) {
+    int r = -1;
+    for (int n : neighbours(c)) {
+        if (owner[n] < 0) continue;                       // not flooded yet
+        int rn = find(owner[n]);
+        if (r < 0 || rn == r) { r = rn; continue; }
+        float smaller_peak = std::min(peak[r], peak[rn]);
+        if (clearance[c] >= ratio * smaller_peak) r = unite(r, rn);  // really one space
+        else chokes.push_back({c, r, rn, clearance[c]});             // a narrow opening between two
+    }
+    owner[c] = r < 0 ? new_region(c, clearance[c]) : r;              // a local maximum starts a region
+}
+```
+
+Each pair of regions keeps only its first meeting cell (the saddle), and chokes within a few metres of each other are merged, since a doorway's cells all meet at almost the same moment.
+
+Recast partitions its walkable area into regions with the same kind of watershed, so if you use Recast you already have most of this.
+
+## Which chokes matter: traffic
+
+Narrowness isn't importance. A narrow gap that nothing passes through is a dead-end alley, which might even be good cover. The last stage samples shortest routes between random points (40 Dijkstra searches, 12 destinations each) and counts how many cross each cell: a sampled estimate of *betweenness centrality*. Each choke's circle is sized by the share of routes through it, and chokes almost nothing uses are drawn faintly.
+
+## Movement chokes and sight chokes
+
+The map above has a ravine with one bridge, and a wall with two doorways. For movement, the bridge is the busiest choke on the map. Switch **Analyse space for** to **Line of sight** and run it again: the bridge disappears, because you can see and loose arrows across the ravine along its whole length. The doorways stay, because a wall blocks both.
+
+That's two analyses on two maps of free space, and a tactical AI needs both. The movement choke says where enemies *must* pass; the sight analysis says whether that crossing can be watched, and from where. A navmesh-only approach can only ever produce the first.
+
+## Openness
+
+A related, cheaper description: is a place open ground, a street, a junction or a room? Cast rays at eye height in a ring, pair opposite rays into axes through the cell, and classify by the longest axis, the shortest, and the axis across the longest. Hover the map to probe any cell:
+
+<TacticsWidget preset="town" layer="openness" />
+
+An alley is long one way and narrow across: a corridor, however narrow. A crossroads is long in two directions: a junction. A room is short in every direction. In a game you'd bake this from the map data (building footprint density and distance to the nearest building say most of it) rather than cast rays specially.
+
+## Takeaways
+
+- **A distance transform** gives every cell its width in two linear passes; it's the raw material for chokes, unit-size checks and openness.
+- **A watershed flood** over it splits space into regions joined by chokes, and the meeting points tell you how wide each opening is.
+- **Traffic** separates important chokes from dead ends.
+- **Movement and sight are different maps.** A bridge over a ravine is a movement choke and not a sight choke.

@@ -1,0 +1,36 @@
+---
+/** The tactics lab embedded in a lesson: one analysis layer on one map. */
+interface Props {
+  preset: string;
+  layer: string;
+  method?: string;
+  mode?: 'move' | 'sight';
+  stance?: 'standing' | 'crouched';
+  size?: string;
+}
+const p = Astro.props;
+---
+
+<tactics-widget data-opts={JSON.stringify(p)}><p class="ll-loading">Loading…</p></tactics-widget>
+
+<script>
+  import '../tactics/tactics.css';
+  import '../tactics/tactics-embed.css';
+
+  class TacticsWidget extends HTMLElement {
+    async connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const o = JSON.parse(this.dataset.opts ?? '{}');
+      const { TacticsApp } = await import('../tactics/app');
+      new TacticsApp(this, { preset: o.preset, layer: o.layer, coverMethod: o.method, chokeMode: o.mode, stance: o.stance, size: o.size });
+    }
+  }
+  if (!customElements.get('tactics-widget')) customElements.define('tactics-widget', TacticsWidget);
+</script>
+
+<style>
+  tactics-widget {
+    display: block;
+  }
+</style>

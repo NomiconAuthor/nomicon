@@ -1,0 +1,56 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Relationships
+order: 4
+part: Storage and identity
+summary: Pairs, wildcards and Exclusive relationships, what they do to storage, and when an entity id in a plain component is the better choice.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A **relationship** is a pair `(Relationship, Target)` added to an entity, like `(Eats, Apples)`. Both halves are entities. The pair is an id like any other, so it goes into the entity's type, it can be queried, and (as with any id) it decides which table the entity lives in.
+
+That last part is the key to how relationships behave:
+
+- `(Eats, Apples)` and `(Eats, Pears)` are **different ids**, so Bob-eats-apples and Alice-eats-pears live in different tables. Every new target can mean a new table.
+- Querying `(Eats, Apples)` matches whole tables, just as fast as matching a component.
+- An entity can have the same relationship with several targets (`(Eats, Apples)` and `(Eats, Pears)`) unless the relationship is **Exclusive**, in which case adding a new target replaces the old one, like `ChildOf`.
+- The wildcard `(Eats, *)` matches any target. A wildcard query returns one result *per matching pair*, so an entity that eats two things is returned twice.
+
+## Watch the tables
+
+<FlecsDebugger scenario="relationships" />
+
+Things to notice:
+
+- **Each target gets its own table.** Bob and Alice don't share `[Position, (Eats, ...)]`, even though they have the same kind of data.
+- **Both caches check every new table.** `EatsApples` keeps only tables with `(Eats, Apples)`; `EatsAnything` keeps all of them.
+- **`(Eats, *)` returns Bob twice**, once for each pair. If you want each entity once, add the wildcard as a filter and read the targets yourself, or rethink whether you need "any".
+- **Exclusive moves, it doesn't add.** `bob.add<Faction>(blue)` moves Bob from the `(Faction, Red)` table to a `(Faction, Blue)` one.
+
+## Or: an entity id in a component
+
+The same information can live in plain data: `struct Eats { flecs::entity_t food; }`. Here is the identical setup that way:
+
+<FlecsDebugger scenario="idsInComponents" />
+
+Everyone shares one table, and changing what someone eats is a write, not a move. The price is that flecs can't answer "who eats apples?" for you: you iterate everyone with `Eats` and check the field.
+
+The flecs author's advice: **if an entity id inside a component does the job, prefer it over a relationship.** A relationship earns its keep when you need to *query* by target. It costs extra memory, because flecs keeps an index entry per pair (with statistics enabled, the Explorer's front page shows exactly how much).
+
+What about `DontFragment` relationships, which keep the pair queryable without splitting tables? They're covered in [fragmentation](/flecs/fragmentation/) and [choosing storage](/flecs/storage-traits/), but one warning belongs here. Users have reported that a query matching a DontFragment relationship through a wildcard or a variable target (`with<Link>("$x")`) takes flecs' slowest path. One test measured about 300 ms, against roughly 0.001 ms for the same data stored as an id in a component. Recent versions are faster, but it's still the slow path. Measure before you choose it for anything hot.
+
+<Tip kind="note" title="Unions vs relationships with component targets">
+Some people model "one of several states" as a C++ union (or variant) with an enum discriminator, instead of a relationship whose targets each carry a component type. Trade-offs reported by the flecs author:
+
+- **Reflection:** a union can't be reflected member by member, so the Explorer and Flecs Script can't see inside it (the [reflection lesson](/flecs/reflection-and-scripts/) covers the ways around that).
+- **Memory:** a union uses less, because there's no lookup index per target. Watch for waste if the members differ a lot in size.
+- **Storage:** a union is a value inside a component, so changing state is a write. With a fragmenting relationship each state gets its own table, and changing state is a move (unless the relationship is DontFragment).
+- **Querying:** you can't query on the union's target, because it isn't an entity.
+
+Choose the union when memory matters and nobody needs to query by state. Choose the relationship when the Explorer, scripts or queries need to see it.
+</Tip>
+
+<Tip title="A rule of thumb">
+Ask "will I query *by* this target?" If yes, use a relationship. If you only ever read it once you already have the entity, an id in a component is cheaper, simpler, and doesn't fragment.
+</Tip>

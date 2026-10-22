@@ -1,0 +1,315 @@
+/*
+ * Visual Studio theme (VS 2019/2022 Dark): a menu bar for the navbar, the page
+ * as an editor tab, the blue status bar, and syntax colours for the chips.
+ * Everything is scoped to html[data-theme='vs'].
+ */
+html[data-theme='vs'] {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --paper: #252526;
+  --raised: #2d2d30;
+  --ink: #f1f1f1;
+  --body: #d4d4d4;
+  --muted: #9d9d9d;
+  --line: #3f3f46;
+  --line-soft: #333337;
+  --accent: #3794ff;
+  --on-accent: #ffffff;
+  --good: #89d185;
+  --warn: #cca700;
+  --alert: #f48771;
+  /* Chips get the editor's syntax colours */
+  --c1: #dcdcaa;
+  --c2: #4ec9b0;
+  --c3: #ce9178;
+  --c4: #b5cea8;
+  --c5: #c586c0;
+  --c6: #d7ba7d;
+  --c7: #569cd6;
+  --c8: #9cdcfe;
+  --focus: #007acc;
+  --f-body: 'Segoe UI', 'Segoe WPC', Tahoma, 'Open Sans', sans-serif;
+  --f-display: var(--f-body);
+  --f-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+
+  /* Pathing Lab canvas */
+  --on-unit: #1e1e1e;
+  --swatch-edge: rgba(255, 255, 255, 0.12);
+  --wall: #5a5a66;
+  --grid: #2b2b2b;
+  --floor: #1e1e1e;
+  --walker: #dcdcaa;
+  --vehicle: #c586c0;
+  --cache: #4ec9b0;
+  --soft: #d7ba7d;
+  --other: #858585;
+  --u2: #4ec9b0;
+  --u3: #ce9178;
+  --u4: #b5cea8;
+  --u5: #c586c0;
+  --u6: #d7ba7d;
+  --u7: #569cd6;
+  --u8: #9cdcfe;
+  --t-road: #4b4430;
+  --t-rough: #2f4a33;
+  --t-mud: #4e3626;
+  --t-water: #1f3a55;
+  --closed: rgba(55, 148, 255, 0.2);
+  --open: rgba(55, 148, 255, 0.4);
+  --open-ring: #3794ff;
+  --scan: rgba(220, 220, 170, 0.22);
+  --tree: rgba(212, 212, 212, 0.35);
+}
+html[data-theme='vs'] body {
+  background: #2d2d30;
+  font-size: 13.5px;
+  padding: 0 0 24px;
+}
+html[data-theme='vs'] a {
+  color: #3794ff;
+}
+html[data-theme='vs'] h1,
+html[data-theme='vs'] h2,
+html[data-theme='vs'] h3 {
+  color: #ffffff;
+  font-weight: 400;
+}
+
+/* Menu bar */
+html[data-theme='vs'] .site-nav {
+  max-width: none;
+  margin: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  gap: 2px 8px;
+  border-bottom: 1px solid #3f3f46;
+  background: #2d2d30;
+  font-size: 13px;
+}
+html[data-theme='vs'] .site-nav .brand {
+  font-weight: 400;
+  font-size: 13px;
+  color: #f1f1f1;
+  gap: 8px;
+}
+html[data-theme='vs'] .site-nav .brand svg {
+  width: 20px;
+  height: 20px;
+}
+html[data-theme='vs'] .site-nav .brand svg rect {
+  fill: #68217a;
+  stroke: #9b4f96;
+  rx: 2px;
+}
+html[data-theme='vs'] .site-nav .brand svg path {
+  stroke: #fff;
+}
+html[data-theme='vs'] .site-nav .links a,
+html[data-theme='vs'] .site-nav .slot button {
+  color: #f1f1f1;
+  font-weight: 400;
+  font-size: 13px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+html[data-theme='vs'] .site-nav .links a:hover,
+html[data-theme='vs'] .site-nav .slot button:hover {
+  background: #3e3e40;
+}
+html[data-theme='vs'] .site-nav .links a[aria-current='page'] {
+  background: #1b1b1c;
+  border-color: #333337;
+}
+html[data-theme='vs'] .theme-pick {
+  color: #9d9d9d;
+  font-size: 12px;
+}
+html[data-theme='vs'] .theme-pick select {
+  color: #f1f1f1;
+  background: #333337;
+  border: 1px solid #434346;
+  border-radius: 0;
+  font-size: 12px;
+}
+
+/* The page as an editor document tab */
+html[data-theme='vs'] .frame {
+  display: block;
+  margin: 6px 0 0;
+}
+html[data-theme='vs'] .frame-bar {
+  display: flex;
+  align-items: flex-end;
+  height: 24px;
+  padding: 0 8px;
+  background: #2d2d30;
+}
+html[data-theme='vs'] .frame-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 8px 0 10px;
+  color: #fff;
+  font-size: 12px;
+  background: #007acc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-theme='vs'] .frame-title::after {
+  content: '✕';
+  font-size: 10px;
+  opacity: 0.9;
+}
+html[data-theme='vs'] .frame-caps {
+  display: none;
+}
+html[data-theme='vs'] .frame-client {
+  display: block;
+  min-height: calc(100vh - 34px - 30px - 24px);
+  padding: 18px 20px 30px;
+  background: #1e1e1e;
+  border-top: 2px solid #007acc;
+}
+@media (max-width: 640px) {
+  html[data-theme='vs'] .frame-client {
+    padding: 12px 10px 24px;
+  }
+}
+
+/* Status bar */
+html[data-theme='vs'] .statusbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  color: #fff;
+  font-size: 12px;
+  background: #007acc;
+}
+html[data-theme='vs'] .statusbar .sb-right {
+  display: flex;
+  gap: 18px;
+}
+html[data-theme='vs'] .statusbar .clock {
+  display: inline;
+}
+
+/* Buttons and fields */
+html[data-theme='vs'] .frame-client button {
+  font-family: var(--f-body);
+  color: #f1f1f1;
+  border: 1px solid #555555;
+  border-radius: 2px;
+  background: #3f3f46;
+  box-shadow: none;
+  text-shadow: none;
+}
+html[data-theme='vs'] .frame-client button:hover:not(:disabled) {
+  background: #505050;
+  border-color: #007acc;
+}
+html[data-theme='vs'] .frame-client button:active:not(:disabled),
+html[data-theme='vs'] .frame-client button[aria-pressed='true'],
+html[data-theme='vs'] .frame-client button.on {
+  background: #094771;
+  border-color: #007acc;
+}
+html[data-theme='vs'] .frame-client button:disabled {
+  color: #6d6d6d;
+  background: #2d2d30;
+  border-color: #3f3f46;
+}
+html[data-theme='vs'] .frame-client :is(button.primary, .fdbg-btn.primary, .sbx-btn.primary, .bench-run, .spg-run, .net-send, .cx-try),
+html[data-theme='vs'] #concepts .cx-try {
+  color: #fff;
+  background: #0e639c;
+  border-color: #1177bb;
+}
+html[data-theme='vs'] .frame-client :is(button.primary, .fdbg-btn.primary, .sbx-btn.primary, .bench-run, .spg-run, .net-send, .cx-try):hover:not(:disabled) {
+  background: #1177bb;
+}
+html[data-theme='vs'] .frame-client :is(input[type='text'], input[type='number'], input:not([type]), textarea, select) {
+  color: #f1f1f1;
+  background-color: #333337;
+  border: 1px solid #434346;
+  border-radius: 0;
+}
+html[data-theme='vs'] .frame-client :is(input, textarea, select):focus {
+  border-color: #007acc;
+  outline: none;
+}
+
+/* Panels: tool windows */
+html[data-theme='vs'] .frame-client :is(.card, .sandbox-card, .lesson-list a, .fdbg, .qpg, .bench, .spg, .net, .tryit, .callout, .sec, .lane, .transport) {
+  box-shadow: none;
+}
+html[data-theme='vs'] .frame-client :is(.card, .lesson-list a):hover {
+  border-color: #007acc;
+  background: #2a2d2e;
+}
+/* Solution Explorer style selection */
+html[data-theme='vs'] .lesson-nav li a[aria-current='page'] {
+  color: #fff;
+  background: #094771;
+}
+html[data-theme='vs'] .lesson-nav li a:hover {
+  background: #2a2d2e;
+}
+html[data-theme='vs'] .lesson pre,
+html[data-theme='vs'] .lesson pre.astro-code {
+  background: #1e1e1e !important;
+  border: 1px solid #3f3f46;
+  border-radius: 0;
+}
+html[data-theme='vs'] .astro-code,
+html[data-theme='vs'] .astro-code span {
+  color: var(--shiki-vs) !important;
+}
+html[data-theme='vs'] .lesson :not(pre) > code {
+  background: #2d2d30;
+  border-color: #3f3f46;
+  color: #ce9178;
+}
+html[data-theme='vs'] #concepts {
+  background: #252526;
+  border-left: 1px solid #3f3f46;
+}
+html[data-theme='vs'] ::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+html[data-theme='vs'] ::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+html[data-theme='vs'] ::-webkit-scrollbar-thumb {
+  background: #424242;
+  border: 3px solid #1e1e1e;
+}
+html[data-theme='vs'] ::-webkit-scrollbar-thumb:hover {
+  background: #4f4f4f;
+}
+
+html[data-theme='vs'] :is(.bench, .bench-num, .bench-run, .callout, .card, .concepts-btn, .cx-card, .cx-try, .fdbg-btn, .fdbg-q, .fdbg-ref, .fdbg-sset, .fdbg-toolrow select, .fdbg-value, .lane, .lane-head .tag, .lesson pre, .lesson-list a, .lesson-nav li a, .ln-mobile, .net, .net-code pre, .net-btn, .net-toggle, .net-send, .net-ent, .net-log, .net-wire, .qpg, .qpg-in, .qpg-plan, .qpg-table, .sandbox-card, .sbx select, .sbx-in, .sbx-num, .sbx-bar, .sbx-btn, .sbx-entry, .sbx-item, .sbx-sec, .sbx-set, .sbx-table, .sec, .seg, .seg button, .spg, .spg-ed, .spg-ent, .spg-game pre, .spg-log, .spg-run, .spg-btn, .spg-x, .stat, .tcard, .term-pop, .unit-row, .unit-table-wrap, .inspect, .transport, .fdbg-code, .fdbg-log, .fdbg-now, .fdbg, .fdbg-variants, .tryit, canvas.map, .bench-out, .tc, .tcard) {
+  border-radius: 2px;
+}
+html[data-theme='vs'] .frame-client :is(.chip, .net-kind, .net-tag, .spg-tag, .spg-preset, .qpg-preset) {
+  border-radius: 2px;
+}
+
+html[data-theme='vs'] .lesson-nav li a {
+  color: #d4d4d4;
+}
+html[data-theme='vs'] .lesson-nav {
+  max-height: calc(100vh - 60px);
+}

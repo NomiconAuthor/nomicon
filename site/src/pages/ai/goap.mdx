@@ -1,0 +1,122 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Goal-oriented action planning
+order: 4
+part: Trees and plans
+summary: 'Instead of writing what to do, describe what each action needs and what it changes, give the agent a goal, and let a search find the sequence. World state as facts, A* over states, context-dependent costs, and what it takes to execute a plan in a world that won''t sit still.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Utility AI and behaviour trees both choose the *next* action. Neither knows that recharging now is only worth it because casting comes after. **Goal-oriented action planning** (GOAP) works the other way round: give the agent a **goal**, describe each action by what it **needs** and what it **changes**, and search for a sequence of actions that gets from the current state to the goal.
+
+GOAP was made famous by Jeff Orkin's AI for *F.E.A.R.* (2005), whose enemies flanked, took cover and flushed players out of hiding without anyone scripting those sequences. It's a game-sized version of STRIPS, a planning formalism from 1970s robotics.
+
+## Facts, actions, goals
+
+The planner doesn't see the arena. It sees a handful of **facts**, each true or false: *in range*, *in cover*, *staff charged*, *spare crystals*, *carrying potion*, *potion at shrine*, *healthy*, *enemy dead*.
+
+Each **action** has:
+
+- **preconditions**: facts that must hold before it can run (*CastBolt* needs *in range* and *staff charged*);
+- **effects**: facts it makes true or false (*CastBolt* makes *enemy dead* true; *Get crystals* makes *spare crystals* true but *in cover* and *in range* false, because the crystal cache is at the back);
+- a **cost**, which can depend on the state (*Recharge* costs 1 in cover and 4 in the open).
+
+A **goal** is a set of facts to make true: *enemy dead*, or *healthy*.
+
+## Planning is a search
+
+A state is the set of facts. Applying an action whose preconditions hold gives a new state. That's a graph, and finding the cheapest sequence of actions is a shortest-path problem, so the planner is A*: the same algorithm as in the [pathing lab](/pathing-lab/), over world states instead of grid cells. The heuristic here is the number of goal facts still false.
+
+<AiWidget kind="goap" />
+
+From the default state (an enemy out of range, an empty staff, spare crystals), the plan for *Kill the enemy* is **Approach → TakeCover → Recharge → CastBolt**, cost 7. Nobody wrote that sequence. The planner found that recharging in the open costs 4 but recharging in cover costs 1, and casting from cover costs 2 instead of 4, so getting into range and then into cover beats recharging on the spot (Recharge, Approach, CastBolt would cost 10).
+
+Things to try:
+
+- **Turn off *spare crystals*.** The plan grows a *GetCrystals* at the front, and the search expands about twice as many states to find it.
+- **Turn on *staff charged*.** Now it's *Approach → CastBolt*: taking cover first would cost the same, and the search stops at whichever it reaches first.
+- **Goal *Get healthy*, with *healthy* off.** *FetchPotion → TakeCover → DrinkPotion*. Turn off *potion at shrine* and there's no plan at all: the search exhausts every reachable state and reports failure. That's an answer too, and the agent needs a fallback goal.
+- **Play** the search, or step through it one expansion at a time, and watch g (cost so far) and h (goal facts still false) decide what's explored next. Every row is a distinct state; the search never revisits one.
+
+```cpp
+using Facts = uint32_t;                       // one bit per fact
+
+struct Action {
+    const char* name;
+    Facts pre_mask, pre_value;                // (state & pre_mask) == pre_value
+    Facts eff_mask, eff_value;                // state = (state & ~eff_mask) | eff_value
+    float (*cost)(Facts state);
+};
+
+std::vector<const Action*> plan(Facts start, Facts goal_mask, Facts goal_value, std::span<const Action> actions) {
+    struct Node { Facts s; float g, f; int parent; const Action* via; };
+    std::vector<Node> nodes{{start, 0, (float)std::popcount((start ^ goal_value) & goal_mask), -1, nullptr}};
+    std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>, std::greater<>> open;
+    std::unordered_map<Facts, float> best{{start, 0.0f}};
+    open.push({nodes[0].f, 0});
+    while (!open.empty()) {
+        int i = open.top().second; open.pop();
+        Node n = nodes[i];
+        if (n.g > best[n.s]) continue;                                    // stale entry
+        if ((n.s & goal_mask) == goal_value) {                            // reached the goal
+            std::vector<const Action*> out;
+            for (int k = i; nodes[k].via; k = nodes[k].parent) out.insert(out.begin(), nodes[k].via);
+            return out;
+        }
+        for (const Action& a : actions) {
+            if ((n.s & a.pre_mask) != a.pre_value) continue;
+            Facts s = (n.s & ~a.eff_mask) | a.eff_value;
+            float g = n.g + a.cost(n.s);
+            auto it = best.find(s);
+            if (it != best.end() && it->second <= g) continue;
+            best[s] = g;
+            float h = (float)std::popcount((s ^ goal_value) & goal_mask);
+            nodes.push_back({s, g, g + h, i, &a});
+            open.push({g + h, (int)nodes.size() - 1});
+        }
+    }
+    return {};                                                            // no plan
+}
+```
+
+With a few dozen facts in a bitset and a dozen actions, a plan takes microseconds. Orkin's planner searched *backwards* from the goal, looking for actions whose effects satisfy unmet goal facts; that tends to explore fewer states when there are many actions. The forward version is easier to follow and debug, and fine at this size.
+
+<Tip kind="warn" title="This heuristic isn't quite admissible">
+"Goal facts still false" can overestimate when one action makes several goal facts true at once, so A* isn't guaranteed to find the cheapest plan. In practice plans are short and it rarely matters; if it does, use a smaller heuristic (the count divided by the most goal facts any one action can set) or zero, which makes it Dijkstra.
+</Tip>
+
+## Executing a plan
+
+A plan is a guess about the future, and the arena doesn't cooperate. Most of the work of a GOAP agent is in running the plan, not finding it:
+
+- **Map facts to the world.** Every tick, the agent recomputes its facts from its factors (*in range* is distance ≤ 12 m; *healthy* is health ≥ 60). The symbolic model is coarse: *staff charged* is true with one charge left.
+- **Advance when a step's effects hold.** *TakeCover* is done when the agent is in cover.
+- **Replan when the plan breaks.** If the next step's preconditions are false (the staff ran dry mid-*CastBolt*), or a step takes far too long, or the goal changes, plan again from the current facts.
+- **Choose the goal.** GOAP plans *how*; something else decides *what for*. Here it's a short priority list (heal if hurt, fight if enemies, restock if idle), and in real games it's often utility scoring.
+
+In the arena (next lesson), the GOAP agent replans about 33 times in a three-minute fight and expands 6.5 states per plan. That's its cost profile: nothing most ticks, a small search occasionally. A behaviour tree, by contrast, does a little work every tick.
+
+## Strengths and weaknesses
+
+**What GOAP does well:**
+
+- **Emergent sequences.** Add an action (*ThrowFirebomb: needs a firebomb, makes the enemy leave cover*) and the agent uses it wherever it helps, without touching any other behaviour.
+- **Context-dependent costs** give sensible choices for free: recharge in cover, heal in cover.
+- **Different agents, same planner.** A goblin without a potion action simply never plans to heal.
+
+**Where it struggles:**
+
+- **Designers lose direct control.** "Why did it do that?" needs the plan and the search on screen, not just the current action.
+- **The symbolic model is a lie.** Facts are a coarse summary, and the gap between "in cover" the fact and cover the geometry is where the bugs live. Every fact is a small sensing problem.
+- **State spaces grow.** Each fact doubles the number of possible states. Keep the facts few and the actions per agent type small.
+- **Plans go stale.** A fast-changing fight means frequent replanning, and an agent that replans every tick is a slow, confusing utility system.
+
+After *F.E.A.R.*, planners like this appeared in games such as *Tomb Raider* (2013) and *Middle-earth: Shadow of Mordor*. Combat is only one fit: it suits any domain where actions chain through preconditions, like a colony-sim worker who needs an axe before chopping and a free hand before hauling, or a guard who investigates a noise, raises the alarm and fetches help.
+
+## Takeaways
+
+- GOAP describes **actions by preconditions, effects and cost**, and finds sequences with **A\* over world states**.
+- **Costs that depend on the state** produce sensible, unscripted sequences.
+- Most of the engineering is in **execution**: mapping facts to the world, advancing, and replanning when the plan breaks.
+- Something else (often **utility**) chooses the goal.

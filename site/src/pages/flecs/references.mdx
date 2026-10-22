@@ -1,0 +1,57 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Holding on to component references
+order: 3
+part: Storage and identity
+summary: A reference to a component is a pointer into a table column. Here is everything that silently moves it, what reading or writing through it then does, and the patterns that stay safe.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+`ensure<T>()`, `get_mut<T>()`, the `T&` an `each()` hands you: all of these are plain pointers into storage. For a normal component that's a slot in a table column, row *n* of the `T` array. Nothing tracks that pointer. If the row moves or the array is reallocated, the reference keeps pointing at the old address, and C++ will happily read and write through it.
+
+From the [archetypes lesson](/flecs/archetypes/) you already know the three things that move a row:
+
+1. **The entity itself changes type.** Any add or remove on it, including an `ensure<U>()` that adds a component it didn't have, moves it to another table.
+2. **Another entity leaves its table.** Deleting or moving a neighbour swaps the table's last row into the hole. If that last row was yours, your entity's row index changed.
+3. **The table grows.** Tables allocate room for a number of rows. When one more entity arrives than fits, every column is reallocated to a bigger block, and **every** reference into that table dangles, even for entities nobody touched.
+
+The third one is the nasty one. Your code holds `Position& p` for Ship, some unrelated system spawns a few entities with the same components, and `p` now points at freed memory.
+
+## Watch a reference go bad
+
+Step through this with the **References** panel in view. Each pin (◆) marks the row a reference points at. It turns red when the reference dangles, and stays on the row it *used* to point at. The reads and writes are real: the debugger dereferences the actual address in flecs' memory and reports what lives there now.
+
+<FlecsDebugger scenario="references" />
+
+What happens, line by line:
+
+- **`p = ship.ensure<Position>()`** points at row 0 of `[Position]`. Writing `p.x = 2` is fine.
+- **`ship.set<Velocity>(...)`** moves Ship to `[Position, Velocity]`. Ship's old row is deleted and the last row, Tree, is swapped into row 0. `p` still points at row 0 of the old table.
+- **`print(p.x)`** prints Tree's x. No crash and no warning: just the wrong entity's data.
+- **`p.x = 50`** overwrites **Tree's** Position. No flecs operation runs, so no `OnSet` fires and nothing records the change.
+- **`q = ship.ensure<Position>()`** re-fetches and is valid again. Then four new entities arrive in Ship's table. Watch the capacity in the table header (`rows used / rows allocated`): the table grows from 2 to 4 rows and then to 8, and each regrow reallocates the columns. `q` dangles even though Ship never changed.
+- **`print(q.x)`** reads freed memory. Depending on what has reused that memory, you'll see either the old value (and the bug hides) or garbage. Run it a few times with different steps in between and both happen.
+- **`flecs::ref<Position>`** remembers the entity and component as well as the address. On every access it compares a version number on the table it last saw. If anything changed it looks the entity up again, and if the entity was deleted it returns null. It costs a check per access, but it doesn't dangle.
+
+Now switch the setup to **Position is Sparse** and run it again. Sparse values live outside the tables (see [choosing storage](/flecs/storage-traits/)) and keep their address when the entity changes tables or the table grows. Every reference stays valid, until the component itself or the entity is removed.
+
+## Safe patterns
+
+**Keep references short-lived.** Take a reference, use it, and drop it before anything structural can happen: no add, remove, set of a *new* component, delete or entity creation in between. That includes calls into code that might do those things.
+
+**Re-fetch after any structural change.** If you have to change the entity's type in the middle, get the reference again afterwards. Treat `ensure<T>()` for a component the entity might not have as a structural change.
+
+**Use `flecs::ref` for references you keep around**, such as a camera's target or a UI panel's selected entity. Use entity ids (and `is_alive`) for anything that lives longer than a frame.
+
+**Inside systems and observers, mutate through the stage.** System iteration is safe because operations through the stage (the entity handles a C++ iterator gives you, `it.stage()`, or `it->stage` in C) are enqueued, so the table you're iterating can't move under you (see the [commands lesson](/flecs/commands/)). Operations on the real world inside a callback (`it.world()` in C++, `it->world` in C) are applied immediately, and reintroduce exactly the bugs above.
+
+**Make the component Sparse** when stable addresses are part of its design: things that hold pointers to each other, or that other systems cache pointers into.
+
+<Tip kind="warn" title="No debug check will catch this">
+flecs can't know that your code still holds an old pointer, so there is no debug flag that detects stale references. The one guard it has is a storage lock: while it runs hooks on a table, it asserts if something tries to add or remove rows in that same table. Everything else is down to discipline, code review, and keeping reference lifetimes visibly short.
+</Tip>
+
+<Tip title="A quick rule for reviews">
+When you see a `T&` or `T*` from flecs, look for any line between where it's taken and where it's last used that could add, remove, create or delete. If there is one, the reference needs re-fetching or a `flecs::ref`.
+</Tip>

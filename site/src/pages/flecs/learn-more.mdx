@@ -1,0 +1,53 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Where to learn more
+order: 19
+part: Wrapping up
+summary: The official manuals, the examples worth reading first, real projects built on flecs, and where people ask questions.
+---
+import Tip from '../../components/lesson/Tip.astro';
+
+These lessons cover the parts of flecs that are easiest to get wrong. The official documentation covers everything, and it's good. Here's where to go next, roughly in the order that helps most.
+
+## The manuals
+
+- **[Designing with Flecs](https://www.flecs.dev/flecs/DesignWithFlecs.html)**: the author's own guidance on structuring entities, components, systems and modules. Read it after this course and much of it will feel familiar.
+- **[Quickstart](https://www.flecs.dev/flecs/Quickstart.html)** and **[Entities and components](https://www.flecs.dev/flecs/EntitiesComponents.html)**: the full API surface for the basics, including ids, names and entity ranges.
+- **[Queries](https://www.flecs.dev/flecs/Queries.html)** and **[the query language](https://www.flecs.dev/flecs/FlecsQueryLanguage.html)**: every term, operator and traversal option.
+- **[Systems](https://www.flecs.dev/flecs/Systems.html)**: phases, custom pipelines, sync points, immediate systems and threading.
+- **[Observers](https://www.flecs.dev/flecs/ObserversManual.html)**: events, custom events, and what each event delivers.
+- **[Relationships](https://www.flecs.dev/flecs/Relationships.html)**, **[hierarchies](https://www.flecs.dev/flecs/HierarchiesManual.html)** and **[prefabs](https://www.flecs.dev/flecs/PrefabsManual.html)**.
+- **[Component traits](https://www.flecs.dev/flecs/ComponentTraits.html)**: Sparse, DontFragment, CanToggle, Exclusive, cleanup policies and the rest, in one place.
+- **[Flecs Script](https://www.flecs.dev/flecs/FlecsScript.html)** and **[the remote API](https://www.flecs.dev/flecs/FlecsRemoteApi.html)**.
+- **[FAQ](https://www.flecs.dev/flecs/FAQ.html)**, and the general **[ECS FAQ](https://github.com/SanderMertens/ecs-faq)** if you're explaining ECS to someone else.
+
+All of these are linked from the [documentation index](https://www.flecs.dev/flecs/Docs.html), which also lists videos, engine integrations (Unreal, Godot, raylib, SDL) and articles.
+
+## Code to read
+
+- **[The examples](https://github.com/SanderMertens/flecs/tree/master/examples)** in the flecs repository, for C and C++. Each one is small and runs on its own. The `relationships`, `queries`, `observers` and `reflection` folders pair well with the lessons here.
+- **[flecs-hub](https://github.com/flecs-hub)**: modules that build a small engine out of flecs (transform, physics, input, rendering), and **[flecs-game](https://github.com/flecs-hub/flecs-game)**, which ties them together. They show how real modules split components, systems and phases.
+- **[City](https://github.com/flecs-hub/city)** ([live](https://flecs.dev/city)) and **[Tower defense](https://github.com/SanderMertens/tower_defense)**: complete demos built from those modules.
+- **[Extermination Shock](https://github.com/Wizard-Of-Chaos/ExShock_code)** and **[ECS Survivors](https://github.com/ptidejteam/ecs-survivors)**: open-source games, so you can see how a full project organises itself.
+
+## Articles
+
+The author's articles explain why flecs is built the way it is, which makes the trade-offs in these lessons easier to reason about:
+
+- [Archetypes and vectorization](https://ajmmertens.medium.com/building-an-ecs-2-archetypes-and-vectorization-fe21690805f9) and [storage in pictures](https://ajmmertens.medium.com/building-an-ecs-storage-in-pictures-642b8bfd6e04): the storage this course visualises.
+- [Doing a lot with a little: ECS identifiers](https://ajmmertens.medium.com/doing-a-lot-with-a-little-ecs-identifiers-25a72bd2647): ids, versions and pairs.
+- [Building games in ECS with entity relationships](https://ajmmertens.medium.com/building-games-in-ecs-with-entity-relationships-657275ba2c6c) and [data-oriented hierarchies](https://ajmmertens.medium.com/building-an-ecs-data-oriented-hierarchies-62fb2847d100).
+- [Why storing state machines in ECS is a bad idea](https://ajmmertens.medium.com/why-storing-state-machines-in-ecs-is-a-bad-idea-742de7a18e59): the long version of "is it data or a state?".
+
+## Tools
+
+- **[The Explorer](https://flecs.dev/explorer)**: connect it to your running game to inspect entities, tables, queries, systems and memory. Its [script playground](https://www.flecs.dev/explorer/?host=flecs_explorer.wasm) runs Flecs Script in the browser with nothing to install.
+- **[The sandbox on this site](/flecs/sandbox/)**: a live world for poking at storage and observers.
+
+## People
+
+The **[flecs Discord](https://discord.gg/BEzP5Rgrrp)** is active, friendly, and where much of the practical knowledge on this site comes from: people sharing what they measured, what surprised them, and what worked in their games. Search it before asking, since most questions have come up before, and bring numbers if you're asking about performance.
+
+<Tip title="flecs moves quickly">
+These lessons run against current flecs master, and the behaviour you've stepped through is what that build does. Releases change things: APIs get renamed, defaults change, slow paths get faster. When something here disagrees with the docs for the version you use, trust the docs and the [release notes](https://github.com/SanderMertens/flecs/releases), and when it disagrees with what you measure, trust the measurement.
+</Tip>

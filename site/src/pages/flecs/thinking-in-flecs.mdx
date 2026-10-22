@@ -1,0 +1,75 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Thinking in flecs
+order: 18
+part: Wrapping up
+summary: 'Everything so far, as a way of designing. A worked redesign of a typical game character, the questions to ask before adding a component, tag or relationship, and how to check your choices instead of guessing.'
+---
+import Tip from '../../components/lesson/Tip.astro';
+import TryIt from '../../components/lesson/TryIt.astro';
+
+Each lesson has been about one mechanism. This one is about the habit they add up to: designing around **how data is accessed and how often it changes**, rather than around what things *are*. The mechanisms only pay off when the design leans on them.
+
+## A redesign
+
+Here's a character the way it often starts, as one object with everything a character has:
+
+```cpp
+struct Character {
+    float health, hunger, hunger_rate;
+    Entity target;
+    std::vector<Buff> buffs;
+    bool stunned;
+    std::vector<Item> inventory;
+};
+```
+
+Now take each piece and ask who reads it, who writes it, and how often.
+
+**`hunger` and `hunger_rate`** are updated every tick for every character, by one system that touches nothing else. Make them their own components. If that system is the hottest thing you run, consider putting a character's stats on a separate entity, so every stats entity shares one table and the tick is one tight pass. The cost moves to the rarer "show me this player's stats" lookup. ([The query language](/flecs/query-language/) has the measured version of this trade.)
+
+**`health`** is read by many systems and written by a few. A plain component, on the character.
+
+**`target`** is one entity pointing at another. If nothing ever asks "who is targeting X?", an entity id inside a component is the cheapest option: no extra tables, no index. If you do need that question answered, make it a relationship, and pick `DontFragment` so characters with different targets don't split into a table each. ([Relationships](/flecs/relationships/) and [fragmentation](/flecs/fragmentation/).)
+
+**`buffs`** is a list of things with their own data and lifetimes. Make each buff an entity: a `Duration`, an effect component, and a link to the character that deletes the buff with it. Pick that link with fragmentation in mind: `(ChildOf, character)` gives every character its own table of buffs, so a thousand buffed characters means a thousand small tables. A `Parent` hierarchy, or your own `DontFragment` relationship with an `(OnDeleteTarget, Delete)` policy, keeps every buff of one kind in one table. Either way, a single system iterates the buffs, expired ones are deleted like any entity, and when the character dies its buffs go with it. ([Deleting](/flecs/deleting/).)
+
+**`stunned`** is a boolean that flips often. As a regular tag, every stun moves the character between tables twice, once on and once off. As a value it's free to change, but every system has to check it. `CanToggle` keeps the component and flips a bit, and a `DontFragment` tag keeps the character in its table while staying queryable. Choose by how often it flips and how many systems need to skip stunned characters. ([Choosing storage](/flecs/storage-traits/).)
+
+**`inventory`** is items, which are things in their own right, with kinds that share data. Items become entities that inherit their kind from a prefab (`(IsA, Sword)`) and point at their owner with a relationship. Item stats live once on the prefab, and "every item this character has" is a query. As with buffs, a fragmenting owner relationship splits items into a table per owner as well as per kind; with many characters, make it `DontFragment`. ([Prefabs](/flecs/prefabs/).)
+
+None of these choices is the "flecs way" on its own. They're each the answer to a question about access and change, and the same field can get a different answer in a different game.
+
+## Questions to ask before you add something
+
+**Is it data or a state?** Data that changes value is a component, and writing it is free. A state that changes *membership* (alive/dead, in combat, selected) is a structural change every time it flips. That's fine for things that change rarely, and worth a storage trait or a value for things that change every few frames.
+
+**Who iterates it, and with what?** Components that are always read together should end up in the same table, which they do if the same entities have them. Data only one rare path reads doesn't need to be on the hot entities at all.
+
+**Does anything need to *query* by it?** If yes, it's a component, tag or relationship. If no, a field in an existing component is often simpler and cheaper.
+
+**How many distinct values will exist?** A relationship target or a tag that varies per entity creates a table per value. Ten factions is fine. Ten thousand targets is fragmentation, so use `DontFragment` or an id in a component.
+
+**Who must react to it, and when?** Hooks own a component's resources; observers react to changes; systems do per-frame work. If a reaction must happen *now* rather than at the next sync point, that's a design decision with a cost (an immediate system, or doing it outside iteration), not something to discover later.
+
+**How long will anyone hold on to it?** Entity ids are for keeping. Component references are for using right now. ([References](/flecs/references/).)
+
+<Tip title="When a change has to be visible right away">
+It depends on who needs to see it. If a **later system** in the same frame needs it, declare the write (`.write<T>()`, or `[out] T()` in the query language) and the pipeline merges the queue before that system runs. If the **same system** needs it partway through its own iteration, make the system `immediate` and write through `it.world()` instead of the stage; that system then runs single-threaded. If it only needs to be visible next frame, let the command queue do its job.
+</Tip>
+
+## Measure instead of guessing
+
+Most of the advice above is about trade-offs, and the right side of a trade-off depends on your counts. flecs will tell you what's going on:
+
+- **The Explorer.** Connect it to your running game (`world.set<flecs::Rest>({})`, then open [flecs.dev/explorer](https://flecs.dev/explorer)) to browse entities, tables, queries and systems. Import the statistics module (`world.import<flecs::stats>()`) and its front page shows memory use, broken down, so "how much does this relationship cost?" has an exact answer.
+- **Table counts.** If the number of tables keeps growing as you play, something is fragmenting. Find which ids appear in the most tables.
+- **System callbacks.** A system called hundreds of times per frame for a handful of entities is iterating many small tables.
+- **Query plans.** When a query is slow, read its plan before rewriting it.
+- **Benchmarks with your own numbers.** The benchmarks on this site run in WebAssembly with made-up counts. The ratios are the lesson, and your counts are the answer.
+
+<TryIt preset="empty">Start from an empty world and model something from your own game: one entity per thing, and watch the tables it ends up in.</TryIt>
+
+<Tip kind="note" title="Change your mind cheaply">
+Because systems and queries match by components rather than by type, changing a design (a tag into a `DontFragment` tag, a field into a relationship) usually means changing the definition and the few places that write it, not every system that reads it. That's the real payoff of thinking this way: getting a choice wrong is cheap to fix, as long as you notice.
+</Tip>

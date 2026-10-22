@@ -1,0 +1,77 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Reflection, scripts and engine resources
+order: 16
+part: Engine integration
+summary: 'flecs only knows the size of your components until you tell it what is inside them. What needs that, what scripts really do when they assign values, and how to tie engine resources (physics bodies, meshes) to components so every path that creates them works.'
+---
+import FlecsScript from '../../components/FlecsScript.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+When you register `Position` as a component, flecs learns its size, its alignment and (in C++) how to construct, copy, move and destroy it. That is enough to store it, move it between tables and hand it to your systems. It is not enough to *read* it: flecs can't tell that the 8 bytes are two floats called `x` and `y`.
+
+**Reflection** is that missing description. It lives in the world as more components on the component's entity (a struct with members, an enum with constants, and so on), and it's what lets flecs turn bytes into `{"x": 1, "y": 2}` and back.
+
+## What needs it, and what doesn't
+
+Queries, systems, observers, relationships and storage don't need reflection at all. Everything that converts values to or from text does:
+
+- **Flecs Script** assigning `Position: {x: 1, y: 2}`.
+- **JSON**: `entity.to_json()`, `world.to_json()`, serialising a save game, the REST API.
+- **The Explorer**: its inspector shows nothing but component names for unreflected types.
+- **Units and ranges** on members, used by the Explorer and by your own tools.
+
+So reflection is optional for a game that never looks at its data from outside, and becomes essential the moment you want scripts, a level format, live inspection or networking that serialises components.
+
+```cpp
+// C++: describe the members. Enums are reflected automatically.
+world.component<Position>()
+    .member<float>("x")
+    .member<float>("y");
+```
+
+In C the `ECS_STRUCT` / `ECS_ENUM` macros (or `ecs_struct` with a member list) do the same, and a script can declare a component with `struct Position(x: f32, y: f32)`, which comes with reflection built in.
+
+## Try it
+
+The game here has registered `Position`, `RigidBody` and a `Shape` enum with reflection, and `Health` *without* it. It also has a pretend physics engine: one body per entity with a `RigidBody`, kept in sync by two observers. Open **What the game registered** to see the C++ it stands in for. Then work through the presets in order.
+
+<FlecsScript />
+
+## A script is ordinary ECS operations
+
+Nothing about a script is special at runtime. `Crate { RigidBody: {...} }` creates (or finds) the entity `Crate` and calls `set` on it. So:
+
+- **Every assignment is a set.** `OnSet` fires, exactly as if your C++ had called `entity.set<RigidBody>()`. Re-running a script sets the values again and fires `OnSet` again, even if nothing changed.
+- **Hooks and observers don't know who called.** That's the point: if your physics, rendering or audio glue lives in hooks or observers, entities from scripts, from code, from prefabs and from the network all get resources through the same path. If it lives in a "spawn crate" function instead, the first entity a script creates is broken.
+- **Prefabs follow the usual rules.** Instances copy the prefab's components (unless the component is marked `(OnInstantiate, Inherit)`; see [prefabs](/flecs/prefabs/)), so each copy fires the glue, and editing the prefab later doesn't change instances that already exist.
+
+## Engine resources: the pattern
+
+The physics glue in the playground is the shape to copy for anything that owns memory outside flecs: a Jolt or PhysX body, a GPU mesh, an audio voice.
+
+1. **The component holds authored data only.** `RigidBody` is shape and mass, the things a script, a level file or the Explorer should be able to set. The engine's handle isn't in it.
+2. **The handle lives elsewhere.** Either in a map keyed by entity (as here), or in a separate runtime-only component such as `PhysicsBody { BodyID id; }` that the glue adds. That component needs no reflection, and nothing authored can overwrite the handle with zero.
+3. **`OnSet` is create-or-update.** It fires on the first set and on every set after that, so it must check for an existing resource first. Creating unconditionally leaks a body every time a script or the network re-sends the value.
+4. **`OnRemove` destroys.** It runs when the component is removed, when the entity is deleted, and when a parent's deletion cascades to it, so one place covers every way the resource can go away.
+
+<Tip title="Hooks or observers?">
+A component has **one** set of hooks (`on_add`, `on_set`, `on_remove`, plus construct/copy/move/destroy). On add and set they run before any observer, and on remove after them (the [observers lesson](/flecs/observers/) has the full order), so an observer never sees the component without its resource. That makes hooks the natural owner of a resource that belongs to the component itself: physics glue for `RigidBody` in your own engine is a hook. Observers can be added by anyone, any number of times, so they suit reactions from other modules and components you don't own (hooks can only be set once, so a library's component may already have them). The playground uses observers only because they're easier to show; the logic is the same.
+</Tip>
+
+<Tip kind="warn" title="Don't branch on the event for prefab instances">
+In the flecs build on this page, when a prefab is instantiated the `OnSet` observer for the copied component runs with the iterator's event reported as `OnAdd`. If one observer listens for several events and switches on `it.event()`, it can take the wrong branch for instances. Give each event its own observer, as the glue here does.
+</Tip>
+
+## Types reflection can't describe
+
+Reflection covers structs, enums, bitmasks, fixed arrays, and (with a little help) vectors and strings. It can't describe a C `union` or a `std::variant`, because nothing in the bytes says which alternative is active. Two ways out:
+
+- **Model the alternatives as data flecs understands.** One component per alternative, or an exclusive relationship to say which one applies (`(Weapon, Sword)` plus a `Sword` component with its own stats). Each part has its own reflection, and you can query by kind, which a variant never allowed.
+- **Make it opaque.** An opaque type tells flecs "present this as some other reflected type" and provides callbacks to serialise and assign it. That's how containers like `std::string` and `std::vector` are exposed, and it works for a variant too: you choose how it looks in JSON, and your callbacks do the conversion.
+
+Pointers and engine handles don't mean anything outside the running process, which is another reason to keep them out of the components you reflect.
+
+<Tip kind="note" title="Reflection costs nothing per entity">
+The description is stored once per component type, as a handful of entities. It doesn't change how components are stored or iterated, so describe every component you might ever want to see in the Explorer.
+</Tip>

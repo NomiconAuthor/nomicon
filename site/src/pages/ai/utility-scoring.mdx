@@ -1,0 +1,133 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Utility AI, scoring with curves
+order: 1
+part: Utility
+summary: 'Replace hand-tuned score arithmetic with a structure that scales: factors describe the world, considerations turn one factor into a 0 to 1 score through a response curve, and a behaviour''s score is the product of its considerations. With a live inspector to poke at.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Most game AI starts the same way. Each behaviour gets a function that returns a score, and the agent does whatever scored highest:
+
+```cpp
+float score_heal(const Agent& a) {
+    float s = 0;
+    if (a.health < 30) s += 50;
+    if (a.has_potion)  s += 20;
+    if (a.under_attack) s -= 15;
+    return s;
+}
+```
+
+With four behaviours this works, and that's the trap. Every number is relative to every other behaviour's numbers, so they can only be tuned together. "Under attack" is worth −15 to healing but how much to recharging? Is a score of 60 high? Adding a fifth behaviour means re-reading the other four. It's scoring by feel, and it stops scaling quickly.
+
+**Utility AI** keeps the good part (every option gets a number, the best number wins) and gives the numbers a structure that does scale. The structure most people use today was popularised by Dave Mark's talks on the *Infinite Axis Utility System*.
+
+## Factors, considerations, behaviours
+
+There are three layers, and keeping them separate is most of the benefit.
+
+- **Factors** are plain facts about the world, in their own units: health 0–100, charges in the staff, distance to the nearest enemy in metres, damage taken in the last two seconds. Each one is computed once per agent per decision, and many behaviours share them.
+- **Considerations** each look at *one* factor and answer one question with a score from 0 to 1. The factor is first normalised into 0–1 over a range ("health 0 to 100", "distance 0 to 30 m"), then passed through a **response curve** that says how the answer changes as the factor does.
+- **Behaviours** (actions, options) are a list of considerations. A behaviour's score is the **product** of its considerations' scores, optionally times a weight.
+
+```cpp
+struct Consideration {
+    Factor factor;          // which number to read, e.g. Factor::Health
+    float  min, max;        // normalisation range, in the factor's units
+    Curve  curve;           // 0..1 in, 0..1 out
+};
+
+struct Behaviour {
+    ActionId action;
+    float weight = 1.0f;
+    std::vector<Consideration> considerations;
+};
+
+float score(const Behaviour& b, const Factors& f) {
+    float s = b.weight;
+    for (const Consideration& c : b.considerations) {
+        float x = std::clamp((f[c.factor] - c.min) / (c.max - c.min), 0.0f, 1.0f);
+        s *= c.curve(x);
+        if (s == 0.0f) break;               // vetoed: no need to look further
+    }
+    return s;
+}
+```
+
+Why these rules?
+
+- **Everything is 0 to 1**, so every behaviour is on the same scale. A score of 0.8 means "very appropriate" whichever behaviour it belongs to. A new behaviour can be designed on its own.
+- **The product works like AND.** Every consideration has to be at least somewhat satisfied for the behaviour to score well, and any consideration at zero vetoes it outright: no spare crystals means recharging scores 0, whatever else is true. You never write `if (reserve == 0) return 0;` again.
+- **Considerations are reusable data.** "Hurt", "enemy close" and "not exposed" turn up in several behaviours with different curves. Behaviours become a list in a data file that a designer can edit, rather than code.
+
+## Response curves
+
+The curve is where the design lives: it says *how much* a factor matters across its range. Most systems get by with four shapes plus a few modifiers:
+
+<AiWidget kind="curve" />
+
+- **Linear**, for factors that matter evenly across their range.
+- **Power** (`x^k`). Above 1 the score stays low until the input is high: urgency that builds late. Below 1 it rises fast and flattens: "a bit is nearly as good as a lot". Inverted, an exponent of 2 or 3 gives "matters a lot only when low", the classic shape for health in a heal behaviour.
+- **Logistic**, an S-curve: a threshold with a soft edge. "Health below about 40%" without the cliff edge of an `if`.
+- **Step**, a true threshold. Useful for genuine rules ("is there an enemy at all?"), but every step is a place where scores can jump, which comes back in [the next lesson](/ai/choosing-and-committing/).
+- **Output min and max** rescale the curve. Raising the minimum is how a consideration expresses "this matters, but it can't veto": with a floor of 0.5, being exposed halves a behaviour's score instead of zeroing it.
+
+## The inspector
+
+This is the whole decision for the arena agent used in the decision-making lessons, a battle-mage holding off waves of goblins: its staff holds six charges, it recharges from spare mana crystals, and it can carry one healing potion. Seven behaviours, three to five considerations each. Pick a situation or drag the factors, and click any small curve to edit it.
+
+<AiWidget kind="inspector" />
+
+Things to try:
+
+1. **Under attack in the open.** *Take cover* wins over *Attack*, 0.85 to 0.73. Click *Take cover › Hurt* and lower its output minimum: the agent becomes braver, and only takes cover once it's actually hurt.
+2. **Staff empty, in cover.** *Attack* is vetoed by *Charges left* (the red 0.00), and *Recharge* wins easily. Move **In cover** to *no*: *Not exposed* halves recharge's raw score and *Take cover* overtakes it. Nobody wrote "recharge in cover"; it falls out of two considerations.
+3. **Badly hurt, no potion.** *Get potion* wins, because the shrine has one. Set **Potion at the shrine** to *no* and its score drops to zero: the agent fights on, since nothing else makes sense.
+4. **Drag health down slowly** and watch *Attack* fade while *Take cover* and *Heal* rise. The crossovers are where the agent changes its mind, and they come from the curves' shapes, not from thresholds written anywhere.
+
+## Compensating for the number of considerations
+
+Multiplying has a side effect: the more considerations a behaviour has, the lower its score tends to be. Five considerations that are each a healthy 0.8 multiply to 0.33, while a behaviour with one consideration at 0.6 scores 0.6. The more carefully specified behaviour loses for being careful.
+
+The usual fix gives back part of the lost score, more for behaviours with more considerations:
+
+```cpp
+// After multiplying n considerations into `s` (before the weight):
+float mod     = 1.0f - 1.0f / n;
+float make_up = (1.0f - s) * mod;
+s = s + make_up * s;
+```
+
+With five considerations at 0.8, that lifts 0.33 to about 0.50. Turn **Compensation** off in the inspector: every score drops, and the behaviours with the most considerations drop furthest (*Get potion* has five, *Patrol* one and doesn't change). It's not a law of nature, just a correction that makes behaviours with different numbers of considerations comparable. In this arena it makes little difference (166 s average survival without it, 168 s with, over 40 fights), because the behaviours have similar counts; it matters more as counts spread.
+
+## Weights, and keeping them rare
+
+The weight multiplies the final score. It's tempting to use weights to fix every tuning problem, but that leads straight back to scoring by feel: a weight of 1.3 on one behaviour quietly changes how it compares with all the others. Use weights for genuine importance (here *Heal* is 1.1, so that at equal urgency the agent heals rather than fetches), and fix everything else in the curves, where the reason is visible.
+
+<Tip title="Show the scores in your game">
+The inspector above is the most useful debugging tool a utility system can have. Log or draw every behaviour's score, and every consideration's value, for the selected agent each decision. When an agent does something odd, the reason is right there: which consideration was too high, which curve too flat. Without it, utility AI is as opaque as the "vibes" version.
+</Tip>
+
+## Factors as data, and in an ECS
+
+Separating factors from considerations also tells you how to lay this out in an engine. In flecs terms:
+
+- A **sensing** system computes each agent's factors into a component (`Factors`, a struct of floats), from whatever it needs: queries for nearby enemies, the agent's own components, the navmesh.
+- A **decision** system reads `Factors` and the behaviour set (shared data, one per agent type, ideally in a prefab) and writes the chosen action. It touches no other entities, so it parallelises trivially.
+- **Action** systems run every tick and do the chosen action.
+
+Decisions don't need to run every tick: 2–5 times a second is common, and staggering agents (`entity_id % N == tick % N`) spreads the cost. Store the current action as a value, not as a tag per action, or every decision change moves the entity between tables (see [choosing storage](/flecs/storage-traits/)).
+
+<Tip title="Beyond the arena">
+The arena is a small skirmish because that keeps it compact, but nothing in the structure is about shooting. *The Sims* is the classic example: each object **advertises** how much it satisfies each need, and a Sim scores the adverts against its own needs through curves, so a new object adds behaviour without anyone touching the Sims. Strategy games score what to build next and where to send workers the same way, and a creature in a survival game scores hunting, fleeing and sleeping like the arena agent scores attacking and taking cover.
+</Tip>
+
+## Takeaways
+
+- **Factors** are facts in their own units; **considerations** turn one factor into 0–1 with a range and a **response curve**; a **behaviour** multiplies its considerations.
+- **The product is an AND**: any zero vetoes. Use an output minimum when a consideration should matter without vetoing.
+- **Curves carry the design.** Thresholds become shapes, and the reasons are visible and editable.
+- **Compensate** for consideration count; keep **weights** rare.
+- **Build an inspector** before you tune anything.

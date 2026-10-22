@@ -1,0 +1,206 @@
+/*
+ * Nomicon theme (the default): a dark violet page like the inside of an old book,
+ * amethyst accents, gold highlights, and Cinzel for display headings. Body text and
+ * code keep Roboto / Roboto Mono for readability. Change --f-display to swap the
+ * heading face. Everything is scoped to html[data-theme='nomicon'].
+ */
+html[data-theme='nomicon'] {
+  color-scheme: dark;
+  --bg: #120f1b;
+  --paper: #1a1627;
+  --raised: #241e35;
+  --ink: #f1ecf8;
+  --body: #d4cce2;
+  --muted: #a598bb;
+  --line: #3b3252;
+  --line-soft: #2a2340;
+  --accent: #b994ff;
+  --on-accent: #1a1030;
+  --gold: #e9bf68;
+  --good: #8fdcae;
+  --warn: #e9bf68;
+  --alert: #ff7f8e;
+  --c1: #e9bf68;
+  --c2: #6fd6e6;
+  --c3: #ff95c8;
+  --c4: #95e09a;
+  --c5: #b994ff;
+  --c6: #ffad70;
+  --c7: #8aa8ff;
+  --c8: #a9b6cc;
+  --focus: #c9a8ff;
+  --f-body: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  --f-mono: 'Roboto Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Canvas tokens (labs and widgets) */
+  --on-unit: #120f1b;
+  --swatch-edge: rgba(255, 255, 255, 0.14);
+  --wall: #6e6488;
+  --grid: #231d31;
+  --floor: #19152a;
+  --walker: #e9bf68;
+  --vehicle: #c79bff;
+  --cache: #7fd8c4;
+  --soft: #e6c86e;
+  --other: #9488a8;
+  --u2: #6fd6e6;
+  --u3: #ff95c8;
+  --u4: #95e09a;
+  --u5: #b994ff;
+  --u6: #ffad70;
+  --u7: #8aa8ff;
+  --u8: #a9b6cc;
+  --t-road: #5a4d3a;
+  --t-rough: #33493c;
+  --t-mud: #57392f;
+  --t-water: #27406a;
+  --closed: rgba(185, 148, 255, 0.2);
+  --open: rgba(185, 148, 255, 0.42);
+  --open-ring: rgba(201, 168, 255, 0.95);
+  --scan: rgba(233, 191, 104, 0.22);
+  --tree: rgba(212, 204, 226, 0.4);
+}
+
+html[data-theme='nomicon'] body {
+  background:
+    radial-gradient(1200px 520px at 50% -180px, rgba(140, 92, 240, 0.16), transparent 70%),
+    radial-gradient(900px 600px at 100% 100%, rgba(233, 191, 104, 0.04), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+html[data-theme='nomicon'] ::selection {
+  background: rgba(185, 148, 255, 0.35);
+}
+
+/* Display headings */
+html[data-theme='nomicon'] :is(h1, h2),
+html[data-theme='nomicon'] .site-nav .brand-name {
+  font-family: var(--f-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+html[data-theme='nomicon'] h3 {
+  color: #e8dcff;
+}
+
+/* Navbar */
+html[data-theme='nomicon'] .site-nav {
+  border-bottom: 0;
+  position: relative;
+}
+html[data-theme='nomicon'] .site-nav::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(185, 148, 255, 0.45) 20%, rgba(233, 191, 104, 0.5) 50%, rgba(185, 148, 255, 0.45) 80%, transparent);
+}
+html[data-theme='nomicon'] .site-nav .brand-name {
+  font-size: 1.22rem;
+  letter-spacing: 0.06em;
+  background: linear-gradient(180deg, #fff6e2, #e9bf68 120%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+html[data-theme='nomicon'] .site-nav .links a[aria-current='page'] {
+  background: rgba(185, 148, 255, 0.14);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-radius: 8px 8px 4px 4px;
+}
+
+/* Lesson titles get a small ornament: rule, diamond, rule. */
+html[data-theme='nomicon'] .lesson h1,
+html[data-theme='nomicon'] .intro h1 {
+  letter-spacing: 0.015em;
+  color: #f6eeff;
+  line-height: 1.2;
+}
+html[data-theme='nomicon'] .lesson h1::after,
+html[data-theme='nomicon'] .intro h1::after {
+  content: '';
+  display: block;
+  width: 180px;
+  height: 10px;
+  margin-top: 10px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M5 0 L10 5 L5 10 L0 5 Z' fill='%23e9bf68'/%3E%3C/svg%3E") center / 10px 10px no-repeat,
+    linear-gradient(90deg, transparent, rgba(185, 148, 255, 0.7) 45%, transparent 45%, transparent 55%, rgba(185, 148, 255, 0.7) 55%, transparent) center / 100% 1px no-repeat;
+}
+html[data-theme='nomicon'] .lesson h2 {
+  color: #f1e8ff;
+}
+html[data-theme='nomicon'] .lesson h2::before {
+  content: '✦';
+  color: var(--gold);
+  font-size: 0.6em;
+  vertical-align: 0.3em;
+  margin-right: 0.55em;
+  opacity: 0.85;
+}
+html[data-theme='nomicon'] .lesson .kicker,
+html[data-theme='nomicon'] .kicker,
+html[data-theme='nomicon'] .ln-home {
+  color: #c4a9f0;
+}
+
+/* Sidebar */
+html[data-theme='nomicon'] .lesson-nav li a[aria-current='page'] {
+  background: linear-gradient(90deg, rgba(185, 148, 255, 0.18), rgba(185, 148, 255, 0.04));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Cards (home and section indexes) */
+html[data-theme='nomicon'] .card {
+  background: linear-gradient(180deg, #1e1930, #17132a);
+  border-color: #30284a;
+  box-shadow: inset 0 1px 0 rgba(233, 191, 104, 0.12);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+html[data-theme='nomicon'] .card:hover {
+  border-color: rgba(185, 148, 255, 0.7);
+  box-shadow: inset 0 1px 0 rgba(233, 191, 104, 0.25), 0 6px 28px -10px rgba(140, 92, 240, 0.55);
+  transform: translateY(-1px);
+}
+html[data-theme='nomicon'] .card h2 {
+  color: #f6eeff;
+}
+html[data-theme='nomicon'] .go {
+  color: var(--gold);
+}
+
+/* Callouts: a gilded edge */
+html[data-theme='nomicon'] .callout {
+  background: linear-gradient(180deg, rgba(36, 30, 53, 0.9), rgba(26, 22, 39, 0.9));
+  border-color: #3a3052;
+  box-shadow: inset 0 1px 0 rgba(233, 191, 104, 0.1);
+}
+html[data-theme='nomicon'] .callout-t {
+  font-family: var(--f-display);
+  letter-spacing: 0.04em;
+}
+
+/* Code */
+html[data-theme='nomicon'] .lesson pre,
+html[data-theme='nomicon'] .lesson pre.astro-code {
+  background: #15111f !important;
+  border-color: #2e2643;
+}
+html[data-theme='nomicon'] .astro-code,
+html[data-theme='nomicon'] .astro-code span {
+  color: var(--shiki-tome) !important;
+}
+html[data-theme='nomicon'] .lesson :not(pre) > code {
+  background: #211b31;
+  border-color: #342b4b;
+  color: #ead9ff;
+}
+
+/* Prev / next */
+html[data-theme='nomicon'] .pn {
+  border-top: 0;
+  background: linear-gradient(90deg, transparent, rgba(185, 148, 255, 0.35), transparent) top / 100% 1px no-repeat;
+}

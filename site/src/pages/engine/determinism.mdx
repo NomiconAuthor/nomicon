@@ -1,0 +1,227 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Determinism
+order: 4
+part: Time
+summary: 'Same inputs, same outputs, every time. What breaks it (floats, containers, random numbers, threads, clocks), the levels of determinism you can aim for, and how to use worker threads and frame budgets without letting timing leak into the simulation.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A simulation is **deterministic** if the same starting state and the same inputs always produce the same result. It's what makes lockstep multiplayer, replays, rollback netcode, "send me the input file and I'll reproduce your bug" and golden-file tests possible.
+
+It sounds like the default. Computers are deterministic machines, after all. But a game simulation is full of things that quietly depend on *when* and *where* it ran: the order threads finished in, the address an allocator handed out, the CPU's floating-point unit, the frame rate. Each one is a small leak, and determinism is the work of finding and plugging them.
+
+[Game loops](/engine/game-loops/) covered the first step: a fixed timestep, so the simulation never sees the frame's delta time. This lesson is about everything else.
+
+## How deterministic do you need to be?
+
+There are roughly three levels, and choosing one up front saves a lot of pain.
+
+| Level | Guarantee | Needed for | Cost |
+|---|---|---|---|
+| **Bitwise, cross-platform** | Identical bits on every compiler, CPU and OS you ship | Lockstep RTS across PC/console/mobile, competitive replays shared between players | High. Strict floats or fixed point everywhere, your own maths library, constant vigilance |
+| **Same build, same machine type** | Identical bits for one binary on one platform | Replays, bug repro, regression tests, lockstep on a single platform | Moderate. Fixed step, ordered iteration, owned randomness, careful threading |
+| **Deterministic enough** | Close, and drift is detected and corrected | Most client/server games, rollback with an authority | Low. Checksums plus a way to resync |
+
+Most games that think they need the first level actually need the third: a server that's authoritative, clients that predict, and **desync detection** (a hash of the important state every N ticks) so drift becomes a correction instead of a mystery. Bitwise cross-platform determinism is a genuine engineering project; pick it on purpose.
+
+## Floating point: same maths, different answers
+
+Floating-point addition isn't associative. `(a + b) + c` rounds after the first addition, `a + (b + c)` rounds somewhere else, and the results can differ in the last bits. Any time the *order* of operations changes, the answer can change:
+
+<EngineWidget kind="floatorder" />
+
+Every row adds exactly the same 10,000 numbers. Only the order differs, and with values spanning many magnitudes, small ones get rounded away differently each time. The random-order button is what a parallel reduction looks like when partial sums are combined in whatever order threads finish: a different answer on most runs.
+
+Order is the big one, but not the only one:
+
+- **Fused multiply-add.** `a * b + c` can compile to one FMA instruction (one rounding) or a multiply then an add (two). Compilers contract to FMA by default on some targets (`-ffp-contract=fast` is GCC's default outside strict ISO mode). Pass `-ffp-contract=off` to GCC and Clang; on MSVC use `/fp:precise` and don't enable `/fp:contract`. Whatever you choose, use the same settings for every build that has to agree.
+- **`-ffast-math` / `/fp:fast`.** Explicitly allows reassociation, reciprocal approximations and ignoring NaNs. Incompatible with determinism, and often enabled in a release config by someone who wanted a few percent.
+- **Transcendentals.** `sin`, `cos`, `exp`, `pow` and `atan2` come from the platform's maths library and are *not* required to be correctly rounded. MSVC, glibc and Apple's libm can disagree in the last bit. Ship your own implementations for anything inside the simulation.
+- **x87 and extended precision.** Old 32-bit x86 code could keep intermediates in 80-bit registers and round only when spilling to memory, so results depended on register allocation. SSE2 (the default on x64) fixed this, but it's why old advice about float determinism is so gloomy.
+- **SIMD.** A vectorised loop sums in lanes and combines them at the end, which is a different order from the scalar loop. Whether the compiler vectorises can depend on optimisation flags, so debug and release builds can disagree.
+- **Denormals.** Flush-to-zero and denormals-are-zero modes are per-thread CPU flags. A library or driver that sets them on one thread changes results only there.
+
+What does work: IEEE 754 guarantees that `+ - * /` and `sqrt` are correctly rounded. With SSE2, no FMA contraction, no fast-math, your own transcendentals and a fixed order of operations, floats are bit-reproducible across x64 compilers and largely across ARM. It's achievable; it just needs discipline and a test that will catch the day someone breaks it.
+
+### Fixed point
+
+The alternative is to not use floats in the simulation at all. A fixed-point number is an integer with an implied scale (16.16 means "divide by 65,536"), and integer arithmetic is identical everywhere. The trade is real, though:
+
+- **Range versus precision.** 16.16 gives ±32,768 with a resolution of 1/65,536. A large map with fine physics doesn't fit, so you end up with several formats and conversions between them.
+- **Overflow.** Multiplying two 16.16 values needs a 64-bit intermediate. Forget once and positions wrap silently.
+- **Everything is yours.** Square roots, trig, normalisation, every library you might have used. Physics engines, pathfinding and animation libraries all assume floats.
+- **It's slower** for anything beyond add and multiply, and it doesn't vectorise as neatly.
+
+That's why many lockstep games use fixed point only for the state that must match (positions, health, timers), keep floats for presentation, and accept that it's a lot of work. "Deterministic enough" with desync detection is the common compromise: use strict floats, accept that two platforms *might* drift, and correct when they do.
+
+## Random numbers
+
+A random number generator is a deterministic sequence: seed it the same and it yields the same numbers. The problem is *who draws which number*. If two systems share one generator, any change in the order they run (a new system, a skipped one, a different thread schedule) shifts every number after it.
+
+Run the same tick several times with each strategy:
+
+<EngineWidget kind="rngstreams" />
+
+- **One shared generator** gives a different outcome whenever the processing order changes. Even single-threaded, adding an effect that draws one extra number reshuffles every loot roll after it.
+- **A generator per thread** looks like a fix and isn't. Which thread runs which unit depends on scheduling, so the same unit draws from a different stream each run.
+- **A counter-based random number** has no state at all. It's a hash of everything that identifies the question: `hash(world_seed, entity_id, tick, purpose)`. Ask the same question and you always get the same answer, regardless of order or thread.
+
+```cpp
+// A stateless, order-independent random number for the simulation.
+// Any good 64-bit mixer works: SplitMix64, PCG's output function, Philox (used by GPUs).
+inline uint64_t mix(uint64_t x) {
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ull;
+    x ^= x >> 27; x *= 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+inline uint64_t sim_rand(uint64_t seed, uint64_t entity, uint64_t tick, uint64_t purpose) {
+    return mix(seed ^ mix(entity ^ mix(tick ^ mix(purpose))));
+}
+// Uniform [0, n) without implementation-defined distributions:
+inline uint32_t sim_range(uint64_t r, uint32_t n) { return (uint32_t)(((r >> 32) * n) >> 32); }
+
+uint32_t loot = sim_range(sim_rand(world.seed, e.id, tick, Purpose::Loot), 100);
+```
+
+So "per thread or per process?" is the wrong axis. Streams should be **per question**: keyed by what is being decided, not by who is running the code. Where a stateful generator is more convenient (a system that draws many numbers in sequence), give it its own generator seeded from `sim_rand(seed, system_id, tick, 0)` at the start of the tick and only use it from that system, in a fixed order.
+
+<Tip kind="warn" title="The standard library will betray you">
+`std::mt19937` itself is fully specified, but `std::uniform_int_distribution`, `std::uniform_real_distribution` and `std::normal_distribution` are not: libstdc++, libc++ and MSVC produce different numbers from the same engine. Do the range reduction yourself. `rand()` differs between platforms entirely.
+</Tip>
+
+## The usual suspects
+
+Beyond floats and randomness, these are the bugs that actually turn up in desync reports:
+
+- **Iteration order of hash containers.** `std::unordered_map` order depends on bucket count, insertion history and the standard library. Iterating one to apply effects is a classic desync. Iterate something ordered, or collect and sort first.
+- **Pointer values.** Sorting by pointer, hashing pointers, or using an address as a tie-breaker changes with every allocation pattern and with ASLR. Use ids.
+- **Unstable sorts.** `std::sort` doesn't preserve the order of equal elements, and different implementations order them differently. Use `std::stable_sort` or add a tie-breaker (entity id) so there are no equal elements.
+- **Reading the clock.** Anything in the simulation that calls `clock()`, `now()` or uses the frame's delta time. Simulated time is `tick × dt`.
+- **Uninitialised memory and padding.** Reading an uninitialised field is undefined; hashing or comparing a struct with `memcmp` includes its padding bytes, which contain whatever was there before.
+- **Input timing.** Input must be stamped with the tick it applies to and applied at that tick, not "whenever it arrived".
+- **Floating-point state shared with other code.** A plugin, driver or audio thread that changes rounding or denormal modes.
+- **Presentation leaking into the sim.** Gameplay that reads an animation's current frame, a particle's position or whether something is on screen.
+- **Undefined behaviour.** Signed overflow, out-of-bounds reads, data races. Optimisers are allowed to do different things with it in different builds.
+
+<Tip title="Catch drift the moment it happens">
+Hash the simulation state every tick (or every N ticks) in debug builds and log it. Record a session, replay it, and compare the hashes: the first tick where they differ points at the system to look at. Run the same replay on every platform in CI and you'll find the FMA flag someone added before your players do. Hash *components*, not structs with padding, and hash in a defined order.
+</Tip>
+
+## Threads
+
+Threads are where determinism usually goes to die, because the order threads finish in is up to the operating system. The fix isn't to avoid threads; it's to make sure **the order things finish in can't affect the result**. Three rules cover most of it.
+
+**1. Partition, don't share.** Split work so each job owns a disjoint slice of the output: job *k* updates entities `[k×n/K, (k+1)×n/K)`. Jobs read shared state from the previous tick but never write it. This is what an ECS scheduler does when it runs systems with non-overlapping writes in parallel.
+
+**2. Buffer side effects, merge in a fixed order.** When jobs need to affect things outside their slice (spawn a projectile, deal damage to another unit, emit an event), they append to a **per-job output buffer**. After all jobs finish, the main thread merges the buffers in *job index* order, or sorts the combined commands by a stable key such as `(target_id, source_id, sequence)`. Completion order never appears in the result.
+
+```cpp
+struct DamageCmd { EntityId target, source; int32_t amount; };
+
+std::vector<std::vector<DamageCmd>> out(job_count);   // one buffer per job, not per thread
+parallel_for(job_count, [&](int job) {
+    for (EntityId e : slice(job)) attack(e, out[job]);  // append only to this job's buffer
+});
+for (auto& buf : out)                                  // merge by job index: deterministic
+    for (auto& cmd : buf) apply(cmd);
+```
+
+Buffers are per *job*, not per *thread*: a thread pool may run job 3 on any thread, but job 3 always writes `out[3]`. flecs' command queues work the same way: commands queued from multi-threaded systems are merged at the sync point in a fixed order.
+
+**3. Reduce in a fixed shape.** For sums, minimums and counters, each job writes its partial result to its own slot, and the slots are combined in index order (the "4 threads, then combine" row in the float widget is deterministic for exactly this reason). Atomic `fetch_add` on an integer is fine, since integer addition is associative. Atomic float accumulation is not.
+
+## Work that doesn't fit in a tick
+
+Some work takes longer than a tick: a long pathfinding request, a navmesh rebuild, an AI planner, a flow field for a thousand units. The natural thing is to hand it to a worker thread and use the result when it arrives. That's exactly what breaks determinism, because "when it arrives" depends on the machine.
+
+The widget runs six pathfinding jobs on two simulated machines. Each job needs the same amount of work on both; only how fast the worker happens to go differs. Compare the strategies:
+
+<EngineWidget kind="deadline" />
+
+- **Apply when ready.** The result enters the simulation on the first tick after the worker finishes. On a faster machine, or a less loaded one, units start moving a tick or two earlier, and the two simulations diverge. Fine for single-player games that don't replay; fatal for lockstep.
+- **A time budget per tick.** "Spend up to 4 ms per tick on pathfinding" sounds deterministic and isn't: how much work fits in 4 ms depends on the CPU, so the job finishes on a different tick on each machine. **A budget measured in time is never deterministic.**
+- **Fixed latency, wait if late.** Every request made at tick *T* is applied at tick *T + K*, always. If the worker hasn't finished when the simulation reaches *T + K*, the simulation **waits** for it. The result is deterministic, and the cost shows up as a stall in wall time, not as a different outcome. Pick *K* so stalls are rare on your minimum-spec hardware, and try lowering *K* in the widget to see the stalls grow.
+- **A budget in work units.** Do exactly 500 units of work per tick (nodes expanded, cells flooded, agents planned), however long that takes. Every machine finishes on the same tick. The cost moves to frame time: on a slow machine the tick takes longer, which the fixed-step loop absorbs, or slows down, as in [the clamp](/engine/game-loops/).
+
+The last two combine well, and that's the pattern most deterministic engines end up with: async jobs with a **fixed deadline in ticks**, sized in **work units**, with a stall only as the last resort.
+
+<Tip kind="note" title="Wall-clock budgets still have a place">
+Time-based budgets are the right tool for work that never feeds back into the simulation: streaming textures, rebuilding render caches, sorting particles, background LOD generation, presentation-only AI like crowd animation. The rule is simple: if the result can change what happens in the game, its timing must be measured in ticks and work, never in milliseconds.
+</Tip>
+
+## Implementing a frame deadline
+
+Here's what a deterministic async job system looks like in practice. The simulation requests work at tick *T*; the request carries the tick it's due. Workers do the work whenever they can. At the due tick, the simulation collects the result, waiting if it must, and applies results in a fixed order.
+
+```cpp
+struct AsyncJob {
+    uint64_t           id;          // assigned in request order: deterministic
+    uint64_t           due_tick;    // tick + latency, fixed when requested
+    std::function<void()> run;      // must only read the snapshot it was given
+    std::atomic<bool>  done{false};
+};
+
+class DeadlineScheduler {
+    static constexpr uint64_t Latency = 3;             // ticks between request and result
+    std::deque<std::unique_ptr<AsyncJob>> pending;     // in request order
+    uint64_t next_id = 0;
+    ThreadPool& pool;
+public:
+    explicit DeadlineScheduler(ThreadPool& p) : pool(p) {}
+
+    // Called from the simulation at tick `now`. The job gets a copy (or an immutable
+    // snapshot) of the inputs it needs, never a pointer into live simulation state.
+    // Returns the job's id; its result is applied at the due tick by collect().
+    uint64_t request(uint64_t now, std::function<void()> work) {
+        auto job = std::make_unique<AsyncJob>();
+        job->id = next_id++;
+        job->due_tick = now + Latency;
+        job->run = std::move(work);
+        AsyncJob& ref = *job;
+        pool.submit([&ref] { ref.run(); ref.done.store(true, std::memory_order_release); });
+        pending.push_back(std::move(job));
+        return ref.id;
+    }
+
+    // Called once per tick, at a fixed point in the tick, before systems that use results.
+    template <typename Apply>
+    void collect(uint64_t now, Apply&& apply, Telemetry& t) {
+        while (!pending.empty() && pending.front()->due_tick <= now) {
+            AsyncJob& job = *pending.front();
+            if (!job.done.load(std::memory_order_acquire)) {
+                auto start = now_seconds();
+                pool.help_until([&] { return job.done.load(std::memory_order_acquire); });
+                t.stall_ms += ms_since(start);            // late: we stalled, but stayed correct
+                t.late_jobs++;
+            }
+            apply(job);                                   // in request order, at the due tick
+            pending.pop_front();
+        }
+    }
+};
+```
+
+The details that make it work:
+
+- **Snapshot the inputs.** A job must read state as it was at tick *T*, not as it is when the worker gets round to it. Copy what it needs, or give it a read-only snapshot (double-buffered components, or a versioned navmesh) that the simulation won't modify until the job is collected.
+- **Apply at a fixed point.** `collect` runs at the same place in every tick, and jobs due on the same tick are applied in request order (or sorted by id). Never apply a result from inside the worker.
+- **Help while waiting.** `help_until` runs other pool jobs on the waiting thread rather than sleeping, so a stall costs as little as possible.
+- **Same latency for everyone.** The deadline is in ticks and the same on every machine. Don't adapt *K* at runtime based on how fast this machine is, or you've reintroduced the timing leak. If you must change it, change it as a simulation input, on a known tick, for every peer.
+- **Measure stalls.** Track how often jobs are late and by how much. If stalls are common, increase *K*, split the work, or make it cheaper; don't quietly switch to applying when ready.
+
+Long jobs can also be **time-sliced in work units** by the simulation itself instead of a worker: keep the search state (an open list, a partial plan) in the simulation, expand exactly N nodes per tick, and finish when it finishes. No threads, no stalls, fully deterministic, at the cost of using the simulation thread's time. Incremental pathfinders like the ones in the [pathing lab](/pathing-lab/) are a natural fit, because their state is already a resumable open list.
+
+<Tip kind="warn" title="Faster than real time, again">
+Fixed-latency jobs interact with [headless and fast-forward runs](/engine/game-loops/): at ×16, the simulation reaches *T + K* sixteen times sooner in wall time, so jobs are late far more often and the simulation stalls on them. That's correct (the result is identical) but it caps your fast-forward speed at how fast the workers go. For replay scrubbing and AI training, run with `help_until` from the start, or with more workers.
+</Tip>
+
+## Takeaways
+
+- **Decide what level you need.** Same-build determinism plus desync detection covers most games; bitwise cross-platform determinism is a deliberate project.
+- **Floats are deterministic only in a fixed order** with fixed compiler settings and your own maths functions. Fixed point trades that discipline for a different one.
+- **Key random numbers by the question, not the thread.** `hash(seed, entity, tick, purpose)` can't be reordered.
+- **Threads may run in any order; results must not depend on it.** Partition writes, buffer side effects per job, merge by index.
+- **Budgets in time are non-deterministic; budgets in ticks and work units are.** Give async work a fixed deadline and stall rather than apply it late.
+- **Hash the state every tick in testing**, so the first divergent tick tells you where to look.

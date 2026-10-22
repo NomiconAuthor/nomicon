@@ -1,0 +1,104 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Handles and allocators
+order: 2
+part: Memory
+summary: 'How to refer to things that get created and destroyed without dangling pointers (generational handles and slot maps), and how to get memory for them without asking malloc every time (arenas, pools and free lists).'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Games are full of objects that come and go: units, projectiles, particles, textures being streamed in and out. Other code needs to refer to them, and those references outlive the objects all the time. A unit targets another unit that dies; a material refers to a texture that gets unloaded.
+
+A raw pointer can't tell you when that's happened. It keeps pointing at the old address, which by then holds freed memory or a different object (the [references lesson](/flecs/references/) shows exactly this inside flecs' storage). A plain array index is better, but has the same flaw once slots are reused: index 3 used to be a goblin and is now a crate.
+
+## Generational handles
+
+The standard fix is a **handle**: an index into a table of slots, plus a **generation** counter. Each slot remembers its current generation, and destroying the object in a slot bumps it. A handle is only valid if its generation matches the slot's, so stale handles are caught instead of silently pointing at the slot's next occupant.
+
+Spawn a few objects, erase some, spawn again, and then `get` the old handles:
+
+<EngineWidget kind="slotmap" />
+
+What to notice:
+
+- **Freed slots form a free list.** Each empty slot stores the index of the next free one, so finding a slot is O(1) with no searching and no separate allocation: the list lives in the slots themselves (and the index can share storage with the dead value, in a union).
+- **Reuse is immediate.** The most recently freed slot is handed out first (it's the head of the list), which is exactly when an old handle is most likely to still be around.
+- **Stale handles fail safely.** `get` on an old handle returns null rather than the new occupant, and `erase` on one does nothing rather than destroying the wrong object.
+- **A handle is just a number.** Index and generation pack into 32 or 64 bits, so handles copy, serialise and hash like integers, and they survive the storage growing or moving, which pointers don't.
+
+This is exactly how [flecs entity ids](/flecs/entities/) work: the low 32 bits are an index into the entity index, and the version above it is this generation.
+
+```cpp
+struct Handle { uint32_t index; uint32_t gen; };
+
+template <typename T>
+class SlotMap {
+    struct Slot { T value; uint32_t gen = 0; uint32_t next_free; bool alive = false; };
+    std::vector<Slot> slots;
+    uint32_t free_head = UINT32_MAX;
+public:
+    Handle insert(T value) {
+        uint32_t i;
+        if (free_head != UINT32_MAX) { i = free_head; free_head = slots[i].next_free; }
+        else { i = (uint32_t)slots.size(); slots.emplace_back(); }
+        slots[i].value = std::move(value);
+        slots[i].alive = true;
+        return { i, slots[i].gen };
+    }
+    T* get(Handle h) {
+        if (h.index >= slots.size()) return nullptr;
+        Slot& s = slots[h.index];
+        return (s.alive && s.gen == h.gen) ? &s.value : nullptr;
+    }
+    void erase(Handle h) {
+        if (!get(h)) return;                 // stale or already gone
+        Slot& s = slots[h.index];
+        s.alive = false;
+        s.value = T{};                       // release what it held now, not on reuse
+        ++s.gen;                             // every old handle is now stale
+        s.next_free = free_head;
+        free_head = h.index;
+    }
+};
+```
+
+<Tip title="Engine resources want handles too">
+Textures, meshes, audio buffers, shaders: anything the engine can stream out, hot-reload or replace is better referred to by handle than by pointer. A material holding `TextureHandle` keeps working when the texture is reloaded into a different GPU allocation, and a stale handle after unloading becomes a "missing texture" fallback instead of a crash. Give each resource type its own handle type (`Handle<Texture>`, `Handle<Mesh>`) so they can't be mixed up.
+</Tip>
+
+### Variations worth knowing
+
+- **Dense storage.** Keep the objects packed in a separate array and let the slots point into it. Erasing swaps the last object into the gap and fixes up one slot. Iteration then walks a tight array with no holes, which is what you want for anything updated every frame (see [memory and the cache](/engine/memory-and-cache/)).
+- **Sparse sets.** An index-to-position array plus a packed dense array. flecs uses one for its entity index and for `Sparse` components.
+- **Generation overflow.** With 16 generation bits, a slot reused 65,536 times wraps around and an ancient handle could match again. Either use more bits, or retire a slot once its generation hits the maximum.
+
+## Allocators: memory with known lifetimes
+
+Every insert above needs memory from somewhere. `malloc` and `new` are general-purpose: they handle any size and any lifetime, from any thread, and pay for it with locks, per-block headers, searching, and fragmentation that builds up over a long session. Games usually know far more about their allocations than that, and a specialised allocator can turn that knowledge into speed and predictability.
+
+Allocate and free in each mode and watch the heap (64 units of 16 bytes):
+
+<EngineWidget kind="alloc" />
+
+| | Allocate | Free | Fragments? | Typical use |
+|---|---|---|---|---|
+| **Arena** (linear, bump) | bump a pointer: a few instructions | all at once, by resetting | never | per-frame scratch, a level's load-time data, building a temporary list |
+| **Pool** (fixed size) | pop the free list | push the free list | never (but internal waste if objects are smaller than a block) | particles, projectiles, nodes, anything numerous and same-sized |
+| **Free list** (general) | search for a gap | return the block, merge with neighbours | yes, over time | everything else |
+
+**Arena.** Allocation is moving a pointer forward, and there's no per-allocation bookkeeping at all. The catch is that you can't free one thing; the whole arena is reset at once. That matches a lot of game memory surprisingly well: everything allocated while building this frame's render list, or while loading this level, dies together. A common pattern is two frame arenas used alternately, so data from the previous frame survives one more frame.
+
+**Pool.** Every block is the same size, so any free block fits any request and fragmentation can't happen. Free blocks are threaded into a list through their own memory, exactly like the slot map's free slots. A slot map is a pool plus generations.
+
+**Free list.** Mixed sizes and mixed lifetimes leave gaps. Run **Churn** a few times and the free space splinters: the stats can show plenty of free memory while a large request still fails, because no single gap is big enough. Turning off merging makes it far worse. Real general-purpose allocators fight this with size classes, best-fit trees and schemes like TLSF (constant-time, popular in real-time code) or buddy allocation, but the underlying problem never fully goes away. This is one reason long-running games and servers prefer pools and arenas for their churn-heavy data.
+
+<Tip kind="note" title="In standard C++">
+`std::pmr` (C++17) gives you allocator *resources* the standard containers can use: `monotonic_buffer_resource` is an arena, `unsynchronized_pool_resource` is a set of pools by size class. A `std::pmr::vector<int>` built on a frame arena costs a pointer bump per growth and nothing to free.
+</Tip>
+
+## Takeaways
+
+- **Refer by handle, not pointer**, for anything that can be destroyed, moved or reloaded. Check handles where they're used; it's one compare.
+- **Choose allocators by lifetime.** Things that die together go in an arena; numerous same-sized things go in a pool; only the rest needs a general allocator.
+- **Pack hot data densely** and let handles do the indirection, so per-frame loops stay cache-friendly.

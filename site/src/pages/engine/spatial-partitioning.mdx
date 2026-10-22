@@ -1,0 +1,93 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Spatial partitioning
+order: 5
+part: Space
+summary: '"What is near this?" and "what overlaps what?" are asked thousands of times a frame. Uniform grids, quadtrees, bounding volume hierarchies and sweep and prune, drawn live over moving objects, with the work each one does and where each one falls over.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Games constantly ask spatial questions. Which units are within 20 metres of this fireball? Which arrows hit something? Which objects does this ray touch? What can this AI see? Asked the obvious way, by checking everything against everything, the cost grows with the square of the object count: 1,000 objects is half a million pairs, 5,000 is twelve and a half million.
+
+A **spatial partition** organises objects by where they are, so a question only has to look at the part of the world it's about. There are a handful of standard structures, and they make different trade-offs between how fast they are to build, how fast they are to query, and what kinds of scene they cope with.
+
+## Try them
+
+The field holds moving circles. Pick a structure and a question. For **"What is near the cursor?"**, move the pointer over the field (scroll to resize the circle); for **"Which objects overlap?"**, the structure finds every overlapping pair, which is what a physics engine's *broadphase* does every frame.
+
+<EngineWidget kind="spatial" />
+
+The numbers that matter are **objects tested** (how much exact checking was needed: lower is better, and brute force is 100%) and the **timing** line, which is real time in your browser. Every structure finds exactly the same results; they differ only in how much work it takes to get there.
+
+## Uniform grid
+
+Divide the world into equal cells, and put each object in every cell its bounding box overlaps. A query looks only at the cells the query area touches; the pair search tests objects that share a cell.
+
+- **Building is a counting sort**: count objects per cell, prefix-sum the counts, then fill one flat array. No allocation per object, no pointers, cache-friendly. It's cheap enough to rebuild from scratch every frame, which is what this widget does.
+- **Cell size is everything.** Try **10** and **160**. Too small and every object spans many cells (more build work, duplicates to skip); too big and each cell holds many objects that are tested pointlessly. A good rule of thumb is about the size of a typical object, or of a typical query.
+- **It assumes even density.** With **Clustered** or **All in a column**, most cells are empty and a few are packed, and the packed ones dominate the cost.
+- **Big objects are expensive.** Under **A few big ones**, each giant spans dozens of cells.
+- **Memory follows the world's area, not the object count.** For a big or unbounded world, hash the cell coordinates into a fixed-size table instead (a *spatial hash*), so empty space costs nothing.
+
+For lots of similar-sized things in a bounded area (units in an RTS, particles, projectiles, crowds), a grid is very hard to beat. In this widget, with 5,000 objects spread evenly, finding every overlapping pair takes about 2 ms with a grid against roughly 60 ms by brute force (timings from one desktop browser; yours will differ, but the ratio holds).
+
+## Quadtree
+
+Start with one node covering the world. When a node holds more than a handful of objects, split it into four quarters and push its objects down. Dense areas get deep, small cells and empty areas stay as one big node, so it **adapts to density** where a grid can't.
+
+The catch is in objects that straddle a split line. An object that straddles a split line doesn't fit in either child, so it stays in the parent, and every query that touches the parent has to test it, however far away it is. In the widget, objects stuck on the world's midlines stay in the root, which every query touches: look for the ringed objects along the centre lines: tested (drawn in the "tested but missed" colour) even when the cursor is nowhere near them. That's not a bug in the widget; it's the cost the next paragraph's loose quadtree removes. With more objects, more of them land on a line somewhere.
+
+- A **loose quadtree** makes each node's bounds bigger than its cell (typically twice the size), so an object only needs to fit by its centre. Far fewer objects get stuck high up, at the cost of more overlap between nodes.
+- Storing objects in **every leaf they overlap** (like the grid does) avoids stuck objects but brings back duplicates.
+- Tree nodes are small allocations linked by pointers. A cache-friendly quadtree keeps nodes in a flat array with child indices (see [memory and the cache](/engine/memory-and-cache/)).
+
+**Octrees** are the same idea in 3D, with eight children per node. They suit 3D worlds with lots of empty space: an airship's view of a city, say, where the space above the rooftops is one big empty node.
+
+## Bounding volume hierarchy (BVH)
+
+A grid and a quadtree divide **space**. A BVH divides **objects**: put all objects in one box, split them into two groups (here, at the median along the longer axis), give each group its own box, and repeat. Every object lives in exactly one leaf, and boxes are allowed to overlap.
+
+- **It handles any size and any distribution.** Big objects, clusters, a column: the tree shapes itself around the objects, so it's never terrible. In the widget it's the best or near the best for testing in every layout.
+- **Building is the expensive part.** It's a sort at every level. This widget's build is deliberately simple (about 10 ms for 5,000 objects in JavaScript on a desktop browser); production builders bin objects along the axis and use the *surface area heuristic* to choose splits, and are far faster.
+- **Moving objects can be refitted** instead of rebuilt: keep the tree's shape and recompute the boxes bottom-up, which is cheap. Switch to **Refit** with all pairs and watch **node area**: the tree was built for where things *were*, so its boxes grow and overlap as objects drift. In one run here, total box area went from 12× the world to 56× in eight seconds and pair tests nearly quadrupled. Real engines refit most frames and rebuild, or incrementally rotate parts of the tree, when quality drops.
+
+BVHs are the standard structure for ray casting (every GPU ray tracer uses one) and for physics broadphases. Box2D's *dynamic tree* is a BVH that stores slightly enlarged ("fat") boxes, so an object only needs re-inserting when it moves outside its fat box.
+
+## Sweep and prune
+
+Sort objects by the left edge of their box. Walk the sorted list keeping the objects whose right edge you haven't passed yet; only those can overlap on x, and only those are checked on y and then exactly.
+
+- **Keeping the list sorted is nearly free when things move a little.** Insertion sort on an almost-sorted list costs about one step per object plus one per swap. In the widget, a frame of 5,000 moving objects needs a few thousand swaps.
+- **It finds pairs well** (under 1% of brute force with even spreading) and has almost no build cost.
+- **It falls over when objects line up on the sorting axis.** Choose **All in a column**: every object overlaps every other on x, so most pairs survive the first cut. With 5,000 objects it tests somewhere between 15% and 30% of all pairs, depending on how far they've drifted apart, against under 1% for the BVH. Engines sort on the axis of greatest spread, or use one list per region (*multi sweep and prune*).
+- It's a poor fit for one-off queries, since it only orders on one axis.
+
+## Choosing
+
+| | Build or update | Query | Good at | Struggles with |
+|---|---|---|---|---|
+| **Uniform grid / spatial hash** | very cheap rebuild | very cheap | many similar-sized objects, even density | clusters, very varied sizes, choosing cell size |
+| **Quadtree / octree** | moderate (allocation, pointer chasing) | good | varying density, big empty spaces | objects on split lines (use loose trees) |
+| **BVH** | expensive build, cheap refit | very good | any sizes and layouts, ray casts | quality decays when refitted for long |
+| **Sweep and prune** | nearly free when movement is small | poor for one-off queries | pair finding with coherent motion | objects lined up on the sorting axis |
+
+In practice:
+
+- **Mostly similar things moving around** (units, projectiles, particles): a grid or spatial hash, rebuilt every frame.
+- **Ray casts, line of sight, mixed static geometry:** a BVH, built once for the static world, plus a second one or a grid for dynamic objects.
+- **Physics broadphase:** a dynamic BVH (Box2D, Bullet's `btDbvtBroadphase`), or sweep and prune for scenes with strong frame-to-frame coherence.
+- **Large 3D volumes with lots of empty space:** an octree, which also gives you something to pathfind through: [the next lesson](/engine/octrees-and-flight/).
+
+<Tip title="Next to the ECS, not inside it">
+[The flecs spatial lesson](/flecs/spatial-data/) compares three ways of keeping an index like these alongside entities. The usual answer is a structure owned by a singleton or the engine, updated by a system after movement, holding entity ids. Store the boxes in the structure itself, not just ids pointing back at components, so queries don't jump around memory.
+</Tip>
+
+## Takeaways
+
+- **Every structure finds the same answers;** they differ in how much they have to look at, and in what it costs to keep them up to date.
+- **Grids** are the fast default for uniform, similar-sized objects; pick the cell size deliberately.
+- **Quadtrees and octrees** adapt to density; watch for objects stuck on split lines.
+- **BVHs** cope with anything and dominate ray casting; refit is cheap but decays.
+- **Sweep and prune** is excellent for coherent motion until objects line up on its axis.
+- **Measure with your own layouts.** Clustering, size spread and motion change the ranking.

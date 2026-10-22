@@ -1,0 +1,36 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Prefabs and inheritance
+order: 5
+part: Storage and identity
+summary: How a prefab gives an entity its whole type in one move, the difference between copied and inherited components, and what overriding does to storage.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A **prefab** is an entity used as a template. Creating an instance is adding one pair, `(IsA, SpaceShip)`, and the instance gets the prefab's components. What "gets" means is decided per component by its `OnInstantiate` trait:
+
+- **Override** (the default): the component is **copied** into the instance's own table.
+- **Inherit**: the component is **not** copied. The instance reads the prefab's value, so every instance shares one copy, and queries still match it.
+- **DontInherit**: the instance doesn't get it at all.
+
+## Watch an instance being made
+
+`MaxSpeed` and `Position` use the default (copied); `Defence` is set to Inherit.
+
+<FlecsDebugger scenario="prefabs" />
+
+Things to notice:
+
+- **One move with the full type.** Adding `(IsA, SpaceShip)` moves S1 straight into `[MaxSpeed, Position, (IsA, SpaceShip)]`. Compare that with creating an entity and adding components one at a time, which walks through a table per component.
+- **Inherited components aren't in the table.** The instance table has no `Defence` column, yet the `Defended` query returns both instances, because it matches `Defence` on the prefab.
+- **Changing the prefab changes inherited values only.** After `ship.set<Defence>({75})` every instance sees 75. After `ship.set<MaxSpeed>({200})`, the instances keep their copied 100.
+- **Overriding is a move.** `s1.set<Defence>({10})` gives S1 its own `Defence` column, so it moves to a new table, and S2 is swapped into the hole. The query now returns them from two different tables.
+
+<Tip title="When to inherit">
+Inherit data that's the same for every instance and rarely changes per instance: mesh handles, base stats, configuration. It saves memory and keeps the instance table small. Copy (the default) anything each instance changes. Overriding an inherited component later works, but each override moves that entity to a new table.
+</Tip>
+
+<Tip kind="note" title="Prefabs and hierarchies">
+Prefabs can have children. With the newer `Parent` storage for hierarchies (see [fragmentation](/flecs/fragmentation/)), instantiating a prefab's children doesn't create a table per instance, and flecs can cache the structure of the whole tree. If you spawn many small hierarchies, that combination is much cheaper.
+</Tip>

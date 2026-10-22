@@ -1,0 +1,187 @@
+/* Tactics lab: additions to the pathing lab's styles (lab.css). */
+.app-root {
+  display: block;
+}
+.tl-layers {
+  display: grid;
+  gap: 4px;
+}
+.tl-layers button {
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+.tl-layers button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.tl-slider {
+  gap: 2px;
+}
+.tl-slider input {
+  accent-color: var(--accent);
+  width: 100%;
+}
+.tl-slider output {
+  font-family: var(--f-mono);
+  color: var(--ink);
+}
+.tl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.tl-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tl-stats {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.tl-info p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.side .cx-link {
+  justify-self: start;
+}
+.tl-algos {
+  display: grid;
+  gap: 4px;
+}
+.tl-algos button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+.tl-algos button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.tl-algo-kind {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+.tl-transport {
+  position: static;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.tl-transport[hidden],
+.tl-caption[hidden] {
+  display: none;
+}
+.tl-caption {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--body, var(--ink));
+  border-left: 3px solid var(--walker);
+  padding: 2px 0 2px 10px;
+  min-height: 3em;
+}
+.tl-caption b {
+  color: var(--ink);
+}
+
+/* Compare mode: a second lane on the same map. */
+.stage.tl-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .stage.tl-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.tl-peer-host .tl-embed {
+  margin: 0;
+}
+.tl-peer-layer {
+  font-weight: 500;
+}
+.tl-compare {
+  margin-top: 10px;
+}
+/* Half-width lanes: buttons and scrubber on one row, speed and options on the next. */
+.stage.tl-two .transport {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.stage.tl-two .transport .speed {
+  width: auto;
+}
+
+/* Analysis bar: above the transport and map in the full lab. */
+.tl-bar {
+  gap: 12px;
+}
+.tl-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+.tl-bar .tl-compare {
+  margin-top: 0;
+}
+.tl-bar .tl-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tl-bar .tl-layers button {
+  padding: 6px 11px;
+}
+.tl-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 22px;
+  min-height: 58px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.tl-settings > h2 {
+  display: none;
+}
+.tl-settings > .field,
+.tl-settings > .tl-slider {
+  flex: 0 1 auto;
+  min-width: 180px;
+}
+.tl-settings > .tl-slider {
+  width: 220px;
+}
+.tl-settings > .hint {
+  flex: 1 1 260px;
+  margin: 0;
+  align-self: center;
+}
+.tl-settings > .cx-link {
+  align-self: center;
+}
+.tl-settings .tl-algos {
+  display: flex;
+  flex-wrap: wrap;
+}
+/* No trace for this layer: the bar stays in place, greyed out. */
+.tl-transport.tl-off,
+.tl-caption.tl-off {
+  opacity: 0.55;
+}
+.tl-transport.tl-off input {
+  cursor: default;
+}

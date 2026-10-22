@@ -1,0 +1,45 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Queries and what they cache
+order: 7
+part: Queries
+summary: What a cached query actually stores, when that cache is updated, and what an uncached query does instead.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A query finds entities that match a list of terms, like `Position, Velocity`. Because entities with the same type share a table, a query rarely needs to look at individual entities: it can match **whole tables**. That is the first reason archetype queries are fast.
+
+The second reason is caching. Games create most of their tables early on and then keep reusing them. So instead of searching for matching tables every time, a **cached query** keeps a list of them and only updates it when a table is created or deleted. Iterating a cached query is just walking that list.
+
+flecs has both kinds:
+
+| | Cached | Uncached |
+|---|---|---|
+| Iterating | walks a prematched list of tables | searches the component index each time |
+| Creating | slower: the cache is filled first | cheap, stateless |
+| Memory | a list per query | almost none |
+| New tables | every cached query is told, and tests the table once | no cost |
+
+By default, queries with an entity (every system, and named queries) are cached, and ad-hoc queries aren't. You can choose explicitly with the cache kind (`.cached()` in C++, or `EcsQueryCacheAuto` / `EcsQueryCacheNone` in C).
+
+## Watch the caches
+
+Three queries are created before the timeline starts. `Movers` and `AdHoc` are the same query, cached and uncached, and `Heavy` is cached too. The badges on each table card show which caches it is in.
+
+<FlecsDebugger scenario="queries" />
+
+What to look for:
+
+- **Creating a table notifies caches.** When `ship.set<Mass>` creates `[Position, Velocity, Mass]`, the log shows each cached query being told about the new table (`OnTableCreate`) and testing it once. `Movers` and `Heavy` both add it, while `AdHoc` isn't involved at all.
+- **Moving into an existing table costs the caches nothing.** `rock.set<Mass>` moves Rock into a table that already exists, so no query is notified.
+- **Iteration returns tables, not entities.** Iterating `movers` yields one result per non-empty table it matches, with all of that table's matching entities in one go; `each()` then loops over those rows for you.
+- **Caches keep empty tables.** After Ship moves out, `[Position, Velocity]` is empty but stays in `Movers`' cache. Iteration simply skips it: the cache keeps one list of tables and checks each table's row count as it goes, so a table that empties and refills never has to be re-matched.
+
+<Tip>
+Cache what you iterate every frame: systems are cached by default for that reason. Leave one-off lookups (finding the children of one entity, say) uncached, because creating a cached query to use once costs more than the search it saves. Above all, don't create cached queries every frame.
+</Tip>
+
+<Tip kind="note" title="Not everything can be cached">
+Caching works per table, so only terms that match whole tables are cached: components, tags, pairs, wildcards, operators and traversal. `Sparse` components are still in the table type, so their tables are cached too, but their values are fetched per entity. `DontFragment` components aren't in the type at all, so they're matched per entity while you iterate, even in a cached query. [Choosing storage](/flecs/storage-traits/) shows this happening.
+</Tip>

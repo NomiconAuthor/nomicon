@@ -1,0 +1,62 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Hooks and observers, in order
+order: 11
+part: Systems, commands and reactions
+summary: Exactly when component hooks and observers run relative to the storage changes they react to, and what each one can see at that moment.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+import TryIt from '../../components/lesson/TryIt.astro';
+
+flecs has two ways to react to a component being added, set or removed:
+
+- **Hooks** (`on_add`, `on_set`, `on_remove`) are part of a component's definition, like a constructor. There is at most one of each per component, they can change the component, and they're cheap. Each can be set only once in C++ (setting it again asserts), and in C the set of hooks can't change once the component is in use.
+- **Observers** are subscribers. Any part of the game can register as many as it likes, for any events, with a full query, including several terms. They're more flexible, and they cost a query evaluation per event.
+
+The order matters, because it decides what the callback can see. Rather than memorise it, step through it:
+
+<FlecsDebugger scenario="observers" />
+
+What the trace shows on current flecs:
+
+| Operation | Order |
+|---|---|
+| `set<Position>` on an entity without it | move to the new table → `on_add` hook → `OnAdd` observers → value written → `on_set` hook → `OnSet` observers |
+| `set<Position>` on an entity that has it | `on_set` hook → `OnSet` observers (no move, no `OnAdd`) |
+| `add<Position>` (no value) | move → `on_add` hook → `OnAdd` observers; no `OnSet` |
+| `remove<Position>` | `OnRemove` observers (the value is still readable) → row appended to the new table → `on_remove` hook → old row deleted |
+| `destruct()` | `OnRemove` observers for each component → `on_remove` hooks (the row is still intact) → row deleted |
+
+Some details worth knowing:
+
+- **`OnAdd` can't see the value from `set`.** It runs before the value is written. If you need the value, observe `OnSet`.
+- **`OnAdd` fires once, when the component actually arrives.** Setting a component the entity already has only produces `OnSet`.
+- **Multi-term observers check their whole query.** `StartsMoving` listens for `Position, Velocity`. It is invoked whenever either is added, but only calls back once both are present. The first time, Ship has no `Velocity` yet, and the log shows it being checked and not called.
+- **Custom events work like any other.** `Collided` isn't a component change at all. `world.event<Collided>()...emit()` delivers it to observers listening for that event on the entity's `Position`.
+
+<TryIt preset="basics">Add your own observers and systems, then change components and see what gets called, in order.</TryIt>
+
+## Observers that write what they observe
+
+Two very common patterns, both slightly wrong:
+
+- an `OnAdd` observer that sets a **default value** ("new Health starts at 100");
+- an `OnSet` observer that **corrects** the value ("shields always reset to 100", or clamping).
+
+<FlecsDebugger scenario="observerWrites" />
+
+Step through and watch the Watch observers:
+
+- **`a.set<Health>({50})`**: `DefaultHealth` runs on `OnAdd` and enqueues `set<Health>({100})`, which is applied straight after the observer. So `WatchHealth` sees **100**. Then the caller's own value is written, and `WatchHealth` sees **50**. The default is overwritten (last write wins), and anything observing `OnSet` saw a value that was never meant to exist.
+- **`b.set<Shield>({50})`**: `WatchShield` sees 50, then `ResetShield` sets 100, which triggers `OnSet` again. Both observers run a second time, and `ResetShield` only stops because it checks the value. Without the check it would recurse. The caller's 50 is silently replaced.
+
+The rules that fall out of this:
+
+- **Put defaults in the component's constructor** (or an `on_add` hook), not in an `OnAdd` observer. Those run before any value is set, so they can't fight it.
+- **Don't `set` the observed component inside its own `OnSet` observer.** If a value must always be clamped or derived, do it where it's written, in a hook (`on_set` can change the value in place), or in a system that runs before the readers.
+- **When several observers write the same component, the last write wins**, and the order between observers isn't something to build on.
+
+<Tip kind="note" title="When to use which">
+Use a **hook** when the component itself needs it, such as allocating or freeing a resource or keeping a cached value valid. Use an **observer** when *other* code wants to know, and only for things that happen rarely (spawning, destruction, a window being resized). If you find yourself adding and removing components just to trigger an observer, use a system: it runs once per table rather than once per event, and it's easier to reason about. Observers run in the middle of a storage change, so keep them small.
+</Tip>

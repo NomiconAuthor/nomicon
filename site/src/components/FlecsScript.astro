@@ -1,0 +1,25 @@
+---
+/** Flecs Script playground with reflection and physics glue (src/flecs/script/playground.ts). */
+---
+
+<flecs-script><p>Loading the script playground…</p></flecs-script>
+
+<script>
+  import '../flecs/script/playground.css';
+  import { ScriptPlayground } from '../flecs/script/playground';
+
+  class FlecsScriptElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      void new ScriptPlayground(this).init();
+    }
+  }
+  if (!customElements.get('flecs-script')) customElements.define('flecs-script', FlecsScriptElement);
+</script>
+
+<style>
+  flecs-script {
+    display: block;
+  }
+</style>

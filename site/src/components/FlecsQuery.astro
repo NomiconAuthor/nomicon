@@ -1,0 +1,29 @@
+---
+/** Query playground on a small fixed world (src/flecs/query/playground.ts). */
+interface Props {
+  query?: string;
+}
+const { query } = Astro.props;
+---
+
+<flecs-query data-query={query}><p>Loading the query playground…</p></flecs-query>
+
+<script>
+  import '../flecs/query/playground.css';
+  import { QueryPlayground } from '../flecs/query/playground';
+
+  class FlecsQueryElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      void new QueryPlayground(this, this.dataset.query || undefined).init();
+    }
+  }
+  if (!customElements.get('flecs-query')) customElements.define('flecs-query', FlecsQueryElement);
+</script>
+
+<style>
+  flecs-query {
+    display: block;
+  }
+</style>

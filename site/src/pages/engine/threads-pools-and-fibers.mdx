@@ -1,0 +1,164 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Threads, pools and fibers
+order: 8
+part: Threads
+summary: 'What a job system runs on, and what happens to a core when a job has to wait. Named threads like a game thread and a render thread, worker pools, and the four answers to waiting (block, help, fibers, coroutines), with why preemptive threads lose to cooperative scheduling for this kind of work.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[Jobs and task graphs](/engine/jobs-and-task-graphs/) decided *what* runs and in what order. This lesson is about what it runs *on*, and about one awkward moment: a job that has started, handed out work to other jobs, and now needs their results before it can finish. What its core does in the meantime is the difference between threads, thread pools, fibers and coroutines.
+
+## Threads, briefly
+
+An OS thread is a stack plus a set of saved registers, and the operating system decides when it runs. It's **preemptive**: the OS can stop a thread at any instruction to run another, and a thread that waits on a lock or an event is parked until it's woken. That's exactly what you want for unrelated programs sharing a machine. For thousands of small jobs inside one frame, it costs too much:
+
+| | Roughly |
+|---|---|
+| Creating and starting a thread | tens of microseconds |
+| A context switch between threads | a few microseconds, plus refilling the caches afterwards |
+| A thread's stack | 1 MiB reserved by default on Windows, 8 MiB on Linux |
+| A typical game job | 10 to 100 microseconds |
+
+When starting a thread costs as much as the job it runs, a thread per job spends half the frame on bookkeeping. So engines create their threads once, at startup, and never create more.
+
+## Named threads
+
+Some of those threads have a fixed job and a name. Unreal is the familiar example: a **game thread** that runs gameplay, and a **rendering thread** that turns the game's view of the world into draw calls. On graphics APIs that support it, there's a third, the **RHI thread**, which only submits work to the driver. Everything else is **worker threads** in the task graph, which any of them can hand parallel work to.
+
+Why dedicate a thread instead of making everything a job:
+
+- **Some APIs belong to one thread.** Windowing and input usually have to stay on the main thread. Older graphics APIs expect one thread to own the device context. A named thread is the simplest way to guarantee that.
+- **Pipelining.** If the game thread and the render thread are separate, frame *N + 1*'s gameplay can run while frame *N* is being rendered, and frame *N − 1* is on the GPU.
+- **State ownership.** The render thread has its own copy of what it needs (Unreal's render proxies), so the game thread can change the world without locks. They only talk through a queue of render commands.
+
+<EngineWidget kind="pipeline" />
+
+With the defaults (10 ms of gameplay, 8 ms of rendering, 9 ms on the GPU):
+
+| Threads | Between frames | Frame rate | Update to pixels |
+|---|---|---|---|
+| One thread does it all | 18 ms | 56 fps | 27 ms |
+| Game + render thread | 10 ms | 100 fps | 27 ms |
+| Game + render + RHI | 10 ms | 100 fps | 27 ms |
+
+The frame rate is set by the slowest stage instead of the sum of two of them. The cost is **frames in flight**: almost three frames are being worked on at once, so the time from a frame's gameplay to its pixels doesn't improve, and when one stage falls behind, the others queue up behind it. Engines bound that. Unreal's game thread waits at the end of its tick for the render thread to catch up, so it stays at most about a frame ahead, and the render thread waits for the GPU in turn. Try **GPU 12 ms**: the frame rate drops to the GPU's, and the time from update to pixels stretches to about 40 ms as the frames in front of it wait. Splitting the render thread again (RHI) only pays when rendering itself is the bottleneck: try **Game 6, Render 12**.
+
+<Tip kind="note" title="Named threads aren't where the parallelism is">
+A named thread is one thread. The game thread's movement, animation and AI, and the render thread's visibility and command building, are still spread across the worker pool as jobs, exactly as in the previous lesson. Named threads give you ownership and pipelining; the worker pool gives you the cores.
+</Tip>
+
+## Worker pools
+
+The workers are a **thread pool**: one thread per core (often minus the cores the named threads occupy), created at startup and fed from the job queues. Many engines also pin each worker to its own core, so the OS never moves it, and its caches stay warm. Naughty Dog's engine on PS4 ran six workers, each locked to a core.
+
+A worker with nothing to do has three choices. It can **spin**, checking the queue in a tight loop, which reacts in nanoseconds but burns power and steals hyperthread time from its sibling. It can **yield** its time slice. Or it can **sleep** on a condition variable or a semaphore, which costs nothing but takes microseconds to wake. Most pools spin briefly and then sleep.
+
+## When a job waits
+
+Now the awkward moment. A party's update runs a little of its own logic, spawns a job per unit, and needs all of their results before it can finish. On a pool, the worker running the party has to do *something* until the units are done. The widget below runs one frame of jobs: six party updates that each fan out into six unit jobs (and, with **Waits inside waits**, two of those units run a path search that fans out again), then two dozen unrelated jobs. Hover any block to see what it is.
+
+<EngineWidget kind="waiting" />
+
+**Block.** The worker sleeps until the children are done. It's the obvious answer, and it's what calling `future.get()` or joining inside a job does. The core sits idle the whole time (the hatched blocks), and if the waiting jobs outnumber the workers, there's nobody left to run their children: with **4 cores**, the first four parties block every worker before a single unit job starts. A **deadlock**, from a perfectly reasonable piece of code.
+
+**Help while waiting.** The waiting worker takes jobs from the queue and runs them itself, *on top of* the waiting job, on the same stack, until the children are done. No core is idle and nothing deadlocks. The cost is in the nesting. The waiting job can only continue once the job on top of it returns, so if it picked up a 60 µs job just before its children finished, it waits another 60 µs for nothing. And each nested job adds a stack frame: with **Waits inside waits**, workers end up five jobs deep.
+
+**Fibers.** A fiber is a stack and a set of registers, like a thread, but nobody preempts it: it runs until it chooses to switch. Every job runs on a fiber. When one waits, the worker saves its registers, parks the fiber, and switches to a fresh fiber to run the next job. When the children are done, the next free worker switches to the parked fiber and the job carries on where it left off, with its whole call stack intact. The switch is a function call that saves and restores a few registers: no kernel, no thread switch.
+
+**Coroutines.** The same scheduling, but the job is a C++20 coroutine. It doesn't have its own stack; the compiler turns the function into an object that holds its locals, and `co_await` suspends it. Suspending and resuming are cheaper than a fiber switch, and a suspended coroutine costs only its frame.
+
+**A thread per job.** For comparison, no pool at all: every job is an OS thread, and waiting is the OS parking it.
+
+With 8 cores and one level of waiting (6 waiting parties, 1,819 µs of work, a perfect split is 227 µs):
+
+| When a job waits | Frame | Efficiency | Overhead | Worst late resume | Extra stack memory |
+|---|---|---|---|---|---|
+| Block | 714 µs | 32% | 8 µs | none (3,748 µs blocked) | none |
+| Help while waiting | 248 µs | 92% | 8 µs | 13 µs | none |
+| Fibers | 248 µs | 92% | 23 µs | none | 14 fibers, 0.9 MiB |
+| Coroutines | 246 µs | 92% | 12 µs | none | 14 frames, 14 KiB |
+| A thread per job | 657 µs | 35% | 888 µs | none | 27 threads, 27 MiB |
+
+With **Waits inside waits** (18 jobs waiting at some point), blocking deadlocks even with 16 cores, and helping reaches five jobs deep and keeps finished waits waiting for up to 49 µs on 8 cores and 99 µs on 4. Fibers and coroutines don't change shape at all.
+
+What the numbers say:
+
+- **Blocking is out.** It wastes cores, and it deadlocks as soon as enough jobs wait at once. Nothing about the code tells you how many that is.
+- **Helping, fibers and coroutines finish the frame in about the same time.** All three keep every core busy. The differences are elsewhere: how long a finished wait sits behind the job on top of it, how deep stacks get, how much memory parked work holds, and what the code is allowed to do.
+- **A thread per job** loses on overhead alone. The OS switches threads correctly; it just costs many times more than the work deserves, and the thread spawning the frame's jobs becomes the bottleneck creating them.
+
+```cpp
+// Helping: wait by running other jobs until the counter reaches zero.
+void wait_for(std::atomic<int>& counter) {
+    while (counter.load(std::memory_order_acquire) > 0) {
+        if (Job* j = queue.try_pop()) j->run();   // nests on this stack
+        else std::this_thread::yield();
+    }
+}
+```
+
+<Tip kind="warn" title="Helping has a trap">
+A helper can pick up a job that itself waits on something only the original waiting job can provide, and then neither finishes. Many systems restrict helping to jobs in the same group, or only to the children being waited on, which removes most of the cycles at the cost of some idle time.
+</Tip>
+
+## Fibers in practice
+
+Christian Gyrling's GDC 2015 talk, [*Parallelizing the Naughty Dog Engine Using Fibers*](https://www.gdcvault.com/play/1022186/Parallelizing-the-Naughty-Dog-Engine), is the reference design. Six worker threads, one per core. 160 fibers in a pool: 128 with 64 KiB stacks and 32 with 512 KiB for the jobs that need more. Every job runs on a fiber, and the only way to wait is `WaitForCounter`: the job's fiber goes on a wait list attached to the counter, and the worker takes a fresh fiber from the pool. *The Last of Us Remastered* ran 800 to 1,000 jobs a frame this way.
+
+The same talk lists what fibers break, and it's the reason not every engine uses them:
+
+- **Thread-local storage.** A fiber can be parked on one worker and resumed on another. A compiler that cached the address of a thread-local variable across the wait now reads another thread's copy. Naughty Dog had to move all thread-local access into a separate file the optimiser couldn't see through.
+- **OS locks.** A mutex locked on one thread must be unlocked on the same thread, and a fiber may come back on a different one. Waiting on an OS primitive also blocks the whole worker, not just the fiber. Fiber code uses spin locks for short sections and job-aware mutexes, which park the fiber instead, for long ones.
+- **Stack size.** Every fiber needs a stack big enough for the deepest call it might make. Too small overflows; too big multiplies by the number of fibers. Naughty Dog's answer was two pools of different sizes.
+- **Tools.** Debuggers and profilers assume a call stack belongs to a thread. A parked fiber's stack is invisible to many of them, and a stack that hops between threads confuses the rest.
+
+## Coroutines
+
+C++20 coroutines get the same scheduling without the stacks. A function that contains `co_await` is compiled into a state machine: its locals live in a heap-allocated frame (which the compiler can sometimes place on the caller's stack instead), and `co_await` saves where it was and returns to whoever resumed it.
+
+```cpp
+Task update_party(Party& p) {
+    plan_moves(p);
+    Counter done{(int)p.units.size()};
+    for (Unit& u : p.units) spawn([&] { update_unit(u); }, done);
+    co_await done;               // suspend; a worker resumes us when the units are done
+    apply_results(p);
+}
+```
+
+What you get, compared with fibers:
+
+- **Small and cheap.** A suspended coroutine holds only the locals that live across a suspension, often tens or hundreds of bytes, so a hundred thousand waiting jobs are affordable. Suspending and resuming is a little cheaper than a fiber switch.
+- **Explicit suspension points.** You can see every place a job might pause, and only there. Thread-local storage and locks are safe everywhere else.
+- **Colouring.** Only a coroutine can suspend, and only at a `co_await` in its own body. If the wait is three calls deep, every function on the way has to become a coroutine too. Fibers can suspend from anywhere, which is why they're easier to retrofit into existing code.
+- **Plumbing.** The language gives you the mechanism, not the scheduler. The task type, the awaitable counter and the hand-off to the worker pool are yours to write (or take from a library).
+
+| | Preemptive threads | Fibers | Stackless coroutines |
+|---|---|---|---|
+| Who decides when to switch | the OS, at any instruction | the job, at a wait | the job, at a `co_await` |
+| Switch cost | microseconds, through the kernel | a few registers | cheaper still |
+| Memory per waiting job | a full stack (MiB) | a fiber stack (KiB) | the frame (bytes) |
+| Can wait from deep in a call | yes | yes | only if every caller is a coroutine |
+| Thread-local storage and OS locks | work | break across a switch | safe outside suspension points |
+| Debuggers and profilers | fully supported | partly | improving |
+
+<Tip title="Why cooperative wins here">
+Preemption exists so that code that doesn't cooperate still gets a fair share. Inside a job system, every job is yours, short, and written to finish. Giving up control at known points costs nothing, and in return you skip the kernel, the time slices and the stacks nobody needed. That's the whole argument for fibers and coroutines: not that they're faster at running work, but that waiting becomes almost free.
+</Tip>
+
+## Designing so nothing waits
+
+The cheapest wait is the one that doesn't happen. Many jobs that wait in the middle can be split in two: *spawn* the units' jobs, and make *apply the results* a separate job that depends on them. That's the [task graph](/engine/jobs-and-task-graphs/) again, and it needs no blocking, no helping and no fibers, because nothing is ever half-finished. Fibers and coroutines earn their place where splitting is awkward: a long chain of steps with waits in between, or a wait deep inside a call that would be painful to restructure.
+
+flecs takes the splitting route. A system never waits in the middle: it runs to the end, its queued commands are merged at the next sync point, and the next system runs after that. `set_threads` gives flecs its own pool of workers for multi-threaded systems, and `set_task_threads` hands the same work to tasks on your job system instead, so flecs fits next to whatever the rest of your engine uses to wait.
+
+## Takeaways
+
+- **OS threads are preemptive and expensive** to create and switch. Create them once.
+- **Named threads** (game, render, RHI) own APIs and state and pipeline frames; the parallel work still goes to a **worker pool**, one thread per core.
+- **Blocking a worker** wastes a core and deadlocks once enough jobs wait. **Helping** keeps cores busy, at the cost of nested stacks and late resumes.
+- **Fibers** park a waiting job with its whole stack and switch in a few registers. They break thread-local storage, OS locks and tools, and need sized stacks.
+- **Coroutines** are fibers without stacks: tiny and cheap, explicit about where they pause, but every function that waits has to be one.
+- **Better still, don't wait in the middle**: split the job, and let the task graph run the second half.

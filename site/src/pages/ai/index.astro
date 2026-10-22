@@ -1,0 +1,145 @@
+---
+import Base from '../../layouts/Base.astro';
+import '../../styles/lesson.css';
+
+const modules = import.meta.glob<{ frontmatter: { title: string; order: number; summary: string; part?: string }; url: string }>('./*.mdx', { eager: true });
+const lessons = Object.values(modules)
+  .map((m) => ({ ...m.frontmatter, url: m.url }))
+  .sort((a, b) => a.order - b.order)
+  .map((l, k) => ({ ...l, n: k + 1 }));
+// Group consecutive lessons by their `part` frontmatter.
+const parts: Array<{ name: string; lessons: typeof lessons }> = [];
+for (const l of lessons) {
+  const name = l.part ?? '';
+  if (!parts.length || parts.at(-1)!.name !== name) parts.push({ name, lessons: [] });
+  parts.at(-1)!.lessons.push(l);
+}
+---
+
+<Base title="Game AI" section="ai" description="Interactive lessons on how game agents decide, move and read the map: utility scoring, behaviour trees, goal-oriented action planning, steering and context steering, local avoidance from separation to ORCA, formations, Recast and Detour, terrain analysis, influence and threat maps, shared knowledge, and party roles.">
+  <main class="flecs-index">
+    <p class="kicker">Lessons</p>
+    <h1>How game agents decide, move and read the map</h1>
+    <p class="lede">
+      Three families of decision-making, built from scratch and running live: utility scoring, where every option gets a number
+      from response curves; behaviour trees, where a hand-built priority structure is walked every tick; and goal-oriented action
+      planning, where the agent searches for a sequence of actions that reaches a goal. They all drive the same agent in the same
+      small arena, so you can see what each one gets right, what it gets wrong, and what it costs. Then movement: steering as a
+      stack of choices (how an agent moves, follows a path and notices walls, and how those combine), avoiding
+      other agents from a separation force to ORCA, and parties that hold a formation through a doorway. Navmeshes: Recast's
+      build stepped through stage by stage, and Detour against writing your own planner. And terrain analysis:
+      chokes, cover generation stepped through algorithm by algorithm, keeping cover valid as the world changes, and choosing it.
+      Influence and threat maps: whose ground is whose, where an enemy could hit you from, and routes that keep out of sight. Shared knowledge: what a guild, a party and an adventurer each know when parties can only read the guild board at waystones.
+      And party roles: a tank, a cleric and three damage dealers against an orc warchief, with a threat table, triage healing and telegraphed attacks.
+    </p>
+    {
+      parts.map((p) => (
+        <section class="part">
+          {p.name && <h2 class="part-h">{p.name}</h2>}
+          <ol class="lesson-list" start={p.lessons[0].n}>
+            {p.lessons.map((l) => (
+              <li>
+                <a href={l.url}>
+                  <span class="n">{l.n}</span>
+                  <span class="t">{l.title}</span>
+                  <span class="s">{l.summary}</span>
+                </a>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))
+    }
+    <p class="fine">Examples are in C++, with notes on running them as flecs systems. The arena is deterministic: the same seed and the same brain always replay the same fight.</p>
+    <p class="fine">Unit sprites from <a href="https://kenney.nl/assets/tiny-dungeon">Tiny Dungeon</a> by Kenney (CC0).</p>
+  </main>
+</Base>
+
+<style>
+  .flecs-index {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 16px 0 80px;
+  }
+  .part-h {
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 28px 0 10px;
+  }
+  .flecs-index h1 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+    margin: 4px 0 12px;
+  }
+  .kicker {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0;
+  }
+  .lede {
+    color: var(--body);
+    font-size: 1.05rem;
+    max-width: 70ch;
+  }
+  .sandbox-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 24px;
+    padding: 16px 18px;
+    border-radius: 12px;
+    border: 1px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--paper));
+    color: inherit;
+    text-decoration: none;
+  }
+  .sandbox-card .t {
+    color: var(--accent);
+    font-weight: 500;
+    font-size: 1.1rem;
+  }
+  .lesson-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 10px;
+  }
+  .lesson-list a {
+    display: grid;
+    grid-template-columns: 2.2em 1fr;
+    gap: 2px 12px;
+    padding: 14px 18px;
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .lesson-list a:hover {
+    border-color: var(--accent);
+  }
+  .n {
+    grid-row: span 2;
+    font-family: var(--f-mono);
+    color: var(--accent);
+    font-size: 1.2rem;
+  }
+  .t {
+    color: var(--ink);
+    font-weight: 500;
+    font-size: 1.05rem;
+  }
+  .s {
+    color: var(--body);
+    font-size: 0.92rem;
+  }
+  .fine {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+</style>

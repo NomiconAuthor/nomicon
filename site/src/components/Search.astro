@@ -1,0 +1,295 @@
+---
+/** Site search: a navbar button (and Ctrl/⌘ K or /) opening a dialog over the lesson index. */
+---
+
+<button type="button" class="search-btn" aria-haspopup="dialog" aria-controls="site-search" title="Search (Ctrl K)">
+  <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.8"></circle><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+  <span class="search-btn-l">Search</span>
+  <kbd>Ctrl K</kbd>
+</button>
+
+<dialog id="site-search" class="search-dlg" aria-label="Search the lessons">
+  <div class="search-box">
+    <input type="search" placeholder="Search lessons and lab concepts…" aria-label="Search" autocomplete="off" spellcheck="false" />
+    <button type="button" class="search-x" aria-label="Close">Esc</button>
+  </div>
+  <ol class="search-res" role="listbox"></ol>
+  <p class="search-foot">↑ ↓ to move, Enter to open. Matches lesson text, headings and the labs' concept cards.</p>
+</dialog>
+
+<script>
+  interface Entry {
+    s: string;
+    t: string;
+    h: string;
+    u: string;
+    x: string;
+  }
+  const dlg = document.getElementById('site-search') as HTMLDialogElement;
+  const btn = document.querySelector('.search-btn') as HTMLButtonElement;
+  const input = dlg.querySelector('input') as HTMLInputElement;
+  const list = dlg.querySelector('.search-res') as HTMLOListElement;
+  let index: Entry[] | null = null;
+  let loading: Promise<void> | null = null;
+  let sel = 0;
+  let shown: Entry[] = [];
+
+  const load = () =>
+    (loading ??= fetch('/search-index.json')
+      .then((r) => r.json())
+      .then((d: Entry[]) => {
+        index = d;
+        render();
+      })
+      .catch(() => {
+        list.innerHTML = '<li class="search-empty">Search isn\'t available right now.</li>';
+      }));
+
+  function open(): void {
+    if (!dlg.open) dlg.showModal();
+    input.select();
+    load();
+  }
+  btn.addEventListener('click', open);
+  dlg.querySelector('.search-x')!.addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) dlg.close();
+  });
+  window.addEventListener('keydown', (e) => {
+    const t = e.target as HTMLElement;
+    const typing = t.closest('input, textarea, select, [contenteditable]');
+    if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing)) {
+      e.preventDefault();
+      open();
+    }
+  });
+
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const words = (q: string) =>
+    q
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 0);
+
+  /** Every word must appear somewhere; title and heading matches count for more, whole words more than prefixes. */
+  function score(e: Entry, ws: string[]): number {
+    const t = e.t.toLowerCase();
+    const h = e.h.toLowerCase();
+    const x = e.x.toLowerCase();
+    let total = 0;
+    for (const w of ws) {
+      const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g');
+      const whole = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      let s = 0;
+      if (re.test(t)) s += whole.test(t) ? 12 : 8;
+      re.lastIndex = 0;
+      if (re.test(h)) s += whole.test(h) ? 9 : 6;
+      re.lastIndex = 0;
+      const n = Math.min(8, (x.match(re) ?? []).length);
+      s += n ? 2 + n : 0;
+      if (!s) return 0;
+      total += s;
+    }
+    // The words together, as typed, count for more.
+    if (ws.length > 1) {
+      const phrase = ws.join(' ');
+      if (h.includes(phrase) || t.includes(phrase)) total += 15;
+      else if (x.includes(phrase)) total += 6;
+    }
+    return total;
+  }
+
+  function snippet(e: Entry, ws: string[]): string {
+    const x = e.x;
+    const lx = x.toLowerCase();
+    let at = -1;
+    for (const w of ws) {
+      const i = lx.search(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+      if (i >= 0 && (at < 0 || i < at)) at = i;
+    }
+    const start = Math.max(0, at - 60);
+    let s = (start ? '…' : '') + x.slice(start, start + 170) + (start + 170 < x.length ? '…' : '');
+    s = esc(s);
+    for (const w of ws) s = s.replace(new RegExp(`\\b(${esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\w-]*)`, 'gi'), '<mark>$1</mark>');
+    return s;
+  }
+
+  function render(): void {
+    if (!index) {
+      list.innerHTML = '<li class="search-empty">Loading…</li>';
+      return;
+    }
+    const ws = words(input.value);
+    if (!ws.length) {
+      shown = [];
+      list.innerHTML = '<li class="search-empty">Try "archetype", "context steering", "determinism" or "choke".</li>';
+      return;
+    }
+    shown = index
+      .map((e) => ({ e, s: score(e, ws) }))
+      .filter((r) => r.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 30)
+      .map((r) => r.e);
+    sel = 0;
+    list.innerHTML = shown.length
+      ? shown
+          .map(
+            (e, i) =>
+              `<li role="option" id="sr-${i}" aria-selected="${i === sel}"><a href="${e.u}"><span class="sr-k">${esc(e.s)} · ${esc(e.t)}</span><span class="sr-h">${esc(e.h || e.t)}</span><span class="sr-x">${snippet(e, ws)}</span></a></li>`,
+          )
+          .join('')
+      : '<li class="search-empty">Nothing found.</li>';
+  }
+  function move(d: number): void {
+    if (!shown.length) return;
+    sel = (sel + d + shown.length) % shown.length;
+    list.querySelectorAll('li[role=option]').forEach((li, i) => li.setAttribute('aria-selected', String(i === sel)));
+    list.querySelector(`#sr-${sel}`)?.scrollIntoView({ block: 'nearest' });
+  }
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') (e.preventDefault(), move(1));
+    else if (e.key === 'ArrowUp') (e.preventDefault(), move(-1));
+    else if (e.key === 'Enter' && shown[sel]) {
+      e.preventDefault();
+      location.href = shown[sel].u;
+      dlg.close();
+    }
+  });
+  // Following a link to another part of the same page doesn't reload it: close the dialog.
+  list.addEventListener('click', () => dlg.close());
+</script>
+
+<style is:global>
+  .search-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--muted);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  .search-btn:hover {
+    color: var(--ink);
+    border-color: var(--accent);
+  }
+  .search-btn kbd {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    border: 1px solid var(--line-soft);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  @media (max-width: 700px) {
+    .search-btn-l,
+    .search-btn kbd {
+      display: none;
+    }
+  }
+  .search-dlg {
+    width: min(680px, calc(100vw - 32px));
+    max-height: min(640px, calc(100vh - 80px));
+    margin: 60px auto auto;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--bg);
+    color: var(--body);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
+    overflow: hidden;
+  }
+  .search-dlg[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  .search-dlg::backdrop {
+    background: rgb(0 0 0 / 0.45);
+  }
+  .search-box {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .search-box input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: 1rem;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .search-box input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .search-x {
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 0 10px;
+    cursor: pointer;
+  }
+  .search-res {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    overflow: auto;
+    flex: 1;
+  }
+  .search-res a {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .search-res li[aria-selected='true'] a,
+  .search-res a:hover {
+    background: var(--raised);
+  }
+  .sr-k {
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .sr-h {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .sr-x {
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+  .sr-x mark {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    color: var(--ink);
+    border-radius: 2px;
+  }
+  .search-empty {
+    padding: 14px 10px;
+    color: var(--muted);
+  }
+  .search-foot {
+    margin: 0;
+    padding: 8px 14px;
+    font-size: 0.75rem;
+    color: var(--muted);
+    border-top: 1px solid var(--line-soft);
+  }
+</style>

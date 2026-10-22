@@ -1,0 +1,69 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Detour, or your own planner'
+order: 10
+part: Navmeshes
+summary: 'What Detour adds on top of Recast''s polygons (queries, path corridors, crowds, tiles and temporary obstacles), what it assumes, and when to keep the navmesh but write your own search: custom costs, time-slicing, and vehicles that can''t turn on the spot.'
+---
+import Tip from '../../components/lesson/Tip.astro';
+
+[Recast](/ai/navmesh-inside-recast/) builds the navmesh. **Detour** is its runtime: everything that happens with the navmesh during play. Like Recast, it's a set of pieces, and it's common to keep some and replace others.
+
+## What Detour gives you
+
+- **The navmesh itself** (`dtNavMesh`): tiles of polygons, links between them across tile edges, off-mesh connections (jumps, ladders, doors), and a bounding-volume tree per tile for fast spatial lookups. Tiles can be added and removed at run time.
+- **Queries** (`dtNavMeshQuery`):
+  - `findNearestPoly`: which polygon is this point on (or nearest to)?
+  - `findPath`: A* over polygons, giving a **corridor**, the list of polygons to cross;
+  - `findStraightPath`: the corners of the shortest path through that corridor, by the funnel algorithm (string pulling);
+  - `raycast`, `moveAlongSurface`, `findDistanceToWall`, random points, polygons in a radius.
+- **Sliced pathfinding**: `findPath` split across frames with a fixed number of iterations per call, so hundreds of agents can request paths without a spike.
+- **The path corridor** (`dtPathCorridor`): keeps an agent's corridor valid as it moves and gets pushed around, trimming the start, re-joining after detours and optimising the visible part, without replanning from scratch.
+- **The crowd** (`dtCrowd`): corridor following, local avoidance by [adaptive velocity sampling](/ai/local-avoidance/), and steering for many agents at once.
+- **The tile cache** (`dtTileCache`): compressed per-tile layers plus temporary obstacles (cylinders, boxes) that rebuild only the tiles they touch, much faster than re-running Recast. It's the same [dirty-tile](/ai/cover-in-play/) idea as keeping cover valid.
+
+The [pathing lab](/pathing-lab/#concept-navmesh) builds a tiled Recast navmesh and runs Detour's `findPath` alongside its own search as a cross-check.
+
+## What Detour assumes
+
+Detour is very good at one problem: getting a **point-sized, holonomic** agent (one that can move in any direction, and turn on the spot) along the **shortest** path. Each part of that sentence is a place where your game might differ:
+
+- **Agent size** is baked into the navmesh by erosion: one navmesh per size class.
+- **Shortest** is measured by distance with per-area cost multipliers. Costs that depend on the situation (exposure to known enemies, a danger map, the time of day) need a custom query filter or your own search.
+- **Holonomic** is the big one. `findStraightPath` returns corners. Someone on foot can turn on a corner; a cart, a wagon or a horse with a turning circle can't.
+
+## Keep the navmesh, replace the search
+
+Writing your own A* over Recast's polygons is less work than it sounds. The polygon mesh gives you nodes (polygons) and edges (shared edges, or *portals*), and the funnel algorithm turns a polygon sequence into corners. Reasons to do it:
+
+- **Custom costs** from your own data: an exposure map, influence maps, the traffic and choke analysis from the terrain lessons. Cost an edge by sampling them along it.
+- **Stepping, debugging and determinism**: your own search can be time-sliced exactly how your scheduler wants, drawn step by step, and kept deterministic on every platform.
+- **Different search problems**: many goals at once (a Dijkstra flood for "nearest cover"), many agents to one goal (a flow field over polygons), or a hierarchy over Recast's regions.
+
+## Vehicles that can't turn on the spot
+
+For a vehicle, the navmesh is still the best description of where it can drive, but the path has to respect its turning radius and maybe let it reverse. The options, roughly from cheapest to most robust:
+
+1. **Smooth Detour's path.** Replace each corner with an arc of the minimum turning radius, or fit a spline inside the corridor. Cheap, and fine on roads and open ground. It fails when a turn is tighter than the vehicle allows: the smoothed path leaves the corridor and there's no fix except searching again.
+2. **Search in poses, inside the corridor.** Run a **hybrid A\*** or **lattice** planner over *(x, y, heading)*, using drivable motion primitives (short arcs forwards and backwards), and only accept poses inside the polygons of Detour's corridor. Detour's path length makes a good heuristic. This keeps the search small and respects the turning radius.
+3. **Search in poses, on the whole navmesh.** When the corridor is too tight (a three-point turn needs space the shortest path never visits), drop the corridor restriction and use the navmesh only as the "is this pose free?" test, with a Reeds–Shepp curve as the last step to the goal.
+
+The pathing lab has all three ingredients: [the problem](/pathing-lab/#concept-holonomic), [curves with a turning radius](/pathing-lab/#concept-curves), and [hybrid A\*](/pathing-lab/#concept-hybrid) and [lattice planners](/pathing-lab/#concept-lattice) running on the same maps as the navmesh.
+
+<Tip title="Keep Detour's queries even if you replace its search">
+`findNearestPoly`, `raycast`, `findDistanceToWall` and the BV-tree lookups are useful to any planner: they answer "where am I on the mesh?", "can I drive straight there?" and "how much room is there?". Replacing `findPath` doesn't mean replacing the rest.
+</Tip>
+
+## In an ECS
+
+- **The navmesh is a resource**, owned by a singleton or the engine, with tiles swapped in by a background job when they're rebuilt.
+- **Path requests are components**: a `PathRequest` added to an agent, processed by a system with a budget of search iterations per frame (sliced, so a burst of requests spreads over several frames), producing a `PathCorridor` component.
+- **Following** reads the corridor and writes a desired velocity for [steering](/ai/steering/); for vehicles, the planned poses.
+- **Tile rebuilds invalidate corridors**: when a tile changes, agents whose corridors cross it get a new `PathRequest`. An observer on a tile-changed event, or a relationship from agent to the tiles its corridor uses, finds them.
+
+## Takeaways
+
+- **Detour is Recast's runtime**: navmesh tiles, queries, sliced A*, path corridors, crowds and a tile cache for temporary obstacles.
+- **It assumes a point-sized, holonomic agent on the shortest path**; erosion handles size, and the rest may not fit your game.
+- **Your own search over Recast's polygons** is straightforward, and buys custom costs, control over time-slicing and determinism, and other search shapes.
+- **For vehicles**, smooth the path where turns are gentle, and search in poses (hybrid A* or a lattice) inside or over the navmesh where they aren't.

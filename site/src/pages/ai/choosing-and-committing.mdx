@@ -1,0 +1,93 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Choosing and committing
+order: 2
+part: Utility
+summary: 'Scoring is half the job. How to pick from the scores (best, weighted random, dual utility), why agents flip-flop between two actions, and the tools that stop it: inertia, commitment, and considerations that don''t undo themselves. With the agent fighting live.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[The last lesson](/ai/utility-scoring/) scored every behaviour from 0 to 1. Now the agent has to act on those scores, many times a second, in a world that's changing under it. Two things go wrong at this stage: the choice is too predictable, or it isn't stable enough.
+
+## The arena
+
+Here's the agent from the inspector, a battle-mage, fighting goblins. It has a staff that holds six charges and spare crystals, can carry one potion, and gets far fewer hits when a crate is between it and the goblin archer (the green ring). Goblins come in waves of one to four. The chart shows every behaviour's score over the last 20 seconds; the strip underneath shows what the agent actually did. **Why**, beside the arena, takes the current tick apart: the top three behaviours, each score as the product of its considerations, and any bonus for sticking with the current action. Press **Step** to go a tick at a time.
+
+<AiWidget kind="utility-sim" />
+
+Everything is deterministic: the same fight and the same settings replay exactly, so **Restart** after changing a setting compares like with like.
+
+## Picking from the scores
+
+**Highest score** is the obvious rule, and usually the right one for anything a player is fighting. It's predictable, which is mostly good and occasionally robotic: two guards in the same situation do exactly the same thing.
+
+**Weighted random among the best.** Keep the options within some fraction of the best score (here 80%), and pick between them at random, weighted by score. A score of 0.9 still wins far more often than 0.75, but not always. This is how you get variety in idle behaviour, barks or which cover to use. Re-rolling every decision would make the agent twitch, so roll only when the current choice drops out of the pool. Use the agent's own seeded random stream so replays stay [deterministic](/engine/determinism/).
+
+**Dual utility** (described by Kevin Dill) gives each behaviour a **rank** as well as a score. Only the highest rank with a meaningful score is considered, and the scores pick within it. Ranks express "this overrides everything" without inflating numbers: here *Heal* has rank 3, *Patrol* rank 0, everything else rank 2. Ranks are blunt, though. An earlier version of this arena gave *Get potion* and *Get crystals* a lower rank than fighting, so they could only win when nothing else scored. The agent stopped restocking during fights, and its average survival in our tuning runs fell from about 160 seconds to about 105.
+
+Over 40 fights, these three land close together in this arena (168 s average survival for highest score, 156 s weighted random, 154 s dual utility, all with the light inertia and commitment described below), which is the point: the selection rule is a matter of feel. The bigger effects are next.
+
+## Flip-flopping
+
+Switch **"Get potion" safety check** to **Exposed (not in cover)** and press **Restart**. Sooner or later the agent gets hurt while the potion shrine is full, and the strip turns into a barcode: *Take cover*, *Get potion*, *Take cover*, *Get potion*, every tenth of a second, dithering on the spot under fire until it dies.
+
+Here's what happens:
+
+1. In cover, the agent isn't exposed, so *Get potion* scores well and wins.
+2. Getting the potion means walking away from the crate, so on the next tick it *is* exposed.
+3. Now *Get potion* scores low and *Take cover* scores high, so it steps back into cover. Back to 1.
+
+The behaviour **changes its own input**: doing the action invalidates a consideration that made it win. No amount of tuning the curves fixes that, because the scores aren't close; they swing from one extreme to the other.
+
+Over the same 40 fights, the agent with that one consideration survives 110 seconds on average, against 163 with the version that asks *"have I taken damage recently?"* instead. Damage taken doesn't change the moment the agent steps out of cover, so the decision holds long enough to finish.
+
+<Tip kind="warn" title="Look for considerations the action itself changes">
+Distance to a target in a "go to target" behaviour, "in cover" in anything that moves, "has line of sight" in a flanking move, "is hungry" in "eat". These are all true at the start and false a moment into the action, or the other way round. Use a factor the action doesn't immediately change, add the action's own progress as a factor, or let the action own the decision until it finishes.
+</Tip>
+
+## Inertia and commitment
+
+Even without self-invalidating considerations, two behaviours with similar scores will trade places as small things change. That's **oscillation**, and it costs more than looks: in this arena, a recharge or heal that's interrupted loses its progress.
+
+Two standard fixes, both in the widget:
+
+- **Inertia** adds a small bonus to whatever the agent is already doing, so a rival has to beat it by a margin, not by 0.001. It's hysteresis for scores.
+- **Commitment** adds a larger bonus while the current action is *in progress*: during the first second of any action, and while a recharge or heal is underway. Real actions have a natural "don't interrupt me" window: an animation that has to finish, a recharge you can't cancel halfway.
+
+```cpp
+ActionId choose(std::span<const Scored> scored, const AgentState& st, const Tuning& t) {
+    ActionId best = ActionId::None;
+    float best_score = 0.0f;
+    for (const Scored& s : scored) {
+        float v = s.score;
+        if (s.action == st.current && v > 0.0f) {
+            v += t.inertia;
+            if (st.committed()) v += t.commitment;   // mid-recharge, mid-animation, first second...
+        }
+        if (v > best_score) { best_score = v; best = s.action; }
+    }
+    return best;
+}
+```
+
+Measured over 40 fights:
+
+| Setting | Average survival | Action switches / min | Recharges & heals interrupted |
+|---|---|---|---|
+| No inertia, no commitment | 163 s | 39 | 4.4 per fight |
+| Inertia +0.05, commitment +0.2 | 168 s | 29 | 0.9 |
+| Inertia +0.15, commitment +0.5 | 164 s | 26 | 0.0 |
+
+A little stickiness removes a quarter of the switching and nearly every wasted recharge. Too much and the agent starts finishing things it should abandon: commitment +0.5 never interrupts a recharge, even when an enemy walks up and it would be better off moving. The extreme is an agent that commits to everything, which is a state machine.
+
+<Tip title="Other ways to stay stable">
+**Cooldowns** (a behaviour can't be chosen again for N seconds after it ends) stop rapid retries. **Different thresholds for entering and leaving** (start fleeing at 30% health, stop at 50%) are classic hysteresis, and with curves they're two considerations that read the current action. **Decide less often**: at 3–5 decisions a second instead of every frame, small fluctuations simply aren't seen. And **interrupt only at safe points**: let an action report when it can be abandoned.
+</Tip>
+
+## Takeaways
+
+- **Highest score** for anything that should be predictable; **weighted random near the top** for variety; **dual utility** ranks for genuine overrides, used sparingly.
+- **Self-invalidating considerations** cause flip-flopping that tuning can't fix. Find the factor the action itself changes and replace it.
+- **Inertia** stops small-margin oscillation; **commitment** protects actions that lose progress when interrupted. A little of each goes a long way; too much makes the agent stubborn.
+- **Make it deterministic and replayable**, so you can restart the exact fight after each change.

@@ -1,0 +1,22 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base
+  title="Tactics Lab"
+  section="tactics-lab"
+  description="Terrain analysis for game AI on a 2.5D grid: clearance, choke points, openness, cover generation, exposure and cover queries."
+>
+  <h1 style="position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap">Tactics lab</h1>
+  <main id="app" class="app-root"></main>
+  <noscript><p>The Tactics Lab needs JavaScript.</p></noscript>
+</Base>
+
+<script>
+  import '../lab/lab.css';
+  import '../tactics/tactics.css';
+  import '../tactics/tactics-embed.css';
+  import { TacticsApp } from '../tactics/app';
+
+  new TacticsApp(document.getElementById('app')!);
+</script>

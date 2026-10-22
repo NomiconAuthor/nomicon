@@ -1,0 +1,20 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base
+  title="Pathing Lab"
+  section="pathing-lab"
+  description="Watch A*, HPA*, navmeshes, roadmaps and vehicle planners search the same map, step by step."
+>
+  <h1 style="position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap">Pathing lab</h1>
+  <main id="app" class="app"></main>
+  <noscript><p>The Pathing Lab needs JavaScript.</p></noscript>
+</Base>
+
+<script>
+  import '../lab/lab.css';
+  import { App } from '../lab/ui/app';
+
+  new App(document.getElementById('app')!);
+</script>

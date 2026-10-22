@@ -1,0 +1,108 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Behaviour trees
+order: 3
+part: Trees and plans
+summary: 'A behaviour tree is a priority list you can read: selectors try children until one works, sequences run children until one fails, and every node reports success, failure or still running. The same agent driven by a tree, with every node lit up as it ticks, and what reactive and memory composites change.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Utility AI answers "what's the best thing to do?" by scoring everything. A **behaviour tree** answers "what should I do?" by walking a structure a designer wrote, in priority order. It's the most widely used decision structure in games, and the reason is visible below: you can read it.
+
+## Nodes and statuses
+
+Every node, when **ticked**, returns one of three statuses: **success**, **failure**, or **running** (not finished yet, tick me again). A handful of node kinds build everything:
+
+- **Selector** (also called fallback, `?`): tick children in order and stop at the first that *doesn't fail*. "Try this; if that's no good, try the next." Order is priority.
+- **Sequence** (`→`): tick children in order and stop at the first that *doesn't succeed*. "Do this, then this, then this", or with conditions first, "if this and this, then do this".
+- **Condition** (`◇`): a check that succeeds or fails immediately.
+- **Action** (`▶`): does something in the world. Returns running while it's underway, success when done, failure if it can't.
+- **Decorators** wrap one child and change its result or when it runs: invert, repeat, time out, cool down, "only if the blackboard key is set".
+
+A **blackboard** (a per-agent key/value store) holds what nodes share: the current target, the chosen cover spot, the last known enemy position. Here the conditions read the same factors the utility agent used.
+
+## The tree in the arena
+
+Same agent, same arena, same actions; only the brain differs. The tree is on the right, lit up with what each node returned on the last tick. Nodes that weren't reached are dimmed. Under the arena, **Why** lists the same tick in the order the tree visited it, indented by depth, and sums it up in one line: which branches the root tried before one of them ran.
+
+<AiWidget kind="bt" />
+
+Press **Step** a few times during a fight and follow the tick from the root:
+
+- **Patch up** fails at its first condition while health is fine, so the root moves on. Below 40 health it runs: get a potion if needed (a selector: "already carrying one" or "go and get one"), then heal.
+- **Recharge** only runs with an empty staff and spare crystals, and it goes somewhere safe first. *Take cover* returns running while it moves, success once the agent is in cover, and only then does the sequence reach *Recharge*.
+- **Fight** prefers cover when it's taking hits and exposed, and otherwise attacks.
+- **Patrol** at the bottom catches everything else.
+
+## Reactive or memory
+
+The tree's real design decision is what happens on the *next* tick while something is running.
+
+**Reactive** composites start from the root every tick. Higher-priority branches are re-checked constantly, so when health drops below 40 mid-fight, *Patch up* takes over on the very next tick. The cost is work: this tree visits about 12 nodes a tick on average, up to 18.
+
+**Memory** composites remember which child was running and resume it directly, skipping everything before it. That's cheaper (about 3 nodes a tick) and it's what you want for a genuine sequence ("walk to the door, open it, go through"): the earlier steps shouldn't be re-run. But at the root it's a disaster. Switch **Composites** to **Memory** and **Restart**. While *Patrol* is running the agent ignores enemies until it reaches the next waypoint; once it's attacking it keeps attacking, never re-checking its health, until the staff runs dry. Over 40 fights, the memory version survives 118 seconds on average and kills 9 enemies; the reactive version survives 162 and kills 20.
+
+Real engines combine the two. Unreal's behaviour trees, for example, are event-driven: instead of re-ticking the whole tree, a decorator can be set to **abort** the running branch when its condition changes ("observer aborts" self, lower priority, or both). It's the reactive behaviour, paid for only when something actually changes.
+
+```cpp
+enum class Status { Success, Failure, Running };
+
+struct Node { virtual ~Node() = default; virtual Status tick(Agent& a) = 0; };
+
+struct Selector : Node {
+    std::vector<std::unique_ptr<Node>> children;
+    Status tick(Agent& a) override {
+        for (auto& c : children) {                       // reactive: always from the first child
+            Status s = c->tick(a);
+            if (s != Status::Failure) return s;          // success or running stops here
+        }
+        return Status::Failure;
+    }
+};
+
+struct Sequence : Node {
+    std::vector<std::unique_ptr<Node>> children;
+    Status tick(Agent& a) override {
+        for (auto& c : children) {
+            Status s = c->tick(a);
+            if (s != Status::Success) return s;          // failure or running stops here
+        }
+        return Status::Success;
+    }
+};
+
+struct Condition : Node {
+    bool (*test)(const Agent&);
+    Status tick(Agent& a) override { return test(a) ? Status::Success : Status::Failure; }
+};
+```
+
+<Tip title="Share the tree, not the state">
+The tree's structure is the same for every agent of a type, so build it once. Per-agent state is tiny: which child each memory composite is running, decorator timers, the blackboard. Keep that in a component (`BtState`) and pass it into `tick`, and a thousand agents share one tree. In an ECS this also makes the tick a plain system over `(BtState, Blackboard, …)` that parallelises across agents.
+</Tip>
+
+## Strengths and weaknesses
+
+**What trees do well:**
+
+- **They're readable and debuggable.** Lighting up the nodes, as above, tells you exactly why the agent is doing what it does. Designers can edit them in a visual editor.
+- **Sequences are natural.** Multi-step behaviours (go to cover, *then* recharge) are a sequence, where utility AI needs either separate behaviours or an action that runs its own little script.
+- **Priority is explicit.** If something must always win, put it first.
+
+**Where they struggle:**
+
+- **Thresholds are back.** `health < 40` and "taking hits ≥ 14" are exactly the magic numbers utility AI replaced with curves. A tree is a set of `if`s with good tooling.
+- **Priority is fixed.** The order of a selector's children can't depend on the situation. "Attack, unless the enemy is weak and I'm hurt, in which case..." turns into duplicated branches and extra conditions.
+- **Big trees get hard to change.** Inserting a behaviour means deciding where it goes relative to everything else, and subtle interactions between branches appear.
+
+That's why hybrids are common: a **utility selector** node that scores its children instead of trying them in order, keeping the tree for structure and sequences and the curves for choosing between options. [Choosing an architecture](/ai/choosing-an-architecture/), two lessons on, comes back to this.
+
+Trees came to wide attention through *Halo 2*'s AI and are now built into Unreal and most other engines. They suit anything with prioritised, step-by-step behaviour, not only combat: a shopkeeper's daily routine, a boss's attack phases, a companion keeping up with the player.
+
+## Takeaways
+
+- Nodes return **success, failure or running**; **selectors** try children until one doesn't fail, **sequences** run children until one doesn't succeed.
+- **Reactive** composites re-check higher priorities every tick; **memory** composites resume the running child. Use memory inside sequences, reactivity (or event-driven aborts) at the decision points.
+- Trees are **readable, debuggable and good at sequences**, but bring back thresholds and fixed priorities.
+- **Share the tree; keep per-agent state small** and in a component.

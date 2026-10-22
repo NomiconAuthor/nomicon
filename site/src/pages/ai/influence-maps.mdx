@@ -1,0 +1,86 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Influence and threat maps
+order: 14
+part: Reading the world
+summary: 'Terrain analysis describes the map; influence and threat maps describe the situation on it. Whose ground is whose and where the front line runs, where an enemy could hit you from, by what you know (and what you only knew a while ago), and how a utility score or a path cost reads it.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[Terrain analysis](/ai/terrain-chokes/) and [cover](/ai/cover-in-play/) describe the map: where it's narrow, where you can hide. They're baked once and change only when the map does. What each unit can see says where the enemy is right now. An **influence map** sits between the two: a grid over the map, recomputed every so often, holding a number per cell that sums up the *situation*. Whose ground is this? Is it contested? Can an enemy hit me if I stand here? Every agent can then ask those questions with one lookup instead of reasoning about every unit in the game.
+
+The idea goes back to strategy games (Paul Tozour's "Influence Mapping" in *Game Programming Gems 2* is the classic introduction) and is a staple of tactical shooters; Dave Mark's *Modular Tactical Influence Maps* in *Game AI Pro 2* is the modern, utility-flavoured take this lesson follows.
+
+<AiWidget kind="influence" />
+
+## Influence: whose ground is it?
+
+Each unit spreads a value that's highest where it stands and falls to zero at some range (here 28 m), and each side's values are added up. Two numbers fall out of the two sides' maps:
+
+- **Control** = knights − goblins. Positive is ground the knights hold, negative is the goblins', and the cells near zero where both are present are the **front line** (the dots in the widget).
+- **Tension** = knights + goblins. High where *both* sides are strong at once: contested ground, where fights will happen.
+
+A third is often derived from them: **vulnerability** = tension − |control|, high where both sides are present and neither is winning.
+
+How the value spreads matters. **In a straight line**, influence passes through buildings: a unit on one street "controls" the next street over, which it can neither reach nor see. **Along the streets**, the value spreads by walking distance (a flood over walkable cells, the same [Dijkstra](/pathing-lab/) the pathing lab uses), so influence goes round buildings and stops at walls. Switch between them in the widget and watch the goblins' control stop leaking into the knights' side of the blocks. The flood costs a little more to compute and is almost always the more honest picture.
+
+<Tip kind="note" title="Momentum and decay">
+Many games don't recompute influence from scratch: each update, every cell blends towards the maximum of its neighbours' values (falling off with distance), plus the units' own stamps. With a *momentum* term it keeps a memory of where units have been, and with a *decay* term that memory fades. It's cheap to update incrementally, and it's the same thing as the flood above, spread over several frames.
+</Tip>
+
+## Threat: where can they hit me?
+
+Influence answers "whose area is this"; it doesn't say where an arrow can reach. For that, the **threat map**: for each enemy, every walkable cell within bow range (here 36 m) that it can see a standing body in, weighted to fall off with distance. It's the [exposure layer](/tactics-lab/) from the cover lessons, computed for every known enemy at once and kept up to date. Show **Threat to the knights**: the goblins' fans are sightlines down the streets, and the gaps between them are where the knights can move unseen.
+
+Then add what we don't know. Two goblins are in sight now; four were last seen a while ago. Where are they now? Anywhere they could have walked since: a ring of radius *speed × age* (here 1.5 m/s), measured by walking distance. The map spreads each one's threat over a dozen possible positions inside that ring, and scales it by how sure we still are, falling off as *e*<sup>−age/30 s</sup>. Change **Unseen enemies last seen**:
+
+| Last seen | Town under threat | Line-of-sight tests |
+|---|---|---|
+| just now | 25% | 12,591 |
+| 10 s ago | 43% | 95,352 |
+| 30 s ago | 55% | 103,300 |
+| 60 s ago | 34% | 97,916 |
+
+As the sightings age, threat first spreads (they could be anywhere nearby, so more of the town *might* be watched), then fades (after a minute, we no longer trust that they're there at all). And uncertainty is expensive: twelve possible positions cost twelve times the rays of one known position.
+
+## Using it
+
+**In a utility score.** A map is a factor like any other: "threat at this spot", "control at this spot", "tension within 10 m". A [cover query](/ai/cover-in-play/) multiplies in a consideration on the threat at each candidate; an *advance* behaviour scores higher where control is ours; a *flank* behaviour looks for cells near the front line with low threat. The [utility lessons](/ai/utility-scoring/) take it from there: the map turns "where are the enemies and what can they see" into one number per cell, which is exactly what a consideration wants.
+
+**In a path cost.** Multiply each metre's cost by (1 + *k* × threat), and the [shortest path](/pathing-lab/) becomes the *safest reasonable* path. *k* says how much a metre of danger is worth in metres of walking:
+
+| Route (enemies last seen 10 s ago) | Length | Metres in possible enemy sight | Danger along it |
+|---|---|---|---|
+| Shortest | 65 m | 21 m | 8.13 |
+| Weighs threat ×2 | 67 m | 4 m | 0.66 |
+| Weighs threat ×10 | 73 m | 0 m | 0.00 |
+
+Twelve per cent further, never seen. With older sightings it gets subtler: at 30 s the ×10 route walks **38 m** in *possible* sight against the shortest route's **28 m**, yet its danger is **1.31** against **10.00**. Threat from a stale sighting is faint and spread thin, and the route trades a little of it for staying out of the strong, recent sightlines. That's the point of weighting by confidence: it treats "a goblin could be there" and "a goblin is watching this street" differently.
+
+<Tip title="Several maps, combined by the reader">
+Keep the maps separate (each side's influence, threat, last-known positions, your own static exposure) and combine them where they're used, with weights that belong to the behaviour asking. An archer looking for a position and a healer looking for a path want different mixes of the same maps. This is the "modular" in modular influence maps.
+</Tip>
+
+## What it costs, and how to keep it cheap
+
+- **A coarser grid.** One-metre cells suit a demo. Two to four metres is typical for influence, and a 4 m grid has a sixteenth of the cells.
+- **Update rarely, and in slices.** Positions change every frame; the *situation* doesn't. Two to four updates a second is plenty, and the work splits naturally by enemy, so it time-slices or runs as jobs that merge in a fixed order ([jobs](/engine/jobs-and-task-graphs/) and [determinism](/engine/determinism/)).
+- **Precompute visibility.** The static map's line of sight doesn't change: a baked cell-to-cell visibility table (at a coarse resolution) turns each test into a lookup, and caching recent results per cell pair helps when the same questions come up every update.
+- **Treat stale enemies more cheaply.** Their threat changes slowly: recompute it every second or two, use fewer possible positions, or spread it with a flood instead of line of sight.
+- **One map per side, not per agent.** Threat to the knights is the same for every knight, so it's computed once and shared: it belongs to the side's knowledge, not the individual's.
+
+## In an ECS
+
+- **The maps are resources**, one set per side, owned by a singleton (or by a side entity) and double-buffered so readers always see a complete map while the next one is built.
+- **A stamping system** reads `Position` and `Side` and writes influence; a **threat system** reads the side's knowledge of the enemy (known positions, last-seen positions and their ages) rather than the enemies' true positions. The AI must only threaten itself with what it knows.
+- **Readers sample, never write.** Utility considerations and path costs read cells; nothing else touches the maps.
+
+## Takeaways
+
+- **Influence maps** sum each side's presence into a grid: **control** (whose ground), **tension** (contested ground), and the **front line** between.
+- **Spread by walking distance**, not straight-line distance, so influence respects walls.
+- **Threat maps** mark where an enemy can hit you: range plus line of sight, weighted by distance.
+- **Uncertainty is part of the map:** a stale sighting spreads over where the enemy could be and fades with time.
+- **Use them as factors:** a consideration in a utility score, or a multiplier on path cost. *k* is how much danger is worth in metres.
+- **Keep them cheap and shared:** coarse cells, a few updates a second, precomputed visibility, and one map per side.

@@ -1,0 +1,100 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Networking patterns
+order: 17
+part: Engine integration
+summary: 'Two worlds that must agree on what an entity id means. Making ids match with make_alive, keeping local ids out of the way with entity ranges, choosing what to send with a Replicated tag, and sending frequent and rare data differently.'
+---
+import FlecsNet from '../../components/FlecsNet.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+flecs has no networking layer, and that's deliberate: what to send, how often and how reliably is a game decision. What flecs does give you is a set of id tools that make the usual designs straightforward, and a few traps that are easy to fall into. This lesson collects the patterns that come up again and again.
+
+The running example is a server-authoritative game. The server owns the ships, and the client mirrors them by **using the same entity ids**, so a message can say "entity #5001 moved" and both sides know which entity that is.
+
+## Entity ids have two halves
+
+An entity id is 64 bits: a 32-bit **index** and, above it, a 16-bit **version** (sometimes called the generation). The top bits are reserved for flags. When an entity is deleted, its index goes on a recycle list. The next entity to take that index gets the version bumped by one, so `#5000 v1` and the deleted `#5000 v0` are different ids, and `is_alive` on the old one returns false. That's what makes holding on to an id safe (see [entities](/flecs/entities/)), and it matters here because the version has to travel with the id.
+
+## Making the client use the server's ids
+
+The client can't call `entity()` and hope for the right number. It creates the entity with a specific id instead:
+
+```cpp
+flecs::entity e = world.make_alive(server_id);   // C: ecs_make_alive(world, server_id)
+```
+
+`make_alive` guarantees that exactly that id (index and version) is alive afterwards. Two cases need care:
+
+- **The same id is already alive.** Then `make_alive` does nothing, which is what you want if it's the entity you replicated last time. It's a silent disaster if that id belongs to something the client made itself.
+- **The index is alive with a different version.** The client still has `#5000 v0` (its delete hasn't arrived, or arrived after the spawn) and the server sends `#5000 v1`. `make_alive` refuses. Delete the stale entity first, or use `set_version` if you deliberately want to move an existing entity to the new version.
+
+## Try it
+
+Two real flecs worlds run below, one for the server and one for the client. Start with ranges **off**:
+
+1. Spawn a local spark on the client.
+2. Spawn a ship on the server.
+3. Send an update.
+
+Both worlds handed out the same next id, so the ship's components land on the client's spark. Then turn ranges **on** (which resets both worlds) and do the same thing.
+
+To see versions at work: with a ship already on the client, delete it on the server and spawn another, which recycles the index with a new version. Tick **lose the deletes** and send. The client still has the old version alive, `make_alive` refuses the new one, and the client has to delete the stale entity first.
+
+<FlecsNet />
+
+## Entity ranges
+
+An entity range tells a world to hand out new ids from an interval:
+
+```cpp
+auto server_range = world.range_new(5000, 99999);   // pass 0 as max for no upper bound
+world.range_set(server_range);
+```
+
+While a range is active, both new and recycled ids come from it, and each range keeps its own recycle list, so ids never leak from one range into another. Ranges can't be deleted: to stop using one, activate another. When a range runs out, creating an entity asserts, so size them generously.
+
+That makes ranges a simple ownership scheme:
+
+- **Server-owned entities** come from the server's range.
+- **Client-local entities** (effects, UI, sounds, predicted things) come from a range the server never uses, so a replicated id can never collide with one.
+- **Several authorities** (a server plus clients that spawn their own projectiles, or peers in a peer-to-peer game) each get their own range, and the owner of an entity is visible from its id alone.
+
+<Tip kind="warn" title="Register first, then activate">
+Components, tags and other entities your startup code creates take ids like anything else. Do all registration *before* activating a range, in the same order on both sides, so those ids don't depend on which range happens to be active. If you send component ids over the wire rather than names, both sides must agree on them exactly.
+</Tip>
+
+## Choosing what to send: a Replicated tag
+
+Not every component should cross the network. Velocity might be server-only simulation state, and a client's `Spark` should never go anywhere. A neat way to say which ones do is to tag the **component entities**:
+
+```cpp
+struct Replicated {};
+world.component<Position>().add<Replicated>();
+world.component<Label>().add<Replicated>();
+```
+
+Components are entities, so this is ordinary data. The serialiser walks an entity's type and sends the components whose id `has<Replicated>()`, and anything new that a module tags is picked up without touching the networking code. You can also list every replicated component with a query for `Replicated`.
+
+Turning a component into bytes is a job for [reflection](/flecs/reflection-and-scripts/): with members described, one generic serialiser can write any replicated component. The demo uses flecs' JSON for readability; a real game would write a compact binary form from the same reflection data.
+
+## Frequent and rare data
+
+The widget sends two kinds of update, because data changes at very different rates:
+
+- **Frequent data** such as positions changes nearly every tick for anything moving. Tracking which ones changed costs about as much as sending them, so send them every packet (or at a fixed rate, or quantised and delta-compressed).
+- **Rare data** such as names, inventory or equipment changes occasionally and is worth tracking, so only changes go out.
+
+Ways to know what changed, roughly from fine to coarse:
+
+1. **An `OnSet` observer that records the entity** in a dirty list, as the server in the demo does. Precise, but it only sees writes that go through flecs: `set()`, or `modified()` after a write through a reference. A system that writes `Label&` through `each()` changes the value without any `OnSet`, unless it calls `modified()`.
+2. **Query change detection.** A cached query built with `detect_changes()` can tell you with `changed()` (or `it.changed()` per table) whether matched data was written since it was last iterated. It's per table, not per entity, so it answers "does this batch need sending at all?", which is cheap and often enough for coarse snapshots.
+3. **A `Dirty` tag.** Tempting and easy to query, but a regular tag moves the entity to another table when added and back when removed, twice per change per entity. If you want a marker, make it `DontFragment` or `CanToggle` (see [choosing storage](/flecs/storage-traits/)), or keep a plain list. `Sparse` doesn't help here: a Sparse tag is still part of the type, so adding it still moves the entity.
+
+<Tip title="Deletes need to be reliable and ordered">
+Positions can be dropped and the next packet fixes them. Spawns and deletes can't: a lost delete leaves a ghost on the client, and a delete that arrives after the spawn of the recycled id deletes the *new* entity unless you compare versions. Send them on a reliable channel and check the full id (index and version) before applying.
+</Tip>
+
+<Tip kind="note" title="One world per side, or two in one process">
+The demo runs two separate worlds, which is also how a listen server or a test harness can run server and client in one process. Ranges still matter there: the two worlds don't share ids, so nothing stops them from handing out the same ones.
+</Tip>

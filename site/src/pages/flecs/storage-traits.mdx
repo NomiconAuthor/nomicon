@@ -1,0 +1,75 @@
+---
+layout: ../../layouts/Lesson.astro
+title: "Choosing storage: column, Sparse, DontFragment, CanToggle"
+order: 14
+part: Designing your data
+summary: Four ways to store or switch a component, what each does to moves, pointers, queries and systems, and how to choose.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+import TryIt from '../../components/lesson/TryIt.astro';
+
+By default, a component is stored as a column in every table whose type includes it. Two traits change that:
+
+- **`Sparse`** stores the component's values outside the tables, in one sparse set per component. The component is still part of the entity's type, so adding or removing it still moves the entity between tables. But the *value* never moves, so pointers to it stay valid when the entity changes tables.
+- **`DontFragment`** uses the same sparse storage, but the component is **not part of the type** at all. Adding or removing it doesn't move the entity, and it never creates tables.
+
+## Same code, three storages
+
+`Health` is given to A and B, two frames run, and then A loses it. Two systems run each frame: `Regen` (over `Health`) and `Render` (over `Position`). Run it with each setup, and compare the tables, the sparse storage panel and the callbacks per frame:
+
+<FlecsDebugger scenario="traits" />
+
+| | Column (default) | Sparse | DontFragment |
+|---|---|---|---|
+| Adding / removing moves the entity | yes | yes | **no** |
+| Creates tables | yes | yes | **no** |
+| Value lives in | the table's column | a sparse set | a sparse set |
+| Pointer stable across moves | no | **yes** | **yes** |
+| `Regen` (`Health`) iterates | one table's column | tables, then each entity's value | each entity with `Health` |
+| `Render` (`Position`) callbacks | one per table | one per table | **fewer tables** |
+
+What the trace shows:
+
+- **Column:** `a.set<Health>` creates `[Position, Health]` and moves A; removing it moves A back. `Regen` is called once per table, with a contiguous array.
+- **Sparse:** the same moves and tables, plus a *sparse storage* step where the value is inserted. The `Health` chip on the table is dotted: it's in the type but has no column.
+- **DontFragment:** no table is created and nothing moves, only the sparse set changes. `[Position]` keeps all three entities, so `Render` has one table to visit.
+
+<TryIt preset="traits">Shield is Sparse, Burning and Selected are DontFragment. Add and remove them and see which ones move rows.</TryIt>
+
+## Sparse vs DontFragment, in more depth
+
+Both keep values in sparse sets, so it's tempting to always pick DontFragment ("no tables, no moves"). The flecs author points out the costs:
+
+- **Queries with several components are faster on Sparse.** A Sparse component is still in the table type, so a query can find candidate *tables* first and only then fetch values.
+- **Mixed queries favour Sparse.** With Sparse plus normal components, the fast table search still works. With DontFragment, matching is always done one entity at a time.
+- **The worst case is DontFragment mixed with table components.** Every row of every candidate table is checked individually for the DontFragment term.
+- **An entity with only sparse components moves cheaply.** If all of an entity's data is Sparse, moving to another table copies no column data, so it's constant time.
+
+There's one bonus for all-DontFragment queries in C++. When every component in `world.query<A, B>()` has the DontFragment trait at compile time (and none is inherited from prefabs), you get a `flecs::sparse_query`, which iterates the sparse sets directly and is much faster. Sparse alone doesn't qualify.
+
+**Rule of thumb from these:** for state that comes and goes constantly on a few entities (oiled, burning, wet, stunned), sparse storage is a good fit, and the flecs author recommends it for exactly that. Keep the difference in mind, though: with **Sparse**, every add and remove is still a table move (only the value stays put), so it suits that state when it's queried together with normal components and moves aren't the cost. **DontFragment** is the one that avoids the move; prefer it when the state is mostly looked up per entity, or queried on its own.
+
+## CanToggle: off without removing
+
+A fourth option for "this applies sometimes": keep the component and switch it off. With the `CanToggle` trait, `e.disable<T>()` / `e.enable<T>()` flip a bit in a per-table bitset, and queries skip disabled rows.
+
+<FlecsDebugger scenario="toggle" />
+
+- **The first disable is a move.** B moves into a table whose type includes `TOGGLE|Velocity`, the bitset column. Entities that have never been disabled stay where they were.
+- **After that, toggling is just a bit.** Enabling and disabling B again changes nothing in storage, and `Move` simply isn't called for disabled rows.
+- **The value is kept**, so enabling restores it exactly.
+
+That makes CanToggle the cheapest choice for something that flips on and off often but whose data you want to keep, such as a pausable effect or a temporarily inactive AI.
+
+<Tip kind="note" title="Choosing">
+- **Column (default):** components most entities have and that hot systems read. Contiguous columns are what makes iteration fast.
+- **Sparse:** stable pointers, large or non-movable data, and state that's queried alongside normal components. Adding and removing it still moves the entity.
+- **DontFragment:** data a few entities have, or that's added and removed often and mostly looked up per entity, where moves and extra tables cost more than per-entity matching.
+- **CanToggle:** state that switches on and off often but keeps its value.
+- **A field in a component:** state that changes every frame, where any of the above is still too much machinery.
+</Tip>
+
+<Tip kind="warn" title="DontFragment limitations (current flecs)">
+`DontFragment` components don't appear in an entity's type, and monitors don't trigger on them. Some query features (`Or`, `Optional`, `AndFrom`/`NotFrom`, inheritance) aren't supported for them yet, and they aren't serialised to JSON yet. Basic operations, simple and wildcard queries, and exclusive relationships all work.
+</Tip>

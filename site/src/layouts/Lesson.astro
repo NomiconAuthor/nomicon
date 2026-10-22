@@ -1,0 +1,79 @@
+---
+import Base from './Base.astro';
+import '../styles/lesson.css';
+
+interface Frontmatter {
+  title: string;
+  order: number;
+  summary: string;
+}
+interface Props {
+  frontmatter: Frontmatter;
+}
+const { frontmatter } = Astro.props;
+
+// Lessons are grouped by their folder: /engine/…, /flecs/…, /ai/…
+const SECTIONS: Record<string, { name: string; note?: string }> = {
+  flecs: { name: 'flecs lessons', note: 'Running flecs master (4.2 in progress), compiled to WebAssembly.' },
+  engine: { name: 'engine fundamentals', note: 'Measurements run in your browser, so absolute numbers vary; the ratios are the point.' },
+  ai: { name: 'game AI', note: 'Deciding, moving and reading the map. Every comparison runs on the same small, deterministic worlds, so the techniques can be compared fairly.' },
+};
+const sectionId = Astro.url.pathname.split('/').filter(Boolean)[0] ?? 'flecs';
+const section = SECTIONS[sectionId] ?? SECTIONS.flecs;
+const modules = import.meta.glob<{ frontmatter: Frontmatter; url: string }>(['../pages/flecs/*.mdx', '../pages/engine/*.mdx', '../pages/ai/*.mdx'], { eager: true });
+const lessons = Object.values(modules)
+  .filter((m) => m.url.startsWith(`/${sectionId}/`))
+  .map((m) => ({ ...m.frontmatter, url: m.url }))
+  .sort((a, b) => a.order - b.order)
+  .map((l, k) => ({ ...l, n: k + 1 }));
+const i = lessons.findIndex((l) => l.order === frontmatter.order);
+const number = lessons[i]?.n ?? frontmatter.order;
+const prev = lessons[i - 1];
+const next = lessons[i + 1];
+---
+
+<Base title={frontmatter.title} section={sectionId as never} description={frontmatter.summary}>
+  <div class="lesson-layout">
+    <nav class="lesson-nav" aria-label="Lessons">
+      <a class="ln-home" href={`/${sectionId}/`}>{section.name}</a>
+      <details class="ln-mobile">
+        <summary>Lesson {number} of {lessons.length} · all lessons</summary>
+        <ol>
+          {
+            lessons.map((l) => (
+              <li>
+                <a href={l.url} aria-current={l.order === frontmatter.order ? 'page' : undefined}>
+                  <span class="ln-n">{l.n}</span>
+                  {l.title}
+                </a>
+              </li>
+            ))
+          }
+        </ol>
+      </details>
+      <ol class="ln-list">
+        {
+          lessons.map((l) => (
+            <li>
+              <a href={l.url} aria-current={l.order === frontmatter.order ? 'page' : undefined}>
+                <span class="ln-n">{l.n}</span>
+                {l.title}
+              </a>
+            </li>
+          ))
+        }
+      </ol>
+      {section.note && <p class="ln-ver">{section.note}</p>}
+    </nav>
+    <article class="lesson">
+      <p class="kicker">Lesson {number}</p>
+      <h1>{frontmatter.title}</h1>
+      <p class="lede">{frontmatter.summary}</p>
+      <slot />
+      <nav class="pn" aria-label="Previous and next lesson">
+        {prev ? <a href={prev.url} class="pn-prev"><span>← Previous</span>{prev.title}</a> : <span />}
+        {next ? <a href={next.url} class="pn-next"><span>Next →</span>{next.title}</a> : <span />}
+      </nav>
+    </article>
+  </div>
+</Base>

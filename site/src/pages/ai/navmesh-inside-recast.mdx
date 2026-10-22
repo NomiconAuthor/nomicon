@@ -1,0 +1,76 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Inside Recast: from triangles to a navmesh'
+order: 9
+part: Navmeshes
+summary: 'Recast is a pipeline, not a black box: triangles, a voxel heightfield, filters, open spans, erosion, a distance field, regions, contours, polygons and a detail mesh. Every stage stepped through on a small scene, with what each one produces and when you could stop there and use it yourself.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Recast is usually used as one function call: geometry in, navmesh out. Inside, it's a pipeline of ten stages, each producing a data structure that's useful on its own. Knowing them means you can stop early and use what Recast has prepared for something else (a walkability grid, a clearance field, region outlines), or keep the whole build and replace only the runtime.
+
+The widget runs the real Recast (Mikko Mononen's library, compiled to WebAssembly via recast-navigation) stage by stage on a small scene: a 24 × 16 m floor with a wall, two boxes with a 0.8 m gap between them, steps up to a platform, a table reached by a ramp, a kerb, a crate with a ramp too steep to walk, and two pillars. The agent is 2 m tall, can climb 0.4 m and has a 0.6 m radius.
+
+<AiWidget kind="recast" />
+
+Click the top view to move the cross-section; the default one cuts through the table and its ramp.
+
+## The stages
+
+**1. Triangles.** The input is a triangle soup, usually the collision geometry, which is simpler than what's rendered. Each triangle is marked walkable if its slope is under the limit. That's the only use of the triangles' orientation: from here on, Recast works on voxels.
+
+**2. Heightfield.** Every triangle is rasterised into columns on a regular grid (cell size, here 0.25 m), and each column becomes a sorted list of solid **spans** (in cell-height steps, here 0.1 m). Note what a column through a hollow box contains: a span for the floor and another for the box's top, with air between. Recast never needed the box to be solid.
+
+**3. Filters.** Three passes correct the walkable flags:
+- **Low-hanging obstacles**: an unwalkable span just above a walkable one (within the climb height) becomes walkable, so kerbs and stair edges can be stepped onto.
+- **Ledges**: a walkable span whose drop to any neighbour is more than the climb height becomes unwalkable, so agents don't stand on the very edge of a drop.
+- **Low height**: a walkable span with less than the agent's height of air above it becomes unwalkable, which removes the floor under the table.
+
+**4. Compact heightfield.** Recast inverts the representation: rather than solid spans it stores the open space above each walkable one, with a link to each neighbour that's reachable within the climb height. This is the first stage that's a graph rather than geometry, and it's naturally multi-level: the table top and the floor beneath it are separate spans in the same column.
+
+**5. Erosion.** Spans within the agent's radius of an edge are made unwalkable, so the rest of the pipeline can treat the agent as a point. The 0.8 m gap closes for a 0.6 m radius; set the radius to 0.3 m and it opens.
+
+**6. Distance field.** For every walkable span, how far it is to the nearest edge. Recast uses it to grow regions from the middles of open spaces outwards; it's also the clearance field from the [terrain analysis lesson](/ai/terrain-chokes/), computed for free.
+
+**7. Regions.** Walkable spans are split into regions with no holes and no overlaps, each simple enough to turn into polygons:
+- **Watershed** floods outwards from the distance field's peaks. It gives the best-shaped regions and is the slowest.
+- **Monotone** sweeps along rows. It's fast and never leaves holes, but makes long thin regions and so long thin polygons.
+- **Layers** partitions so that no region overlaps itself vertically; it's what the tile cache uses, and it's good for levels with lots of overlapping floors.
+
+Regions smaller than a minimum are dropped, and small ones are merged into their neighbours.
+
+**8. Contours.** Each region's outline is traced along its cell edges (840 vertices for this scene), then simplified: vertices are kept where the outline changes neighbouring region, and the rest are dropped while the simplified line stays within the error limit (81 vertices at 1.3 cells). Long edges are split so polygons don't end up as slivers. Try **Simplify within 3 cells** to see corners cut, and 0.5 to see the outline follow the voxels' staircase.
+
+**9. Polygon mesh.** Each simplified contour is triangulated, and neighbouring triangles are merged into convex polygons of up to six vertices (33 here). Convexity is the point: any two points in one polygon can see each other, so a path only needs to know which polygons to cross.
+
+**10. Detail mesh.** The polygons are flat simplifications of the surface. The detail mesh adds triangles inside each one that follow the real height, sampled from the heightfield, so agents can be placed on the ramp rather than above or below it.
+
+The whole build takes tens of milliseconds for this scene in a browser. Real levels are split into **tiles** that build independently (and in parallel), so a change rebuilds only the tiles it touches: the [pathing lab](/pathing-lab/#concept-dirty) shows tiled rebuilds.
+
+## Stopping early
+
+Each stage's output is a general-purpose structure, and many games use Recast's middle without its end:
+
+| You want | Run Recast up to | Then |
+|---|---|---|
+| A voxel model for raster line of sight, sound or volumes | 2. Heightfield | Query the spans directly |
+| A walkable grid with heights, for clearance, cover or openness analysis | 3. Filters (or 4) | Run your own grid passes: the [tactics lab](/tactics-lab/) is one level of this |
+| A multi-level navigation graph for flow fields or voxel A* | 4. Compact heightfield | Search spans and their links |
+| Clearance for several agent sizes at once | 6. Distance field, skipping erosion | Look up "does radius *r* fit here?" per span |
+| An area graph for hierarchical planning, or choke points | 7. Regions | Find where regions meet |
+| Wall outlines for cover rails | 8. Contours | The [boundary walk](/ai/cover-generation/) starts here |
+| A navmesh with your own search | 9. Polygon mesh | [Write your own planner](/ai/navmesh-detour-or-your-own/) |
+| A standard navmesh | 10. Detail mesh | Detour |
+
+<Tip title="One build, several products">
+Nothing stops a bake from taking more than one thing out of the same run: the polygon mesh for pathfinding, the distance field for clearance and chokes, and the contours for cover rails, all from one pass over the geometry, all on the same tiles, and all invalidated together when a tile changes.
+</Tip>
+
+## Takeaways
+
+- **Recast is ten stages**, from triangles through voxels to convex polygons, and each stage's output is useful on its own.
+- **The heightfield and compact heightfield** are a voxel model and a multi-level walkability graph: often all a custom analysis needs.
+- **Erosion bakes in one agent size**; the distance field keeps every size available.
+- **Regions, contours and polygons** are where clearance, chokes and cover rails come from.
+- **Tiles** make it incremental: a change rebuilds only the tiles it touches.

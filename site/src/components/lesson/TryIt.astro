@@ -1,0 +1,52 @@
+---
+/** A "try it in the sandbox" link that opens the sandbox on a preset world. */
+interface Props {
+  preset: 'basics' | 'fragmentation' | 'traits' | 'empty';
+}
+const { preset } = Astro.props;
+---
+
+<a class="tryit" href={`/flecs/sandbox/?preset=${preset}`}>
+  <span class="tryit-k">Try it in the sandbox</span>
+  <span class="tryit-t"><slot /></span>
+  <span class="tryit-a" aria-hidden="true">→</span>
+</a>
+
+<style>
+  .tryit {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--paper);
+    color: var(--body);
+    text-decoration: none;
+  }
+  .tryit:hover {
+    border-color: var(--accent);
+  }
+  .tryit-k {
+    flex: none;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+  .tryit-t {
+    flex: 1;
+    min-width: 0;
+  }
+  .tryit-a {
+    color: var(--accent);
+  }
+  @media (max-width: 520px) {
+    .tryit {
+      flex-wrap: wrap;
+      gap: 4px 12px;
+    }
+  }
+</style>

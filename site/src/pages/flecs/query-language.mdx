@@ -1,0 +1,54 @@
+---
+layout: ../../layouts/Lesson.astro
+title: The query language
+order: 6
+part: Queries
+summary: Operators, wildcards, variables, traversal and fixed sources, tried live on a small world, plus what each one costs.
+---
+import FlecsQuery from '../../components/FlecsQuery.astro';
+import FlecsBench from '../../components/FlecsBench.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Systems, observers, the Explorer and the REST API all use the same query engine, and the same text syntax (the Flecs Query Language). A query is a list of **terms** separated by commas. Each term matches an id (a component, tag or pair) on a **source**, which is the entity being iterated (`$this`) unless you say otherwise.
+
+The playground below runs real queries against a small world: two parties (PartyA is a `Leader`), four units as their children with `Position`, some with `Velocity` and `Health`, `Player` or `Enemy` tags, a `(Faction, Red|Blue)` pair, and a `Game` entity holding `Time`. Pick an example or type your own. You'll see the results with each field's value (and where it came from), which tables matched, and flecs' query plan.
+
+<FlecsQuery />
+
+## The building blocks
+
+| Syntax | Meaning | Cost |
+|---|---|---|
+| `A, B` | entity has A **and** B | table match: cheap, cacheable |
+| `!A` | does **not** have A | table match |
+| `?A` | **optional**: return A if present (`is_set`) | table match |
+| `A \|\| B` | **or**: either id, the field says which | table match |
+| `(R, *)` | **wildcard**: any target; one result per matching pair | table match, more results |
+| `(R, $x)` | **variable**: capture the target in `$x` | depends on how `$x` is used |
+| `A(up R)` | **traversal**: get A from the entity found by following R upwards (e.g. the parent) | cached, with rematching |
+| `A(Game)` | **fixed source**: A always comes from entity `Game` | one lookup |
+| `A($x)` | **variable source**: A on whatever `$x` is bound to | per-result evaluation |
+
+The first rows are all decided per *table*: flecs checks a table's type once and returns its entities in one go, which is what caching stores. The last rows involve other entities, so flecs has to do extra work for each result. Open **Query plan** for `Position, (ChildOf, $party), Leader($party)` and you'll see the extra steps it plans for the variable.
+
+## The cost ladder
+
+A pattern users have measured and reported, for the same data organised three ways (100,000 entities, numbers from one native benchmark, so only the ratios matter):
+
+1. **Plain terms on one table** (`Hunger, HungerRate` where both live on a "stats" entity): iteration took about 0.0001 ms, because it is a single table.
+2. **Traversal** (`Hunger(up HungerLink), HungerRate(up HungerLink)` from the character): iteration about 3 ms, but building the query took about 90 ms, because traversal is resolved when tables are matched and redone ("rematching") when the traversed entities change.
+3. **A variable source** (`Hunger, HungerRate, HungerLink($character, $this)`: "some $character links to me"): cheap to build, but about 30 ms per iteration, because the variable is evaluated per result.
+
+You don't have to take those numbers on trust. The benchmark below builds the same layout inside the flecs running on this page (characters linked to a stats entity through a `Traversable` `HungerLink` relationship) and times building each query and iterating it once. Expect absolute times to differ from native, but the ordering to hold: plain terms are near free, traversal pays mostly up front, and the variable source pays on every iteration.
+
+<FlecsBench kind="ladder" />
+
+The layout that won in that report: put each character's per-tick stats on their **own entity**, so all stats share one table and the simulation iterates it in one pass. Keep tags, relationships and sparse data on the character entity, which only gets looked up occasionally. The simulation stays fast, and the cost moves to the rarer "look up one player's stats" path.
+
+<Tip kind="note" title="Traversal and rematching">
+Cached queries with `up` or `cascade` terms keep their cache valid by *rematching* when something along the traversed relationship changes (for example, a component being removed from a parent). That's usually rare, but if you change parents' components every frame, a cached traversal query can end up rematching every frame. Then an uncached query is the better trade.
+</Tip>
+
+<Tip title="Read the plan">
+When a query is slower than you expect, look at its plan (here, in the Explorer, or with `ecs_query_plan`). Each line is a step, and the more steps that aren't simple `and` checks against `$this`, the more work flecs is doing per result rather than per table.
+</Tip>

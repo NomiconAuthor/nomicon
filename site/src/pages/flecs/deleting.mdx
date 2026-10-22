@@ -1,0 +1,44 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Deleting things
+order: 12
+part: Systems, commands and reactions
+summary: What flecs does to everything that refers to an entity when you delete it, how cleanup policies change that, and why deletes can be bulk table operations.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Deleting an entity is more than deleting its row. Other entities may refer to it, as a parent (`ChildOf`), as the target of a relationship (`(Likes, Alice)`), or because it *is* a component or tag someone has. flecs cleans all of those up when the entity goes, following **cleanup policies** set on the relationship or component:
+
+| Trait | Applies when… | Default | Options |
+|---|---|---|---|
+| `OnDelete` | the id itself is deleted (a component or tag entity) | `Remove` from everyone | `Remove`, `Delete`, `Panic` |
+| `OnDeleteTarget` | the target of a pair is deleted | `Remove` the pair | `Remove`, `Delete`, `Panic` |
+
+`ChildOf` is set up with `(OnDeleteTarget, Delete)`, which is why deleting a parent deletes its children. You can give your own relationships the same behaviour: `OwnedBy` below dies with its owner.
+
+## Watch a delete ripple out
+
+<FlecsDebugger scenario="cleanup" />
+
+What happens:
+
+- **`alice.destruct()`** finds every pair with Alice as the target.
+  - `(Likes, Alice)` uses the default policy (`Remove`). Bob's whole table loses the pair at once: *all* its rows are merged into `[Position]` in one operation, rather than moved one by one.
+  - `(OwnedBy, Alice)` has `Delete`, so the whole `[Position, (OwnedBy, Alice)]` table is cleared: Cargo is deleted, with `OnRemove` fired for it.
+  - The tables that only existed for Alice's pairs are deleted.
+- **`ship.destruct()`** deletes its children in one table-wide clear, because they all share `[Position, (ChildOf, Ship)]`. That's one more reason a parent's children live in their own table.
+
+The bulk operations are worth knowing about. Deleting a parent with a thousand children costs one table clear plus one `OnRemove` batch per table, not a thousand separate deletes.
+
+<Tip kind="warn" title="Cleanup only covers what flecs can see">
+Relationships are cleaned up automatically, but an entity id you stored *inside a component* is invisible to flecs. After the delete it's a stale id, and once the index is recycled it may refer to a different entity (see [entities](/flecs/entities/)). If something must react when its target dies, either make the link a relationship with the right `OnDeleteTarget` policy, or validate the id (`is_alive`) before every use.
+</Tip>
+
+<Tip title="Panic is a debugging tool">
+`(OnDelete, Panic)` or `(OnDeleteTarget, Panic)` makes flecs assert if the entity is deleted while still in use. It's handy on things that should never be deleted mid-game, such as component definitions or level roots, to catch the bug at its source.
+</Tip>
+
+<Tip kind="note" title="Deferred deletes">
+Inside a system, `e.destruct()` is enqueued like any other operation. The cleanup (and its `OnRemove` observers) runs at the sync point, in queue order with your other commands.
+</Tip>

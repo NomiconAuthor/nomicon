@@ -1,0 +1,73 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Generating cover
+order: 12
+part: Terrain analysis
+summary: 'Five ways to find cover, stepped through: scanning every cell, the Recast-style boundary walk that produces rails and peek points, and three sampling methods for when you can''t afford to bake. What each finds, what it misses, and when to use it.'
+---
+import TacticsWidget from '../../components/TacticsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Cover is a walkable spot with something solid between it and the threat. "Something solid" has a height: a 1 m wall hides a crouching unit but not a standing one, and a building hides both. So a cover position has a kind (low or full) and a direction (which side the cover is on).
+
+There are two broad ways to find cover. **Exhaustive** methods visit every candidate once, usually as a bake before play. **Sampling** methods drop points and test them, which suits run-time queries in places nothing was baked.
+
+## The boundary walk
+
+This is how cover is usually generated from a navmesh, and it works the same from building footprints. Press play; it pauses at each stage so the caption can explain it.
+
+<TacticsWidget preset="town" layer="cover" method="walk" />
+
+1. **Trace the outline** where walkable space meets obstacles, as chains of edges with the walkable side always on the left. Recast already does this when it builds a navmesh (its *contours*), so with Recast you start at step 2.
+2. **Simplify** each outline with Douglas-Peucker, so staircases of grid edges become straight walls. Raise the tolerance and the lines start cutting corners, which shows up in the next step as probes that miss.
+3. **Walk each edge** at a fixed spacing, half a metre out on the walkable side, and cast two short probes back towards the wall: at crouch height and at standing height. Which ones hit decides full cover, low cover or none.
+4. **Merge samples into rails**: runs of the same kind along one edge, split wherever the outline turns a convex corner, because the cover ends there.
+5. **Find peek points** just past each end of each rail: if the cover has stopped and the ground is walkable, a unit at the end of the rail can lean or step out to attack.
+
+Step 3 is the only one that touches geometry, and it's a handful of short rays per metre of wall:
+
+```cpp
+enum class Cover { None, Low, Full };
+struct CoverSample { Vec2 pos; Vec2 normal; Cover kind; };
+
+// n points out of the wall, into walkable space.
+void probe_edge(Vec2 a, Vec2 b, Vec2 n, float spacing, std::vector<CoverSample>& out) {
+    float len = length(b - a);
+    Vec2 dir = (b - a) / len;
+    for (float t = spacing * 0.5f; t < len; t += spacing) {
+        Vec2 p = a + dir * t + n * 0.5f;                       // half a metre out from the wall
+        bool low  = ray_hits(p, -n, 0.8f, CROUCH_HEIGHT);      // short probes back towards it
+        bool full = ray_hits(p, -n, 0.8f, STANDING_HEIGHT);
+        out.push_back({p, n, full ? Cover::Full : low ? Cover::Low : Cover::None});
+    }
+}
+```
+
+Merging (step 4) walks the samples of one outline in order and starts a new rail whenever the kind changes or the outline turns a convex corner (one that turns away from the walkable side, where the wall ends). Peek points (step 5) are one more probe each, just past each end of each rail.
+
+The rails and peek points are the point. A list of cover cells says where to hide; rails say how to move while hidden, and peek points say where you can fight from. The next lesson shows how much that matters when choosing cover.
+
+The simplest exhaustive method, a **grid edge scan** (visit every cell, mark walkable cells next to cover), finds the same cells in one pass over the map, but gives no structure until you group them. Pick *Grid edge scan* in the widget to compare.
+
+## Sampling
+
+When nothing was baked (a procedurally generated level, dynamic geometry, a query around one unit right now), sample. The thin-gaps map has one-metre gaps between buildings: good cover, easy to miss. Try each sampling method with the same number of samples:
+
+<TacticsWidget preset="thin" layer="cover" method="random" size="medium" />
+
+- **Random** points clump by chance and leave holes. A thin gap is found only if a sample happens to land within a metre of it.
+- **Poisson-disk** sampling (Bridson's algorithm) keeps samples a minimum distance apart, so coverage is even with no big holes. On average it finds about as much as random sampling, but far more predictably.
+- **Edge-biased** sampling puts the samples where cover can be, on obstacle cells bordering walkable ground. Almost every sample is useful, and thin gaps are found because their walls are edges like any other.
+
+With 300 samples on this map, random and Poisson sampling find 40 and 44 of the 128 cover positions inside the gaps, about a third; edge-biased finds 112, nearly nine in ten. Unreal's Environment Query System is a production example of the sampling style: generate candidate points, then filter and score them.
+
+<Tip title="Which to use">
+Bake with the **boundary walk** for anything static: it's exhaustive, its cost follows the length of the outlines rather than the area of the map, and it produces rails and peek points. Use **edge-biased sampling** at run time for things that weren't baked. Use **Poisson-disk** sampling for open terrain where cover could be anywhere and there are no edges to bias towards.
+</Tip>
+
+## Takeaways
+
+- **Cover has a kind and a direction**: low or full, and which side it protects.
+- **The boundary walk** (outline, simplify, probe, rails, peek points) is the standard bake, and with Recast the first two steps are free.
+- **Sampling** suits run-time queries; bias samples towards edges, and use Poisson-disk spacing in the open.
+- **Thin gaps** are where sampling methods differ most.

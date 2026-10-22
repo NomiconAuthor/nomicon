@@ -1,0 +1,26 @@
+/* Shared knowledge widget: styles the guild version adds on top of the .kn rules in ai/ai.css. */
+.kn-quest .kn-kind,
+.kn-claim .kn-kind {
+  color: var(--c2);
+}
+.kn-quest .kn-text {
+  font-weight: 600;
+}
+.kn-row.kn-closed .kn-text {
+  font-weight: 400;
+  text-decoration: line-through;
+  text-decoration-color: var(--muted);
+}
+.kn-report .kn-kind {
+  color: var(--c4);
+}
+.kn-card.kn-behind {
+  border-color: var(--warn);
+  border-style: dashed;
+}
+.kn-warn {
+  color: var(--warn);
+}
+.kn-note:has(.kn-warn) {
+  border-left-color: var(--warn);
+}

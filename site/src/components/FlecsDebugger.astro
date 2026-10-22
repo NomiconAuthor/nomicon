@@ -1,0 +1,47 @@
+---
+/** A storage debugger running one of the scenarios in src/flecs/scenarios.ts. */
+interface Props {
+  scenario: string;
+  caption?: string;
+}
+const { scenario, caption } = Astro.props;
+---
+
+<figure class="fdbg-fig">
+  <flecs-debugger data-scenario={scenario}><p class="fdbg-loading">Loading the flecs debugger…</p></flecs-debugger>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<script>
+  import '../flecs/debugger/debugger.css';
+  import { DebuggerView } from '../flecs/debugger/view';
+  import { SCENARIOS } from '../flecs/scenarios';
+
+  class FlecsDebuggerElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const sc = SCENARIOS[this.dataset.scenario ?? ''];
+      if (!sc) {
+        this.textContent = `Unknown scenario: ${this.dataset.scenario}`;
+        return;
+      }
+      void new DebuggerView(this, sc).init();
+    }
+  }
+  if (!customElements.get('flecs-debugger')) customElements.define('flecs-debugger', FlecsDebuggerElement);
+</script>
+
+<style>
+  .fdbg-fig {
+    margin: 24px 0;
+  }
+  figcaption {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: -10px;
+  }
+  flecs-debugger {
+    display: block;
+  }
+</style>

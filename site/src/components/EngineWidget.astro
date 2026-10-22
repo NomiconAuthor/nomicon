@@ -1,0 +1,44 @@
+---
+/** Mounts one of the engine lesson widgets (src/engine/). */
+interface Props {
+  kind: 'cache' | 'bench-layout' | 'bench-order' | 'bench-stride' | 'falseshare' | 'slotmap' | 'alloc' | 'loop' | 'floatorder' | 'rngstreams' | 'deadline' | 'spatial' | 'octree' | 'parfor' | 'taskgraph' | 'waiting' | 'pipeline' | 'profiler';
+}
+const { kind } = Astro.props;
+---
+
+<engine-widget data-kind={kind}><p class="ll-loading">Loading…</p></engine-widget>
+
+<script>
+  import '../engine/engine.css';
+
+  class EngineWidget extends HTMLElement {
+    async connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const k = this.dataset.kind;
+      if (k === 'cache') new (await import('../engine/cache')).CacheViz(this);
+      else if (k?.startsWith('bench-')) new (await import('../engine/membench')).MemBench(this, k.slice(6) as 'layout' | 'order' | 'stride');
+      else if (k === 'falseshare') new (await import('../engine/falseshare')).FalseShare(this);
+      else if (k === 'slotmap') new (await import('../engine/slotmap')).SlotMapViz(this);
+      else if (k === 'alloc') new (await import('../engine/alloc')).AllocViz(this);
+      else if (k === 'loop') new (await import('../engine/loop')).LoopViz(this);
+      else if (k === 'floatorder') new (await import('../engine/determinism')).FloatOrder(this);
+      else if (k === 'rngstreams') new (await import('../engine/determinism')).RngStreams(this);
+      else if (k === 'deadline') new (await import('../engine/determinism')).Deadlines(this);
+      else if (k === 'spatial') new (await import('../engine/spatial')).SpatialLab(this);
+      else if (k === 'octree') new (await import('../engine/octree')).OctreeLab(this);
+      else if (k === 'parfor') new (await import('../engine/jobs')).ParallelForViz(this);
+      else if (k === 'taskgraph') new (await import('../engine/jobs')).TaskGraphViz(this);
+      else if (k === 'waiting') new (await import('../engine/waiting')).WaitViz(this);
+      else if (k === 'pipeline') new (await import('../engine/waiting')).PipelineViz(this);
+      else if (k === 'profiler') new (await import('../engine/profiler')).ProfilerViz(this);
+    }
+  }
+  if (!customElements.get('engine-widget')) customElements.define('engine-widget', EngineWidget);
+</script>
+
+<style>
+  engine-widget {
+    display: block;
+  }
+</style>

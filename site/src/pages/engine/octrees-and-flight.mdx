@@ -1,0 +1,87 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Octrees and flying
+order: 6
+part: Space
+summary: 'Navmeshes assume a floor. Airships, dragons and spaceships need to path through volume, and most of that volume is empty air. A sparse octree over a small city, A* through its free cells, how it compares with a plain voxel grid, and smoothing the result into a path worth flying.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Ground units walk on surfaces, and a navmesh describes those surfaces well (the [pathing lab](/pathing-lab/) has one). Anything that flies needs a description of *volume*: where in 3D can it be? The obvious answer, a 3D grid of voxels, works but grows with the cube of the resolution. A world 64 units on a side at a resolution of 1 is 262,144 voxels, and almost all of them say "air".
+
+An **octree** fixes that the same way a [quadtree](/engine/spatial-partitioning/) does in 2D. Start with one cube; if it touches geometry, split it into eight; repeat until cells are either completely free, completely solid, or as small as you allow. Open sky stays as a few huge cells; detail only appears next to surfaces.
+
+## An airship over a city
+
+Below is a small city of box buildings with a bridge across the middle, an octree built over it, and an airship flying the path A* found through the octree's free cells. Drag to orbit, scroll to zoom.
+
+<EngineWidget kind="octree" />
+
+Things to look at:
+
+- **Free space leaves** shows the octree itself: large cubes high above the city, small ones packed around walls and the bridge. **Solid leaves** shows the inside of buildings, which is also subdivided wherever a building's edge doesn't line up with the octree's cells.
+- **Cells A\* expanded** shows the search. In open air it takes big steps; only near buildings does it have to work through small cells.
+- The two stat rows run **the same search on a uniform voxel grid** at the octree's smallest cell size. On a typical trip at cell size 2, the grid has six times as many cells as the octree has leaves and A* expands about three times as many of them. At cell size 1, it's over ten times as many cells and about seven times as many expansions. The grid's cost grows with the cube of its resolution; the octree's grows roughly with the area of the surfaces.
+- **New trip** and **New city** change the problem. **Smallest cell 4** builds a coarse octree quickly, but narrow gaps (under the bridge, between close buildings) disappear.
+
+## Building it
+
+```cpp
+struct Node {
+    Box     bounds;
+    int32_t first_child = -1;      // 8 consecutive children, or -1 for a leaf
+    bool    free = false;
+};
+
+void build(std::vector<Node>& nodes, int index, std::span<const Box> obstacles, float min_size) {
+    Node& n = nodes[index];
+    // Only the obstacles touching this cell matter below it (pass that subset down in real code).
+    bool touches = false, filled = false;
+    for (const Box& o : obstacles) {
+        if (!overlaps(o, n.bounds)) continue;
+        touches = true;
+        if (contains(o, n.bounds)) { filled = true; break; }
+    }
+    if (!touches)                     { n.free = true;  return; }  // empty air: one leaf, however big
+    if (filled || n.bounds.size() <= min_size) { n.free = false; return; }  // solid, or too small to split
+    // push_back can reallocate `nodes` and leave `n` dangling, so copy what we need first.
+    const Box bounds = n.bounds;
+    const int32_t first = (int32_t)nodes.size();
+    n.first_child = first;
+    for (int i = 0; i < 8; ++i) nodes.push_back({ child_bounds(bounds, i) });
+    for (int i = 0; i < 8; ++i) build(nodes, first + i, obstacles, min_size);
+}
+```
+
+Cells too small to split that still touch geometry are marked solid. That's conservative: the airship may lose a gap narrower than the smallest cell, but it never flies through a wall.
+
+## Neighbours, and searching
+
+To pathfind, free leaves need to know which other free leaves they touch. Neighbours in an octree come in different sizes: a big cell can border many small ones across one face, and a small cell borders one big one. Here each leaf finds its neighbours by asking the tree for free leaves just outside each of its six faces, once, after building.
+
+A* then runs over that graph exactly as it would over grid cells, with the distance between cell centres as the cost and straight-line distance to the goal as the heuristic.
+
+There's one catch. Paths through cell *centres* zig-zag, because a big cell's centre may be far from the straight line through it (the thin line in the widget). Two fixes are usually combined:
+
+- **String pulling**: walk the path, and from each point skip ahead to the furthest point still in direct line of sight. That's what the thick line is; it typically saves 10–30% of the length here.
+- **Better waypoints**: use points on the shared faces between cells instead of their centres, which also makes the cost estimate more honest.
+
+<Tip title="Sparse voxel octrees in games">
+Flight navigation with a sparse voxel octree is well established in games. Daniel Brewer's chapter *3D Flight Navigation Using Sparse Voxel Octrees* in *Game AI Pro 3* describes the approach used for flying enemies in *Warframe*. Production versions store the smallest level as compact bitmasks (4×4×4 voxels in one 64-bit integer), precompute neighbour links per level, and build the tree offline or in the background when levels stream in.
+</Tip>
+
+## Trade-offs
+
+- **Memory follows surface area, not volume**, which is exactly what you want for big open levels with flying units.
+- **Searches are cheaper in open air** and the same as a grid's near geometry, so the gain depends on how open the level is.
+- **Costs are uneven.** One step through a huge cell covers a lot of distance; without face waypoints and smoothing, paths hug cell centres and look odd.
+- **Dynamic obstacles are awkward.** Rebuilding a branch is local and cheap, but moving objects usually get handled by local avoidance on top of the static path rather than by the octree.
+- **For agents that mostly stay near the ground**, layered navmeshes or a 2D grid with height are simpler. Octrees pay off when the third dimension is genuinely free.
+
+## Takeaways
+
+- An **octree** subdivides only where geometry is, so empty air costs almost nothing.
+- **Free leaves plus face neighbours** make a graph that A* can search like any other.
+- **Smooth** the result: centre-to-centre paths zig-zag through big cells.
+- Compared with a voxel grid at the same detail, it's far smaller and, in open space, far cheaper to search.

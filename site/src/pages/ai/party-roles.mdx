@@ -1,0 +1,140 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Party roles: tank, healer and damage'
+order: 16
+part: Parties
+summary: 'Five heroes against an orc warchief, in the style of an MMO boss fight. The boss''s threat table and the 110/130% rule that keeps it from flip-flopping, taunts, a cleric who triages instead of healing the lowest bar, damage dealers who mind their threat and kill the adds, and telegraphed attacks read through a danger map. Switch any part to its naive version and watch the fight fall apart.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Role-playing games split a party into three jobs. The **tank** keeps the enemy's attention and soaks its hits. The **healer** keeps everyone standing. The **damage dealers** kill it. Each job is a small brain with one concern. They're coupled through one piece of data the *boss* owns: its **threat table**, the list of who it's angry with and how much. Getting that table and the three roles right is most of what makes a boss fight read well, whether the party is players (an MMO raid) or AI companions (Dragon Age, Final Fantasy XII).
+
+## Try it
+
+Five heroes against an **orc warchief**. The tank is a shield knight. The cleric heals. A knight, a crossbow knight and a battle-mage deal the damage. The warchief swings at whoever it's targeting, and every few seconds it does something bigger:
+
+- **Cleave**: a cone in front of it, telegraphed for 1.5 s.
+- **Ground slam**: a circle under a random party member, telegraphed for 2 s.
+- **War cry**: a little damage to everyone. Nothing to dodge; it keeps the cleric busy.
+- **Shove**: knocks its target back and halves that member's threat.
+- At half health it calls **two goblin archers**.
+
+<AiWidget kind="party" />
+
+Each control switches one part of the party AI to a naive version. Over the same 20 fights (`npm run party-batch`), one change at a time:
+
+| Setup | Wins | Fight | Deaths: tank, cleric, damage | Boss off the tank |
+|---|---|---|---|---|
+| Everything on | 20 | 58 s | 0, 0, 0 | 1.8 s |
+| Boss hits the nearest | 20 | 65 s | 0, 0, 15 | 4.4 s |
+| Top threat, no margin | 20 | 70 s | 0, 0, 1 | 4.3 s |
+| Heal the lowest % | 17 | 61 s | 5, 3, 9 | 1.8 s |
+| Damage at full speed | 16 | 57 s | 19, 20, 23 | 3.6 s |
+| Nobody dodges | 10 | 63 s | 10, 12, 40 | 2.4 s |
+
+*Fight* is the average length, win or wipe. *Deaths* are totals over the 20 fights. *Boss off the tank* is the time per fight the warchief spent hitting someone else while the tank was alive. The sections below take the rows one at a time.
+
+## The threat table
+
+The boss keeps a number per party member. Damage adds to it, times a multiplier: 1 for most, 2.5 for the tank, whose attacks are built to annoy. Healing adds half a point per point healed, shared out over every enemy in the fight, which is why adds go for healers. The boss attacks whoever is top.
+
+That last sentence is where it goes wrong. Two members with similar threat swap the lead every few hits, and the boss turns, walks and turns back: a flip-flop, the same problem as [choosing between scores](/ai/choosing-and-committing/). The classic fix is hysteresis. World of Warcraft's rule is well known: someone takes the boss only when their threat passes **110%** of the current target's in melee range, or **130%** at range.
+
+```cpp
+EntityId pick_target(const Boss& b) {
+    EntityId cur = b.target, top = b.threat.top();
+    if (!alive(cur)) return top;
+    float margin = distance(top, b) <= MELEE_RANGE ? 1.1f : 1.3f;
+    return b.threat[top] > b.threat[cur] * margin ? top : cur;
+}
+```
+
+The tank's tool is the **taunt**: set my threat equal to the top, and force the boss onto me for a few seconds. Here it has an 8 s cooldown, and the tank uses it when the boss turns away for more than a moment. With the margin, a taunt sticks: everyone else has to climb to 110% or 130% of the tank again.
+
+The table's rows two and three show the alternatives:
+
+- **Boss hits the nearest.** No table at all. It works until the tank is shoved back: then the knight standing behind the boss is nearest, and it dies in 14 of the 20 fights.
+- **Top threat, no margin.** Target switches rise from 4.1 to 7.7 a fight, and the fight takes 70 s instead of 58. The damage dealers lose most: they hold back at 90% of what would pull the boss, and without a margin that's 90% of the tank's threat rather than up to 117%.
+
+With the damage dealers at full speed as well, the missing margin turns into real ping-pong: **23.4** target switches a fight and only 8 wins.
+
+<Tip title="Threat drops are a design tool">
+The shove that halves the tank's threat isn't cruelty. Raid bosses have long used knock-backs and threat wipes to test the tank's taunt and the damage dealers' discipline at the same moment. For an AI party it's the event that exercises every rule at once, so it belongs in your test fights.
+</Tip>
+
+## The cleric: triage
+
+The obvious healer heals whoever has the lowest health bar, as a percentage, with its efficient big heal. It's wrong in two ways. Percentages ignore what's *about to happen*: a tank at 60% with the boss hitting it is in more trouble than a crossbow knight at 50% that nothing is hitting. And a 2.5 s heal on someone who has 1.5 s left lands on a corpse.
+
+The triage cleric scores every (member, spell) pair, [utility style](/ai/utility-scoring/), and casts the best if it's worth casting:
+
+```cpp
+float predicted = hp - incoming_dps * spell.cast_time;      // health when it lands
+if (predicted <= 0) return 0;                               // too late with this spell
+float need       = 1 - predicted / max_hp;
+float ttd        = predicted / max(incoming_dps, FLOOR);    // time to death
+float danger     = 1 / (1 + ttd / 8);
+float effective  = min(spell.heal, max_hp - predicted);
+float efficiency = sq(effective / spell.heal);              // 1 = no overheal
+return need * danger * role_weight * efficiency * spell_cost_weight;
+```
+
+- **Incoming damage** is a three-second moving average per member. It has a floor of 80 damage per second, because war cries and arrows come in bursts that a moving average doesn't see coming.
+- **The role weight** puts the tank first (×1.3) and the cleric itself next (×1.15).
+- **Cast time against time to death** picks the spell: if the big heal might land too late, the quick one scores higher, even though it costs nearly twice the mana per point.
+- **Efficiency** squared punishes overheal, so the cleric waits for a heal's worth of damage rather than topping people up.
+- **The mana budget** changes the weights: below 30% mana the quick heal is hardly considered, and only bigger needs are worth a cast.
+
+| Cleric | Wins | Deaths: tank, cleric, damage | Overheal | Mana left |
+|---|---|---|---|---|
+| Lowest % | 17 | 5, 3, 9 | 31% | 1,964 |
+| Triage | 20 | 0, 0, 0 | 21% | 2,018 |
+
+The scores are live in the widget's table, and the cleric's line shows the current cast. Watch it start a big heal on the tank before the tank looks hurt: the prediction says it will be.
+
+## Damage dealers
+
+The damage dealers' rules are short:
+
+- **Assist.** Hit the tank's target, so threat stacks up where the tank wants it.
+- **Mind your threat.** Stop at 90% of what would pull the boss. That's the same 110% or 130% rule, so a crossbow knight at range may run above the tank's own threat. A threat meter in an MMO shows exactly this number.
+- **Adds first.** When the goblins appear, kill them. They spawn into a table already full of healing threat, so they shoot the cleric.
+
+**Full speed** ignores all three. It's slightly faster (57 s) and wins 16 of 20, but the cleric dies in 20 of 20 fights and the tank in 19: the archers are left on the cleric, and the party only wins when the warchief dies first. That's a burn, and players do it on purpose sometimes. As AI behaviour it's a coin toss.
+
+## Telegraphs and positioning
+
+The roles also decide where everyone stands:
+
+- **The tank** stands on the far side of the boss from the party, so the boss faces away from them and its cleave hits only the tank.
+- **The knight** stands behind the boss, out of the cleave.
+- **The cleric and the ranged** stand on the party's side, 10 to 12 m out, spread so that one 4.5 m slam can't catch two of them.
+
+The big attacks are telegraphed: a red cone or circle on the ground that fills up until it lands. That's a promise to the player that a careful fight is winnable, and AI companions have to keep the same promise. Each unit builds a small **danger map** from the live telegraphs (the [influence maps](/ai/influence-maps/) idea at the scale of one fight) and moves with [context steering](/ai/steering/): 16 directions, each with an interest (towards its spot) and a danger (inside a telegraph soon). It takes the most interesting direction among the least dangerous. Danger is graded by how deep inside the area a point is, so a unit standing in one walks straight out instead of dithering at the edge. The tank ignores the cleave aimed at it, because taking it is the tank's job.
+
+With **Nobody dodges**, telegraphs catch someone 4.8 times a fight against 0.1, and the party wins 10 fights out of 20.
+
+## Party AI as rules: gambits and tactics
+
+Several RPGs let the player write their companions' AI as an ordered list of rules. Final Fantasy XII's **gambits** are the best known: each character has a list of *target: condition → action* lines ("Ally: HP < 50% → Cure"), and the first line that applies runs. Dragon Age: Origins has **tactics** slots that work the same way, and the original Baldur's Gate games read companion scripts written as if-then rules.
+
+An ordered list where the first match wins is a [behaviour tree](/ai/behaviour-trees/) selector with one level. It's readable, and players can edit it. Its weakness is the lowest-% healer's: "Ally: HP < 50% → Cure" can't tell a tank about to die from a damage dealer standing still at 49%. The two combine well: gambits for the decisions a player should control, and a score inside one gambit ("Heal: the best triage option") for the decision a list does badly.
+
+## In an ECS
+
+- **The threat table** is a component on the boss: a short array of (member entity, threat) pairs. Every enemy gets one, and party members never write it directly.
+- **A relationship** `(Threat, member)` with a value would let you ask "who has me on their table?" with one query. But every member is a new [pair](/flecs/relationships/), so every boss's set of targets is its own table, and threat changes every tick. An entity id inside a component does the job here; prefer it.
+- **Damage and healing are events.** One system applies them to health, and a threat system adds them to the tables (healing spread over every enemy in the fight). Taunt is an event too.
+- **Target selection** is a system over enemies with a threat table, at the decision rate rather than every frame.
+- **Role brains** are systems over `Tank`, `Healer` and `Damage` tags. The healer's system reads health, a smoothed `IncomingDamage` and mana, and writes a `Cast`.
+- **Telegraphs are entities** with a shape and a time to land. The steering system reads them as danger; the boss's system resolves them.
+
+## Takeaways
+
+- **Roles are separate brains coupled through the boss's threat table.** Damage and healing add threat; the tank multiplies its own and taunts.
+- **Switch targets with a margin** (110% in melee, 130% at range). Without one, the boss ping-pongs; without a table, it hits whoever is nearest.
+- **Triage the heals**: need, danger (time to death), role, overheal and cast time, scored together. "Lowest health first" overheals and loses tanks.
+- **Damage dealers assist, stay under the pull threshold, and kill adds** before they reach the healer.
+- **Telegraph big attacks** and dodge them with a danger map and context steering; spread out so one area hits one unit.
+- **Rule lists like gambits** are a readable top layer; put a score inside the rules that need judgement.

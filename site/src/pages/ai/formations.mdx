@@ -1,0 +1,72 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Formations
+order: 8
+part: Movement
+summary: 'A party that holds a shape in the open and still gets through a doorway. Slots relative to a leader, what to do when a slot ends up inside a wall, falling into single file along the leader''s path, and the small tricks that keep it from looking robotic.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A formation is a set of **slots**: positions relative to a **leader**, expressed in the leader's own frame, so "two metres behind and one to the right" turns with it. Each follower steers towards its slot with [arrive](/ai/steering/), plus separation from the others. In open ground that's all it takes.
+
+```cpp
+Vec2 slot_world(const Vehicle& leader, Vec2 slot /* x forward, y right */) {
+    Vec2 fwd   = normalize(leader.vel);
+    Vec2 right = { -fwd.y, fwd.x };
+    return leader.pos + fwd * slot.x + right * slot.y;
+}
+```
+
+The trouble starts at the first doorway. A wedge of eight, 11 m across, meets a corridor 2 m wide, and most of the slots are now inside walls.
+
+## Through a corridor
+
+The leader, a shield knight, patrols a loop: through the corridor in the middle, round the right-hand side, and back through the doorway at the bottom. Slots are rings, red when they're inside a wall or out of the leader's line of sight. Followers in single file get a gold ring.
+
+<AiWidget kind="formation" />
+
+Three ways to handle a blocked slot:
+
+**Ignore it (rigid slots).** Followers keep heading for their slot even when it's inside a wall. They end up pinned against the wall the leader just walked past, and if **Leader waits for stragglers** is on, the leader crawls along waiting for them. That's the failure everyone sees first.
+
+**Clamp the slot to free space.** Walk from the leader towards the slot and stop at the last point that's free and in the leader's sight. In a corridor every slot clamps to somewhere near the leader, so the party compresses into a jostling knot around it and pours through. It's simple, and the formation recovers instantly on the far side, but followers spend a lot of time squeezing along walls.
+
+**Fall in on the leader's path.** When a slot is blocked, the follower stops trying to reach it and instead takes a place in a queue *behind the leader, on the path the leader actually walked* (the dotted line), 1.5 m apart, ranked by how far back its slot was. The party goes through the corridor in single file, and each follower returns to its slot once that slot has been clear for a moment.
+
+Over a minute of the loop with eight followers in a wedge:
+
+| When a slot is blocked | Average distance from slot | Time pressed against walls | Time in single file |
+|---|---|---|---|
+| Ignore it | 11.2 m | 75% | 0% |
+| Clamp to free space | 2.2 m | 6% | 0% |
+| Fall in on the leader's path | 3.1 m | 0% | 41% |
+
+Rigid slots are hopeless: followers spend three quarters of the time pressed against walls, and fall so far behind that the average distance is the width of a building. Clamping keeps followers closest to their slots on average, because it never gives up on the slot, but they still scrape along walls; falling in on the path is the one that actually looks right, with no wall contact at all. A line abreast gives the same picture: rigid slots pin followers to walls 79% of the time and clamped ones 5%, while the queue stays under 1%.
+
+## Details that matter
+
+**Hysteresis.** A slot near a wall flickers between blocked and clear as the leader moves. If followers switched mode every time, they'd dither on the spot (the same problem as [flip-flopping decisions](/ai/choosing-and-committing/)). Here a follower falls in after its slot has been blocked for 0.15 s, and returns only after it's been clear for 0.6 s: quick to queue, slow to spread out again.
+
+**Following breadcrumbs.** A follower that has fallen behind a wall can't just head for its target in a straight line. It follows the leader's trail instead, steering for the newest point on it that it can see. That's a cheap stand-in for pathfinding that works because the leader's path is, by definition, walkable. In a real game, a follower far from its slot would request a path instead.
+
+**The leader waits.** With **Leader waits for stragglers**, the leader slows as followers fall behind their targets, but never below 40% of its speed: one follower caught on a corner shouldn't stall the whole party. Without it, a party that's queueing through a door stretches out and the back of the column has to sprint to catch up. Most games slow the leader slightly, or move the formation's anchor point (a virtual leader slightly behind the real one) at the speed of the slowest member.
+
+**Turn the shape, not just the leader.** Slots are placed in the formation's frame, and if that frame snaps to the leader's velocity, every slowdown or corner swings the back rank metres sideways in one frame. Here the formation's facing follows the leader's heading at most 1.6 radians a second, so the shape sweeps round a corner instead of jumping.
+
+**Slot assignment.** Here each follower keeps the slot it was given. When the shape changes, or followers end up on the wrong side after a turn, reassigning slots to minimise total travel (a small assignment problem; a greedy nearest-first pass is usually good enough) stops followers crossing through each other.
+
+<Tip title="Ranks, not just shapes">
+Real parties have structure: the healer stays near the middle, the archers at the back, the shield-bearer in front. Slots can carry roles and priorities, and when the party collapses into single file the order of the queue can come from role rather than slot position. The formation is data; the shape is only one field of it.
+</Tip>
+
+## Formations and the decision layer
+
+Formations sit between the decision and steering layers. The leader's brain decides where the party goes, and the pathfinder plans one route, for the leader. Each follower's own decision-making is reduced to "stay in formation" unless something more important wins: a follower who sees an enemy might break formation to take cover, scored by the same utility system as everything else, and rejoin afterwards. A `FormationMember` component pointing at the leader entity (a [relationship](/flecs/relationships/), if you want to query "everyone in this party") and a slot index is all the state it needs.
+
+## Takeaways
+
+- **Slots live in the leader's frame;** followers *arrive* at them with separation.
+- **Blocked slots are the hard part.** Rigid slots pin followers to walls; clamping compresses them; **falling in on the leader's path** gives an orderly single file.
+- **Use hysteresis** between formation and single file, and **follow breadcrumbs** when out of sight.
+- **Let the leader wait**, and reassign slots when the shape changes.

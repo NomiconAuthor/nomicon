@@ -1,0 +1,50 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base title="flecs sandbox" section="flecs" description="A live flecs world in your browser: create entities, add and remove components, and watch archetypes, sparse storage and observers update.">
+  <main class="sbx-page">
+    <div class="sbx-intro">
+      <h1>flecs sandbox</h1>
+      <p>
+        A real flecs world (current master, running in your browser). Create entities, add, set and remove components, and watch rows
+        move between archetype tables. Add observers and systems to see what gets called. Components marked <b>Sparse</b>{' '}or{' '}<b>DontFragment</b> live in sparse storage below the tables. Click a row or an entity to edit it.
+      </p>
+    </div>
+    <flecs-sandbox><p>Loading flecs…</p></flecs-sandbox>
+  </main>
+</Base>
+
+<script>
+  import '../../flecs/sandbox/sandbox.css';
+  import { Sandbox } from '../../flecs/sandbox/sandbox';
+
+  class FlecsSandboxElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      void new Sandbox(this).init();
+    }
+  }
+  if (!customElements.get('flecs-sandbox')) customElements.define('flecs-sandbox', FlecsSandboxElement);
+</script>
+
+<style>
+  .sbx-page {
+    max-width: 1700px;
+    margin: 0 auto;
+    padding-bottom: 60px;
+  }
+  .sbx-intro h1 {
+    margin: 0 0 6px;
+    font-size: 1.7rem;
+  }
+  .sbx-intro p {
+    color: var(--body);
+    max-width: 90ch;
+    margin: 0 0 14px;
+  }
+  flecs-sandbox {
+    display: block;
+  }
+</style>

@@ -1,0 +1,92 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Jobs and task graphs
+order: 7
+part: Threads
+summary: 'Spreading a frame across every core. Job systems and how big a job should be, static splits against shared queues against work stealing, turning a frame''s systems into a task graph from what they read and write, the critical path, reading results a frame later, and keeping all of it deterministic. With how flecs fits in.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A frame is a lot of separate work: move a thousand units, rebuild the spatial index, answer a few hundred path queries, run every brain, animate, prepare the draw lists. A desktop CPU has 8 to 16 cores and a console 7 or 8 usable ones. Running the frame on one of them leaves the rest idle.
+
+The old answer was a thread per subsystem: a physics thread, an audio thread, a render thread. It doesn't scale, because there are more cores than subsystems and the subsystems aren't the same size. The modern answer is a **job system**: one worker thread per core, and the frame cut into many small **jobs** that any worker can run.
+
+## Jobs, and how big to make them
+
+The commonest job is a **parallel-for**: do the same thing to every item in an array, in chunks. The question is how big a chunk should be. Here 2,048 items (path queries, say) are split across workers. Most items are cheap, but a cluster of them costs nine times as much, the way a crowded corner of the map does.
+
+<EngineWidget kind="parfor" />
+
+With 8 workers, a perfect split would take 575 µs:
+
+| Items per job | Static split | One shared queue | Work stealing |
+|---|---|---|---|
+| 1 | 2,289 µs | 855 µs | 660 µs |
+| 8 | 2,267 µs | 613 µs | 623 µs |
+| 64 | 2,264 µs | 594 µs | 893 µs |
+| 256 | 2,264 µs | 2,265 µs | 2,264 µs |
+
+- **A static split** gives each worker an equal slice of the items up front. It costs nothing to schedule and it's fine when every item costs the same. Here the expensive cluster lands mostly on one worker, and everyone else waits for it: 25% efficiency, whatever the job size.
+- **One shared queue**: idle workers take the next job. That balances the load, but every take touches the same queue, and the cost grows with the number of workers fighting over it. With one item per job, scheduling overhead (the red slivers) adds up to half as much again as the useful work.
+- **Work stealing**: each worker has its own queue (a *deque*). It takes from one end of its own, cheaply and without contention; when it runs out, it steals from the other end of someone else's. Overhead stays small even with tiny jobs, and with 16 workers it's the only one that copes with one item per job (327 µs against the queue's 552).
+- **Job size matters as much as the scheduler.** Too small and scheduling eats the gain; too big and there aren't enough jobs to balance, so the frame time depends on luck: at 64 items per job there are only 32 jobs, six of which hold most of the expensive items, and whoever ends up with two of those sets the time (594 µs with the queue and 893 µs with stealing, on these particular timings). A common rule of thumb is tens of microseconds of work per job.
+
+Under the widget, the per-item values are also added up, one partial sum per job, and the partial sums merged in two ways. Merged in the order jobs *finish*, the total changes from run to run, because float addition depends on order and finishing order depends on timing. Merged in *job order*, it's identical every time. That's the whole trick to deterministic parallel code, and the [determinism lesson](/engine/determinism/) has the rest.
+
+<Tip title="Waiting without blocking">
+When a job needs the results of other jobs, the worker running it mustn't just block: that takes a core out of the pool. Production job systems either **help while waiting** (run other jobs until the counter it's waiting on reaches zero) or, like Naughty Dog's engine, run jobs on **fibers**, so a waiting job is parked and its worker picks up something else. [Threads, pools and fibers](/engine/threads-pools-and-fibers/) compares the options.
+</Tip>
+
+## From systems to a task graph
+
+A frame isn't one parallel-for but a sequence of systems, each of which reads some data and writes some other data. If every system declares what it reads and writes, the dependencies follow mechanically. For two systems in program order, the later one must wait for the earlier one if:
+
+- it **reads** something the earlier one **writes** (it needs the result);
+- it **writes** something the earlier one **reads** (it mustn't change data under the earlier one's feet);
+- they both **write** the same thing (the order of the writes matters).
+
+Anything else can run at the same time. That turns the frame into a **task graph**:
+
+<EngineWidget kind="taskgraph" />
+
+| Workers | One thread | System by system | Task graph | Task graph, paths read next frame |
+|---|---|---|---|---|
+| 8 | 7,261 µs | 1,340 µs (68% busy) | 1,034 µs (88%) | 951 µs (95%) |
+| 16 | 7,261 µs | 952 µs (48%) | 595 µs (76%) | 525 µs (86%) |
+
+**System by system** splits each system across the workers but finishes one before starting the next. Every boundary is a barrier, and every barrier wastes the time between the first worker finishing and the last. Serial systems (Input, Audio) waste the most: one worker runs and everyone else waits.
+
+**The task graph** starts each system as soon as the systems it depends on are done. Scripts don't depend on movement, so they run at the very start; Animation, Audio and Render prep only need positions and poses, so they fill the gaps around the spatial index and the path queries. Adding workers stops helping once the frame is as short as its **critical path**, the longest chain of dependencies (highlighted). To go faster, you have to shorten that chain.
+
+## Reading a frame later
+
+Here the critical path runs through the path queries, because Decide needs this frame's paths. If Decide reads **last frame's** results instead, the dependency disappears: the queries only have to finish by the end of the frame, and they overlap everything else. An agent starts along a new path one frame later, which at 30–60 Hz nobody can see; many games already spread path requests over several frames for exactly this reason.
+
+This works for any expensive, batchable query whose consumer can wait: collect the requests during frame *N*, run them as jobs, and hand the results over at the start of frame *N + 1*. It's also deterministic, which "use the result whenever it happens to be ready" is not: the delay is always exactly one frame, whatever the timing.
+
+## Keeping it deterministic
+
+A parallel frame gives the same result as a serial one only if nothing depends on *which* worker ran a job, or *when*:
+
+- **Each job writes only its own outputs**: its slice of an array, or its own buffer. No shared counters or `push_back` onto one list.
+- **Merge in a fixed order.** Reductions, event lists and command buffers are combined by job index, never in completion order.
+- **Randomness comes from the data**, not the thread: seed from the entity, the system and the tick, as in [random streams](/engine/determinism/).
+- **Delays are fixed**: read last frame's results, never "the latest available".
+
+## In flecs
+
+flecs takes the declared-access route. A system's query says what it reads (`[in]`, `const` in C++) and writes, and the pipeline uses that to place **sync points**, where queued commands are merged into storage, only where a later system needs to see them (the [commands lesson](/flecs/commands/) shows them). Commands are queued per thread and merged in order, so the result doesn't depend on timing.
+
+For threads, flecs runs the pipeline's systems in order and parallelises *inside* each system marked `multi_threaded`: with `world.set_threads(n)`, the matched entities are divided across the worker threads, and the same entity stays on the same thread until the next sync point. That's the **System by system** mode above. It's simple, safe and deterministic, and with wide, even systems the barriers cost little. If you already have a job system, `set_task_threads` makes flecs run its work as tasks on yours instead of its own threads.
+
+The places where a full task graph wins most, a long serial stage or one uneven pass like a batch of path queries, are also where the **read-next-frame** pattern helps whatever the scheduler: run that pass as its own jobs, outside the pipeline's barriers, and let next frame's systems read the results.
+
+## Takeaways
+
+- **A job system** keeps one worker per core busy with many small jobs, rather than a thread per subsystem.
+- **Size jobs** so scheduling overhead is small and there are enough of them to balance uneven work: tens of microseconds each.
+- **Work stealing** keeps overhead low as workers and jobs multiply; a static split only works for even work.
+- **Declare reads and writes** and the dependencies, and the task graph, follow. The frame can't be shorter than its critical path.
+- **Read expensive results a frame later** to take them off the critical path, deterministically.
+- **Determinism**: own outputs per job, fixed merge order, data-derived randomness, fixed delays.

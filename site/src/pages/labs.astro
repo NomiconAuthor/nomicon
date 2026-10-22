@@ -1,0 +1,33 @@
+---
+import Base from '../layouts/Base.astro';
+import '../styles/home.css';
+---
+
+<Base title="Labs" section="labs" description="Interactive labs: pathfinding algorithms, and tactical terrain analysis.">
+  <main class="home">
+    <section class="intro">
+      <h1>Labs</h1>
+      <p>Bigger interactive tools, with concept notes built in. Paint a map, pick an algorithm, and watch what it does.</p>
+    </section>
+    <div class="cards">
+      <a class="card" href="/pathing-lab/">
+        <span class="kicker">Lab</span>
+        <h2>pathing lab</h2>
+        <p>
+          A*, JPS, Theta*, HPA*, navmeshes, roadmaps and vehicle planners searching the same map, step by step and side by side, with
+          terrain costs, unit sizes and several units at once.
+        </p>
+        <span class="go">Open the lab →</span>
+      </a>
+      <a class="card" href="/tactics-lab/">
+        <span class="kicker">Lab</span>
+        <h2>tactics lab</h2>
+        <p>
+          Terrain analysis for AI on a 2.5D map: clearance, choke points for movement and for sight, traffic, openness, cover generation
+          by scanning and by sampling, exposure to threats, and picking the best cover.
+        </p>
+        <span class="go">Open the lab →</span>
+      </a>
+    </div>
+  </main>
+</Base>

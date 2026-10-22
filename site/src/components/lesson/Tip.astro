@@ -1,0 +1,14 @@
+---
+/** A callout: tip (default), note, or warn. */
+interface Props {
+  kind?: 'tip' | 'note' | 'warn';
+  title?: string;
+}
+const { kind = 'tip', title } = Astro.props;
+const label = title ?? { tip: 'Tip', note: 'Note', warn: 'Watch out' }[kind];
+---
+
+<aside class={`callout ${kind}`}>
+  <p class="callout-t">{label}</p>
+  <slot />
+</aside>

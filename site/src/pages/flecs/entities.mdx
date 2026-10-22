@@ -1,0 +1,44 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Entities, ids and names
+order: 1
+part: Storage and identity
+summary: What an entity id actually is, why ids get reused, and why "components are entities too" matters more than it sounds.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+An entity is a 64-bit id and nothing else. It has no data of its own: everything you think of as "the entity" (its position, its name, its tags) is components attached to that id.
+
+The id has two parts:
+
+- **The index** (the low 32 bits) is a slot in flecs' entity index, which records the table and row the entity lives in.
+- **The version** (16 bits above the index; also called the generation) counts how many times that slot has been reused. The bits above it are reserved for flags such as the pair marker.
+
+When you delete an entity, its index goes back on a free list, and the next entity you create gets it, with the version bumped by one. So `483` and `483 v1` are different entities that share a slot. Any copy of the old id you kept now refers to something that's gone.
+
+## Watch an id get reused
+
+The debugger shows each entity's id next to its name (`#index`, or `#index vN` once the version is above 0). Step through creating A, deleting it, and creating D.
+
+<FlecsDebugger scenario="entities" />
+
+Things to notice:
+
+- **A new entity starts in the root table** (`[ ]`, no components) and moves as soon as it gets anything. Giving it a name already moves it to `[name only]`, because **a name is a component**: the pair `(Identifier, Name)`. Every component you then add is another move.
+- **D gets A's index with version 1.** `world.is_alive(a)` correctly says `false`, because the version doesn't match. The id `a` still holds is stale.
+- **Deleting is just a row delete.** A's row goes, and the index is recycled. Nothing else in the world knows that `a` existed (here, because nothing referred to it; [deleting](/flecs/deleting/) shows the cleanup when something does).
+
+## Components are entities too
+
+`Position` is itself an entity. It has a name, it lives in a table (with the `Component` component that records its size), and you can add things to it. That's how traits work: `world.component<Position>().add(flecs::Sparse)` adds the `Sparse` tag to the `Position` entity. Tags, relationships, prefabs, systems, queries and observers are all entities as well.
+
+This is why flecs feels uniform once it clicks. Almost every question ("which components are networked?", "which systems are in this phase?") can be answered by adding something to an entity and querying for it.
+
+<Tip kind="warn" title="Stored ids can be stale">
+If you keep an `entity_t` (or a `flecs::entity`) in a component or a container, it can outlive the entity and later point at an index someone else now owns. Check `is_alive()` before using one you didn't just get from a query, or let flecs track the link for you with a relationship and cleanup traits (see [relationships](/flecs/relationships/) and [deleting things](/flecs/deleting/)).
+</Tip>
+
+<Tip title="Unnamed is cheaper">
+Names are a component with a lookup index behind them. Projectiles, particles and other short-lived entities don't need one, and leaving them unnamed keeps them out of the name index and in a smaller table. The name also changes the table, so named and unnamed entities with otherwise the same components are stored separately.
+</Tip>

@@ -1,0 +1,62 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Spatial data and lookups
+order: 15
+part: Designing your data
+summary: 'Which entities are near this point? That is not a question archetypes answer well. Three ways to store a spatial index next to flecs, what each costs, and a benchmark you can run.'
+---
+import FlecsBench from '../../components/FlecsBench.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Sooner or later a game needs to ask a spatial question: what's in this cell, what's within 5 metres of the player, what does this ray hit. Queries match on *types*, not on values, so `Position` alone can't answer "near (10, 4)". You need an index. The interesting part is where that index lives, because the obvious ECS-flavoured answer (put the cell in a relationship) has costs that only show up later.
+
+## Three places to keep the index
+
+**1. A structure next to the ECS.** A grid, quadtree or BVH that stores entity ids, owned by a singleton (`world.set<SpatialGrid>()`) or by your engine code. A system that runs after movement updates it for the entities that moved, and an `OnRemove` observer on the component you index takes deleted entities out. Lookups are whatever your structure is good at, and flecs storage is untouched: all your movers stay in one table.
+
+**2. A relationship per cell: `(InCell, cell)`.** Each cell is an entity, and every indexed entity has an exclusive `(InCell, cell)` pair. Finding a cell's contents is now a flecs operation (`ecs_each_id` / `world.each(pair)` with that exact pair), which lists the matching tables directly. The price is fragmentation: a separate table for every occupied cell, so 1,000 occupied cells means 1,000 tables of movers, and every entity that crosses a cell boundary moves its whole row to another table.
+
+**3. The same relationship with `DontFragment`.** Adding `DontFragment` to `InCell` keeps the pair out of the table type (see [choosing storage](/flecs/storage-traits/)). Entities stay in one table and the cell lookup is still a flecs operation. Changing cell no longer moves rows, but it updates the relationship's sparse index, which is more bookkeeping per move than a plain table move or a grid write.
+
+There's a fourth thing people try: a cached query `Position, (InCell, $cell)` with `$cell` set per lookup. It reads nicely, but a variable has to be checked for each table the query matches, which with one table per cell means every lookup walks the whole cache.
+
+## Run it
+
+The benchmark creates entities scattered over a grid of cells, moves some of them each frame, and does random single-cell lookups. It runs each layout in a fresh world inside the flecs on this page and averages over five frames. The third column times iterating `Position` across every entity once, which is what your movement, rendering or physics systems do all day.
+
+<FlecsBench kind="spatial" />
+
+On a typical run with the defaults (20,000 entities, 32×32 cells, 2,000 moving per frame, 200 lookups):
+
+| Layout | Move entities | Cell lookups | Iterate everything | Tables |
+| --- | --- | --- | --- | --- |
+| Scan everything | 0.23 ms | 22 ms | 0.027 ms | 1 |
+| `(InCell, cell)` pair | 0.76 ms | 0.07 ms | 0.021 ms | 1,024 |
+| `(InCell, cell)` DontFragment | 0.96 ms | 0.05 ms | 0.019 ms | 1 |
+| Grid next to the ECS | 0.17 ms | 0.03 ms | 0.014 ms | 1 |
+| `(InCell, $cell)` variable | 0.78 ms | 5.9 ms | 0.018 ms | 1,024 |
+
+With a 64×64 grid (about 4,000 occupied cells), iterating everything rose to about 0.09 ms for both pair layouts against 0.013 ms for the single-table ones, and the variable lookups rose to about 24 ms.
+
+Small timings like these are noisy, so run it a couple of times before reading much into a single number. What to take from it:
+
+- **Any index beats scanning** once you do more than a handful of lookups. That is the whole point.
+- **The fragmenting pair** has very fast lookups, but every system that iterates `Position` now visits one table per occupied cell instead of one, and tables are created and destroyed as cells fill and empty. At 1,024 cells the iteration cost barely shows. At 4,000 it's several times slower, and a real game iterates Position in many systems, with more components per table.
+- **DontFragment** keeps iteration flat and lookups fast. You pay on the write side, so it suits things that change cell less often than they move.
+- **The plain grid** is cheapest to update and close to the best for lookups. You lose the ability to put the cell in a query, and you own keeping it in sync.
+- **The variable query** is the worst of both: fragmented storage and slow lookups, and the lookups get slower as the number of cells grows (try grid 16 against grid 64). Look up a known pair directly instead.
+
+<Tip title="Index only what needs indexing">
+Not every entity with a Position needs to be in the spatial structure. Static scenery, UI and particles usually don't. Put a tag such as `Spatial` on the entities that do, and drive the index's update system and `OnRemove` observer from that tag, so the index (and any relationship you use for it) only touches the entities that are actually looked up spatially.
+</Tip>
+
+## Choosing
+
+- If the spatial query is **"what's near this point"** (radius, ray, nearest neighbour), use a real spatial structure next to the ECS. Relationships can only answer "what's in exactly this cell", and quadtrees and BVHs answer much better questions ([spatial partitioning](/engine/spatial-partitioning/) compares them).
+- If you want **the cell to be part of queries** (for example "all enemies in the player's current room", where rooms are few and change rarely), a relationship is a good fit. Rooms are a coarse, stable grouping, so fragmentation stays small.
+- If you want the cell in queries **and** have many cells or frequent changes, use `DontFragment` and look up the exact pair.
+- Whatever you pick, keep the index updated in one place (a system that runs after movement; relationship changes made inside systems go through the stage, see [commands and sync points](/flecs/commands/)), and remove entities from it in an `OnRemove` observer, not by remembering to do it at every delete site.
+
+<Tip kind="note" title="Grouping is the in-between">
+Queries can also group their tables by a relationship target (`group_by`) and iterate just one group. That makes per-cell iteration cheap with a fragmenting pair, but it doesn't remove the fragmentation itself, so the full-iteration cost above still applies.
+</Tip>

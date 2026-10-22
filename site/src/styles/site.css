@@ -1,0 +1,149 @@
+/* nomicon: shared theme (the Pathing Lab's dark theme "E") and site chrome. */
+:root {
+  color-scheme: dark;
+  --bg: #14181f;
+  --paper: #1c222b;
+  --raised: #232a35;
+  --ink: #e7ebf0;
+  --body: #c9d1db;
+  --muted: #9aa5b4;
+  --line: #343e4c;
+  --line-soft: #262e3a;
+  --accent: #a9b8ff;
+  --on-accent: #121633;
+  --good: #7fdba0;
+  --warn: #ffd166;
+  --alert: #ff7a8a;
+  --c1: #ffd166;
+  --c2: #5fd4e8;
+  --c3: #ff8fc7;
+  --c4: #8be28b;
+  --c5: #b69cff;
+  --c6: #ffad66;
+  --c7: #7aa2ff;
+  --c8: #9fb3c8;
+  --focus: #a9b8ff;
+  --f-body: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-display: var(--f-body);
+  --f-mono: 'Roboto Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 15px;
+  line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---------- Navbar ---------- */
+.site-nav {
+  max-width: 1600px;
+  margin: 0 auto 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px 22px;
+  flex-wrap: wrap;
+  padding-block: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.site-nav .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin-right: 10px;
+}
+.site-nav .brand svg {
+  flex: none;
+}
+.site-nav .links {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.site-nav .links a {
+  display: block;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+.site-nav .links a:hover {
+  color: var(--ink);
+  background: var(--paper);
+}
+.site-nav .links a[aria-current='page'] {
+  color: var(--ink);
+  background: var(--raised);
+}
+.site-nav .nav-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.site-nav .slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Theme menu */
+.theme-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.theme-pick[hidden] {
+  display: none;
+}
+.theme-pick select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 6px;
+}
+@media (max-width: 560px) {
+  .theme-pick-l {
+    display: none;
+  }
+}
+/* Chrome that only some themes draw: in Dusk the frame is transparent to layout. */
+.frame,
+.frame-client {
+  display: contents;
+}
+.frame-bar,
+.statusbar,
+.clock {
+  display: none;
+}
+.site-nav .slot:empty {
+  display: none;
+}

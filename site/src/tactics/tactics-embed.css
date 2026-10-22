@@ -1,0 +1,250 @@
+/* Tactics lab embedded in a lesson. The lab's own tokens (map colours, unit colours) are
+   defined on :root at low specificity, so the site themes (which set them on
+   html[data-theme]) still win. Component styles are scoped to .tl-embed so nothing
+   leaks into the lesson page. */
+:root {
+  --on-unit: #14181f;
+  --swatch-edge: rgba(255, 255, 255, 0.14);
+  --wall: #6b7686;
+  --grid: #232933;
+  --floor: #1d222b;
+  --walker: #ffd166;
+  --vehicle: #c792ea;
+  --cache: #7fd8c4;
+  --soft: #e6c86e;
+  --other: #8e9ba7;
+  --u2: #5fd4e8;
+  --u3: #ff8fc7;
+  --u4: #8be28b;
+  --u5: #b69cff;
+  --u6: #ffad66;
+  --u7: #7aa2ff;
+  --u8: #9fb3c8;
+  --t-road: #5a523c;
+  --t-rough: #34503a;
+  --t-mud: #5c3e2c;
+  --t-water: #24486a;
+  --closed: rgba(169, 184, 255, 0.2);
+  --open: rgba(169, 184, 255, 0.42);
+  --open-ring: rgba(169, 184, 255, 0.9);
+  --scan: rgba(255, 209, 102, 0.22);
+  --tree: rgba(201, 209, 219, 0.4);
+}
+.tl-embed {
+  margin: 20px 0;
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tl-embed .tl-embed-controls {
+  display: grid;
+  gap: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.tl-embed .tl-embed-controls h2 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tl-embed .row {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.tl-embed .field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.tl-embed .grow {
+  flex: 1 1 0;
+  min-width: 140px;
+}
+.tl-embed select {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 9px;
+  width: 100%;
+}
+.tl-embed button {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.tl-embed button:hover {
+  border-color: var(--muted);
+}
+.tl-embed button.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+.tl-embed .seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg);
+  border-radius: 9px;
+  flex-wrap: wrap;
+}
+.tl-embed .seg button {
+  border: 0;
+  border-radius: 7px;
+  flex: 1 1 auto;
+  color: var(--muted);
+  padding: 5px 8px;
+}
+.tl-embed .seg button[aria-pressed='true'] {
+  background: var(--line);
+  color: var(--ink);
+}
+.tl-embed .hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.tl-embed .check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.tl-embed .check input {
+  accent-color: var(--accent);
+}
+.tl-embed .lane {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.tl-embed .map-wrap {
+  position: relative;
+  min-width: 0;
+}
+.tl-embed canvas.map {
+  display: block;
+  border-radius: 8px;
+  touch-action: none;
+  cursor: crosshair;
+  max-width: 100%;
+}
+.tl-embed .stats {
+  display: grid;
+  gap: 8px;
+}
+.tl-embed .stat {
+  background: var(--raised);
+  border-radius: 10px;
+  padding: 8px 11px;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.tl-embed .stat .k {
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tl-embed .stat .v {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.tl-embed .stat .v.found {
+  color: var(--good);
+}
+.tl-embed .stat .v.bad {
+  color: var(--alert);
+}
+.tl-embed .legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.tl-embed .transport {
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+.tl-embed .transport .btns {
+  display: flex;
+  gap: 5px;
+}
+.tl-embed .transport .btns button {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 8px;
+  font-family: var(--f-mono);
+}
+.tl-embed .scrub,
+.tl-embed .speed {
+  display: grid;
+  gap: 2px;
+}
+.tl-embed .speed {
+  width: 140px;
+}
+.tl-embed .scrub input,
+.tl-embed .speed input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.tl-embed .scrub .lbl,
+.tl-embed .speed .lbl {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .tl-embed .transport {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tl-embed .speed {
+    width: auto;
+  }
+}
+.tl-embed .info p {
+  margin: 0;
+}
+.tl-embed .cx-link {
+  justify-self: start;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
