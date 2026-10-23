@@ -1,6 +1,8 @@
 ---
 import Base from '../../layouts/Base.astro';
 import '../../styles/lesson.css';
+import LearnMore from '../../components/lesson/FlecsLearnMore.mdx';
+import { FLECS_COMMIT, FLECS_DATE } from '../../flecs/version';
 
 const modules = import.meta.glob<{ frontmatter: { title: string; order: number; summary: string; part?: string }; url: string }>('./*.mdx', { eager: true });
 const lessons = Object.values(modules)
@@ -22,7 +24,7 @@ for (const l of lessons) {
     <h1>flecs, from the storage up</h1>
     <p class="lede">
       These lessons follow the <a href="https://www.flecs.dev/flecs/">flecs documentation</a>, but with a debugger alongside. Every
-      example runs real flecs, compiled to WebAssembly from the current master branch, with a trace hooked into its internals.
+      example runs real flecs, compiled to WebAssembly from the master branch (commit <code>{FLECS_COMMIT}</code>, {FLECS_DATE}), with a trace hooked into its internals.
       Step through it and you see what the docs describe: rows moving between tables, the last row swapped into the hole, commands
       waiting for a sync point, caches being told about new tables, and observers firing in order. Later lessons add playgrounds
       and benchmarks you can run on the same build.
@@ -49,6 +51,9 @@ for (const l of lessons) {
         </section>
       ))
     }
+    <section id="learn-more" class="lesson learn-more">
+      <LearnMore />
+    </section>
     <p class="fine">
       Lessons assume you've written some code against an ECS before. Examples are shown in C++; the same operations exist in C, C#
       and Rust. Not affiliated with the flecs project.

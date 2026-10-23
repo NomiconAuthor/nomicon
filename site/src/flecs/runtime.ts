@@ -167,7 +167,7 @@ interface Exports {
   fw_entity_json(e: bigint): Ptr;
   fw_whose(addr: number, comp: Ptr): Ptr;
   fw_is_alive(e: number): number;
-  fw_system(name: Ptr, expr: Ptr, phase: Ptr, cached: number): number;
+  fw_system(name: Ptr, expr: Ptr, phase: Ptr, flags: number): number;
   fw_run_system(s: number, dt: number): void;
   fw_observer(name: Ptr, expr: Ptr, events: Ptr, yieldExisting: number): number;
   fw_emit(event: Ptr, entity: number, id: number): void;
@@ -255,8 +255,10 @@ export class FlecsWorld {
   // ---------------- Systems and observers ----------------
 
   /** A system for `query` that runs `fn` once per matching table each frame. Returns its entity (0 if the query is bad). */
-  system(name: string, query: string, fn: IterCallback, opts: { phase?: string; cached?: boolean } = {}): number {
-    const id = this.withStrings([name, query, opts.phase ?? 'OnUpdate'], ([n, q, p]) => this.x.fw_system(n, q, p, opts.cached === false ? 0 : 1));
+  /** `immediate`: the system runs on a writable world (needed to write through it->world). */
+  system(name: string, query: string, fn: IterCallback, opts: { phase?: string; cached?: boolean; immediate?: boolean } = {}): number {
+    const flags = (opts.cached === false ? 0 : 1) | (opts.immediate ? 2 : 0);
+    const id = this.withStrings([name, query, opts.phase ?? 'OnUpdate'], ([n, q, p]) => this.x.fw_system(n, q, p, flags));
     if (id) this.callbacks.set(id, fn);
     return id;
   }

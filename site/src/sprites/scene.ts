@@ -117,3 +117,33 @@ export function drawStone(ctx: CanvasRenderingContext2D, x0: number, y0: number,
   ctx.strokeStyle = c.line;
   ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
 }
+
+/**
+ * A top-down agent for the steering and avoidance widgets: its real footprint (a disc of
+ * radius `r`, the body the simulation collides) in a group colour, a heading tick from the
+ * edge of the disc, and the sprite standing on it. Overlays drawn afterwards stay on top.
+ */
+export function drawAgent(ctx: CanvasRenderingContext2D, sprite: SpriteId, x: number, y: number, r: number, heading: number, colour: string, o: { size?: number; outline?: string; alpha?: number } = {}): void {
+  const size = spriteSize(o.size ?? r * 2.6);
+  const hx = Math.cos(heading);
+  const hy = Math.sin(heading);
+  ctx.save();
+  const a = o.alpha ?? 1;
+  ctx.globalAlpha = a * 0.55;
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = o.outline ?? colour;
+  ctx.lineWidth = o.outline ? 2.5 : 1.5;
+  ctx.stroke();
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + hx * r, y + hy * r);
+  ctx.lineTo(x + hx * (r + Math.max(4, r * 0.6)), y + hy * (r + Math.max(4, r * 0.6)));
+  ctx.stroke();
+  ctx.restore();
+  drawSprite(ctx, sprite, x, y - size * 0.3, size, { flip: hx < -0.15, alpha: o.alpha });
+}

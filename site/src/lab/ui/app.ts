@@ -20,6 +20,7 @@ import { mergePlans, randomUnit, type LanePlan } from './units';
 import { Learn, linkTerms } from './learn';
 import { clearUrlState, mountShareButton, stateInUrl, unpack } from './share';
 import { conceptById, conceptsFor, type Concept, type Scenario, type Try } from '../learn/concepts';
+import { touchScroll } from '../../engine/touch';
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -1719,6 +1720,9 @@ export class App {
       const y = Math.floor((py - this.cam.oy) / this.cam.cs);
       return [Math.max(0, Math.min(l.w - 1, x)), Math.max(0, Math.min(l.h - 1, y))];
     };
+    // Touch: a vertical swipe scrolls the page unless it starts on a marker or a heading handle;
+    // taps and sideways strokes still paint (engine/touch.ts).
+    touchScroll(c, { defer: true, grab: (e) => !!this.handleAt(lane, e) || !!this.markerAt(...cellAt(e), Math.max(0, Math.ceil(6 / this.cam.cs))) });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener(
       'wheel',

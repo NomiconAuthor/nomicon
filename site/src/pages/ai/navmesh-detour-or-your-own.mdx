@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Lesson.astro
 title: 'Detour, or your own planner'
-order: 10
+order: 7
 part: Navmeshes
 summary: 'What Detour adds on top of Recast''s polygons (queries, path corridors, crowds, tiles and temporary obstacles), what it assumes, and when to keep the navmesh but write your own search: custom costs, time-slicing, and vehicles that can''t turn on the spot.'
 ---
@@ -19,7 +19,7 @@ import Tip from '../../components/lesson/Tip.astro';
   - `raycast`, `moveAlongSurface`, `findDistanceToWall`, random points, polygons in a radius.
 - **Sliced pathfinding**: `findPath` split across frames with a fixed number of iterations per call, so hundreds of agents can request paths without a spike.
 - **The path corridor** (`dtPathCorridor`): keeps an agent's corridor valid as it moves and gets pushed around, trimming the start, re-joining after detours and optimising the visible part, without replanning from scratch.
-- **The crowd** (`dtCrowd`): corridor following, local avoidance by [adaptive velocity sampling](/ai/local-avoidance/), and steering for many agents at once.
+- **The crowd** (`dtCrowd`): corridor following, local avoidance by adaptive velocity sampling (the [local avoidance lesson](/ai/local-avoidance/), coming up, compares it with the alternatives), and steering for many agents at once.
 - **The tile cache** (`dtTileCache`): compressed per-tile layers plus temporary obstacles (cylinders, boxes) that rebuild only the tiles they touch, much faster than re-running Recast. It's the same [dirty-tile](/ai/cover-in-play/) idea as keeping cover valid.
 
 The [pathing lab](/pathing-lab/#concept-navmesh) builds a tiled Recast navmesh and runs Detour's `findPath` alongside its own search as a cross-check.
@@ -57,7 +57,7 @@ The pathing lab has all three ingredients: [the problem](/pathing-lab/#concept-h
 ## In an ECS
 
 - **The navmesh is a resource**, owned by a singleton or the engine, with tiles swapped in by a background job when they're rebuilt.
-- **Path requests are components**: a `PathRequest` added to an agent, processed by a system with a budget of search iterations per frame (sliced, so a burst of requests spreads over several frames), producing a `PathCorridor` component.
+- **Path requests are components**: a `PathRequest` added to an agent, processed by a system with a [budget of search iterations](/engine/deadlines-and-async-work/) per frame (sliced, so a burst of requests spreads over several frames), producing a `PathCorridor` component.
 - **Following** reads the corridor and writes a desired velocity for [steering](/ai/steering/); for vehicles, the planned poses.
 - **Tile rebuilds invalidate corridors**: when a tile changes, agents whose corridors cross it get a new `PathRequest`. An observer on a tile-changed event, or a relationship from agent to the tiles its corridor uses, finds them.
 

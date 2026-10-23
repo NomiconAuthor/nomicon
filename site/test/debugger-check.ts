@@ -89,5 +89,13 @@ for (const [sc0, variant] of runs) {
   if (s.done.length) console.log(layout(s.done.at(-1)!.after, (e) => s.name(e)).replace(/^/gm, '      '));
   const iters = s.done.map((r) => r.events.filter((e) => e.k === 'iter' && (s.systems.has(e.system) || s.queryById.has(e.system))).length).filter(Boolean);
   if (iters.length) console.log(`      callbacks per frame/iteration: ${iters.join(', ')}`);
+  // The sync points lesson: where frame 1's merge lands relative to Burn.
+  if (sc0.id === 'syncPoints') {
+    const evs = s.done[0].events;
+    const burn = evs.findIndex((e) => e.k === 'systemBegin' && e.name === 'Burn');
+    const flush = evs.findIndex((e) => e.k === 'flushBegin' && s.flushHasUserWork(e));
+    const want = variant === 0 ? 'after Burn' : 'before Burn';
+    check(`${sc.id}: frame 1 merges ${want}`, burn >= 0 && flush >= 0 && (variant === 0 ? flush > burn : flush < burn), { burn, flush });
+  }
 }
 process.exitCode = fails ? 1 : 0;

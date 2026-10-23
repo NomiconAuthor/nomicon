@@ -1,6 +1,7 @@
 ---
 import Base from './Base.astro';
 import '../styles/lesson.css';
+import { FLECS_COMMIT, FLECS_DATE } from '../flecs/version';
 
 interface Frontmatter {
   title: string;
@@ -14,7 +15,7 @@ const { frontmatter } = Astro.props;
 
 // Lessons are grouped by their folder: /engine/…, /flecs/…, /ai/…
 const SECTIONS: Record<string, { name: string; note?: string }> = {
-  flecs: { name: 'flecs lessons', note: 'Running flecs master (4.2 in progress), compiled to WebAssembly.' },
+  flecs: { name: 'flecs lessons', note: `Running flecs master (commit ${FLECS_COMMIT}, ${FLECS_DATE}), compiled to WebAssembly.` },
   engine: { name: 'engine fundamentals', note: 'Measurements run in your browser, so absolute numbers vary; the ratios are the point.' },
   ai: { name: 'game AI', note: 'Deciding, moving and reading the map. Every comparison runs on the same small, deterministic worlds, so the techniques can be compared fairly.' },
 };
@@ -70,6 +71,7 @@ const next = lessons[i + 1];
       <h1>{frontmatter.title}</h1>
       <p class="lede">{frontmatter.summary}</p>
       <slot />
+      {sectionId === 'flecs' && <p class="lesson-ver">Checked against flecs master <code>{FLECS_COMMIT}</code> ({FLECS_DATE}). If your flecs version behaves differently, trust the <a href="https://www.flecs.dev/flecs/">docs</a> for your version, then <a href="/flecs/#learn-more">ask</a>.</p>}
       <nav class="pn" aria-label="Previous and next lesson">
         {prev ? <a href={prev.url} class="pn-prev"><span>← Previous</span>{prev.title}</a> : <span />}
         {next ? <a href={next.url} class="pn-next"><span>Next →</span>{next.title}</a> : <span />}

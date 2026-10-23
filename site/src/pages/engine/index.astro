@@ -16,14 +16,14 @@ for (const l of lessons) {
 }
 ---
 
-<Base title="Engine fundamentals" section="engine" description="Interactive lessons on what game engines rest on: memory and the cache, handles and allocators, game loops, determinism, spatial partitioning, job systems and task graphs, threads, pools and fibers, and profiling.">
+<Base title="Engine fundamentals" section="engine" description="Interactive lessons on what game engines rest on: memory and the cache, handles and allocators, game loops, determinism, deadlines for async work, spatial partitioning, job systems and task graphs, threads, pools and fibers, and profiling.">
   <main class="flecs-index">
     <p class="kicker">Lessons</p>
     <h1>Engine fundamentals, made visible</h1>
     <p class="lede">
       The things every engine leans on and most tutorials wave past: how memory reaches the CPU a cache line at a time, why data
       layout decides speed, how to refer to objects that come and go, how a game loop keeps the simulation steady whatever the
-      frame rate does, what it takes to make a simulation replay exactly, how to find what's near what, in 2D and in 3D, how to spread a frame
+      frame rate does, what it takes to make a simulation replay exactly, how to give slow work a deadline without breaking that, how to find what's near what, in 2D and in 3D, how to spread a frame
       across every core without losing determinism, what a core does while a job waits, and how to find out where the time really goes. Each
       lesson has something to play with, and some measure real effects in your browser.
     </p>

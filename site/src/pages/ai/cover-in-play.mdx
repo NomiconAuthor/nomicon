@@ -18,7 +18,7 @@ Store the bake in tiles (here 16 × 16 m). When the world changes, mark the tile
 
 1. **Mark dirty tiles**: every tile the change overlaps, grown by a margin of how far the analysis looks. Cover depends only on direct neighbours, so a 1 m margin is enough.
 2. **Invalidate** the old cover in those tiles: points the change destroyed are dropped at once, and any unit that had claimed a position there must re-query. Everything outside the dirty tiles stays valid.
-3. **Rebuild** each dirty tile, as a background job spread over frames. Whatever survived of the old tile stays in use until the new one is ready.
+3. **Rebuild** each dirty tile, as a background job spread over frames (with a [fixed deadline in ticks](/engine/deadlines-and-async-work/) if the game must replay exactly). Whatever survived of the old tile stays in use until the new one is ready.
 4. **Swap** the new tiles in. For a crater, the lip appears as new low cover.
 
 In code, the change handler is short. The work is in making `bake_cover` take a tile and nothing else, so tiles can be rebuilt independently, in any order, on any thread:

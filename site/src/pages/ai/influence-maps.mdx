@@ -65,7 +65,7 @@ Keep the maps separate (each side's influence, threat, last-known positions, you
 ## What it costs, and how to keep it cheap
 
 - **A coarser grid.** One-metre cells suit a demo. Two to four metres is typical for influence, and a 4 m grid has a sixteenth of the cells.
-- **Update rarely, and in slices.** Positions change every frame; the *situation* doesn't. Two to four updates a second is plenty, and the work splits naturally by enemy, so it time-slices or runs as jobs that merge in a fixed order ([jobs](/engine/jobs-and-task-graphs/) and [determinism](/engine/determinism/)).
+- **Update rarely, and in slices.** Positions change every frame; the *situation* doesn't. Two to four updates a second is plenty, and the work splits naturally by enemy, so it time-slices with a [work budget](/engine/deadlines-and-async-work/) or runs as jobs that merge in a fixed order ([jobs](/engine/jobs-and-task-graphs/) and [determinism](/engine/determinism/)).
 - **Precompute visibility.** The static map's line of sight doesn't change: a baked cell-to-cell visibility table (at a coarse resolution) turns each test into a lookup, and caching recent results per cell pair helps when the same questions come up every update.
 - **Treat stale enemies more cheaply.** Their threat changes slowly: recompute it every second or two, use fewer possible positions, or spread it with a flood instead of line of sight.
 - **One map per side, not per agent.** Threat to the knights is the same for every knight, so it's computed once and shared: it belongs to the side's knowledge, not the individual's.

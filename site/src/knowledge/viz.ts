@@ -34,6 +34,8 @@ const KIND_LABEL: Record<string, string> = { quest: 'Quest', claim: 'Claim', sig
 const RANK: Record<string, number> = { quest: 0, claim: 1, report: 2, sighting: 3 };
 const SPRITE: Record<Role, SpriteId> = { front: 'knight', map: 'mage', loot: 'crossbow' };
 const ROLE_TEXT: Record<Role, string> = { front: 'walks in front', map: 'keeps the map', loot: 'carries the packs' };
+/** Smallest map scale, in px per cell (1 m), before the map scrolls sideways instead of shrinking. */
+const MIN_CELL = 4.4;
 const stat = (v: string, l: string) => h('div', { class: 'll-stat' }, h('b', {}, v), h('span', {}, l));
 
 export class KnowledgeViz {
@@ -62,12 +64,17 @@ export class KnowledgeViz {
   private raf = 0;
   private tickMs = 900;
   private S = 6;
+  private mapWrap: HTMLElement;
+  private panHint = h('p', { class: 'll-muted kn-pan', hidden: true }, 'Swipe the map sideways to see the rest; it follows the chosen adventurer.');
+  /** The time step the map last scrolled to follow the chosen adventurer at. */
+  private followedAt = -1;
 
   constructor(host: HTMLElement, opts: { preset?: Preset } = {}) {
     this.preset = opts.preset ?? 'simple';
     this.run = this.simulate();
     this.selectDefault();
     this.root = h('div', { class: 'll kn' });
+    this.mapWrap = h('div', { class: 'kn-mapwrap' }, this.map);
     host.replaceChildren(this.root);
     this.slider = h('input', { type: 'range', min: 0, max: DURATION, value: 0, 'aria-label': 'Time' }) as HTMLInputElement;
     this.slider.addEventListener('input', () => ((this.phase = 1), this.draw()));
@@ -116,7 +123,8 @@ export class KnowledgeViz {
       h('div', { class: 'll-row kn-time' }, this.playBtn, h('button', { type: 'button', class: 'll-btn', onclick: () => this.step() }, 'Step'), this.slider, this.timeLbl),
       h('div', { class: 'll-row' }, speed.el, h('span', { class: 'll-muted' }, 'Click an adventurer on the map to read its boards.'), this.stageLbl),
       this.note,
-      h('div', { class: 'kn-mapwrap' }, this.map),
+      this.mapWrap,
+      this.panHint,
       key,
       this.cards,
       this.flow,
@@ -282,8 +290,11 @@ export class KnowledgeViz {
     const t = this.t();
     const st = this.run.steps[t];
     const wpx = Math.max(280, this.root.clientWidth - 4);
-    const S = Math.min(7, wpx / VW);
+    // Desktop fits the whole map. A phone would shrink it to under 3 px a cell, so there it keeps
+    // a readable scale, scrolls sideways in its frame, and follows the chosen party.
+    const S = Math.min(7, Math.max(wpx / VW, MIN_CELL));
     this.S = S;
+    this.panHint.hidden = S * VW <= wpx + 1;
     const dpr = window.devicePixelRatio || 1;
     const cnv = this.map;
     cnv.width = VW * S * dpr;
@@ -430,6 +441,20 @@ export class KnowledgeViz {
         ctx.stroke();
       }
     });
+    this.follow(P(st.adventurers[this.member].x));
+  }
+
+  /** When the map is wider than its frame, keep the chosen adventurer in view as time moves on. */
+  private follow(x: number): void {
+    const wrap = this.mapWrap;
+    const w = wrap.clientWidth;
+    if (wrap.scrollWidth <= w + 1) return;
+    const t = this.t();
+    if (t === this.followedAt) return;
+    this.followedAt = t;
+    const left = wrap.scrollLeft;
+    if (x > left + w * 0.2 && x < left + w * 0.8) return;
+    wrap.scrollTo({ left: Math.max(0, Math.min(wrap.scrollWidth - w, x - w / 2)), behavior: this.playing ? 'smooth' : 'auto' });
   }
 
   private drawCards(): void {

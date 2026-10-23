@@ -16,8 +16,8 @@ npm run dev        # http://localhost:4321
 
 | Section | URL | What it is |
 |---|---|---|
-| **engine** | `/engine/` | 9 lessons on what the hardware and the engine underneath do: cache lines and data layout, handles and allocators, game loops, determinism, spatial partitioning, octrees, jobs and task graphs, threads/pools/fibers, profiling. |
-| **flecs** | `/flecs/` | 19 lessons on the flecs ECS, each running **real flecs master** in the browser with its internals instrumented, plus a free-form **sandbox** at `/flecs/sandbox/`. |
+| **engine** | `/engine/` | 10 lessons on what the hardware and the engine underneath do: cache lines and data layout, handles and allocators, game loops, determinism, deadlines and async work, spatial partitioning, octrees, jobs and task graphs, threads/pools/fibers, profiling. |
+| **flecs** | `/flecs/` | 19 lessons on the flecs ECS (plus further reading on the index page), each running **real flecs master** in the browser with its internals instrumented, plus a free-form **sandbox** at `/flecs/sandbox/`. |
 | **game ai** | `/ai/` | 16 lessons: utility AI, behaviour trees, GOAP, steering, local avoidance, formations, Recast and Detour, terrain analysis, cover, influence and threat maps, shared knowledge (blackboards), party roles (tank, healer, damage). Set in one fantasy world. |
 | **labs** | `/labs/` | **Pathing lab** (`/pathing-lab/`): grid A*/JPS/Theta*, HPA*, Recast navmesh, PRM/RRT roadmaps, multi-unit, vehicles with Hybrid A* / state lattice / car RRT. **Tactics lab** (`/tactics-lab/`): clearance, chokes, traffic, openness, cover generation, exposure and best-cover queries on a 2.5D grid. |
 
@@ -73,11 +73,14 @@ Browser checks in `tools/` are optional and need Python with Playwright and Chro
 
 The site is static files only; the server has no Node.
 
-1. Set your domain in `site/astro.config.mjs` (`site:`, currently the placeholder `https://nomicon.example.com`). It's used for the canonical links on the `/low-level/` forwarding pages; lesson pages don't emit a canonical link yet.
+1. The domain is set in `site/astro.config.mjs` (`site:`, `https://nomicon.app`). It's used for every page's canonical link and for the link-preview (`og:`) URLs.
 2. `cd site && npm run build && npm test`.
 3. Copy the **contents** of `site/dist/` into the web root (you should see `index.html`, `flecs.wasm`, `_astro/`, `flecs/`, `pathing-lab/`, ...). Any static host works.
 4. `.wasm` must be served as `application/wasm` (nginx's default mime.types does this).
-5. Optional: real 301s for the old engine URLs: `rewrite ^/low-level/?(.*)$ /engine/$1 permanent;`. The site already forwards them with small pages that keep the `#anchor`.
+5. Serve `404.html` for missing pages instead of falling back to the home page. In nginx: `try_files $uri $uri/ =404;` in `location /`, and `error_page 404 /404.html;` in the `server` block.
+6. Optional: real 301s for the old engine URLs: `rewrite ^/low-level/?(.*)$ /engine/$1 permanent;`. The site already forwards them with small pages that keep the `#anchor`.
+
+**Link previews:** every page has `og:`/Twitter tags, and its own 1200 × 630 card in `site/public/og/` (listed in `src/og-cards.json`; pages without one use the home card). When lessons are added or renamed, regenerate them: `npm run build`, then `python3 tools/make-og-images.py [--fonts DIR]` from the repo root, then build again. The script needs Playwright with Chromium; `--fonts` points at local Cinzel/Roboto `.woff2` files (from the `@fontsource` npm packages) so cards render without Google Fonts.
 
 **Themes without rebuilding:** edit `themes.js` in the web root (source `site/public/themes.js`). `enabled` lists the offered themes and `default` is the first-visit theme; with one theme enabled the menu disappears. Pages load it as `/themes.js?v=<build id>` (`BUILD_ID` in `themes.ts`), so each deploy gets a fresh URL past browser and CDN caches; an edit made on the server between builds still needs a hard refresh (or a short-TTL cache rule for `/themes.js`).
 
@@ -104,34 +107,35 @@ Widget kinds and what they model:
 - `cache`, `bench-layout|order|stride` (real typed-array benchmarks in `membench.worker.ts`), `falseshare` (toy MESI) → *Memory, cache lines and data layout*. Measured: AoS move ≈3.3× SoA, random access ≈3× in-order; stride cost keeps rising past 64 B.
 - `slotmap`, `alloc` (arena, pool, first-fit free list with coalescing) → *Handles and allocators*.
 - `loop` (virtual-clock game loop: variable vs fixed vs interpolated, jitter, hitches, spiral of death) → *Game loops*.
-- `floatorder`, `rngstreams`, `deadline` (`determinism.ts`) → *Determinism*, with a C++ `DeadlineScheduler` sketch.
+- `floatorder`, `rngstreams` (`determinism.ts`) → *Determinism*. `deadline` (`determinism.ts`) → *Deadlines and async work*, with a C++ `DeadlineScheduler` sketch.
 - `spatial` (brute force, uniform grid, quadtree, BVH, sweep and prune; all checked against brute force) → *Spatial partitioning*.
 - `octree` (box city with an airship, octree A* with string pulling vs a voxel grid; hand-rolled 3D canvas) → *Octrees and flying*.
 - `parfor`, `taskgraph` (`jobsim.ts`: discrete-event job system, simulated µs so results match on every machine) → *Jobs and task graphs*.
 - `waiting` (`waitsim.ts`: a job waiting on its children, handled by blocking, helping, fibers, stackless coroutines or one OS thread per task) and `pipeline` (named game and render threads, pipelined) → *Threads, pools and fibers*.
-- `profiler` (`profsim.ts`: a made-up game with known true costs, profiled by sampling, full instrumentation and hand-placed zones) → *Profiling*. Mentions Visual Studio's tools, VTune and RenderDoc.
+- `profiler` (`profsim.ts`: a made-up game with known true costs, profiled by sampling, full instrumentation and hand-placed zones) → *Profiling*. Ends with a table of which profiling tool does what (Visual Studio, WPA, Superluminal, Tracy, VTune, PIX, RenderDoc and others).
 
 ### flecs (`src/flecs/`, lessons in `pages/flecs/`)
 - `runtime.ts`: `FlecsWorld` loads a wasm build; REST in-process, scripts, systems and observers with JS callbacks, iterator ops, table / sparse / query-cache dumps, and the **trace**.
 - `debugger/`: `session.ts` runs ops and snapshots, `model.ts` is the storage model plus event replay, `describe.ts` explains events, `view.ts` is the UI. `scenarios.ts` holds every lesson scenario (with optional *variants*: alternate setup, ops on the world instead of the stage, or a different wasm build).
 - A scenario is Flecs Script `setup` (plus the C++ shown to readers), optional systems/observers/queries/hooks, and a list of `ops` (a C++ line plus `run(ctx)` via REST). Ops run lazily as the reader steps; any cursor position is `before + replay(events[0..n])`. "Lesson entities" exclude ids and name-only entities. Internal flecs systems are hidden unless "flecs internals" is ticked.
+- Variants may replace `systems` (the `syncPoints` scenario adds `[out] Burning()`); `debugger-check.ts` asserts where its merge lands in each variant.
 - `sandbox/sandbox.ts`: define components (column, Sparse, DontFragment), create entities, add observers and systems, run frames; shows tables with FLIP-animated row moves, sparse sets, observer counters and a per-action log. Presets via `?preset=basics|fragmentation|traits|empty`.
 
-Lessons in order: entities, archetypes, references, relationships, prefabs, query-language, query-caching, systems, commands, command-merging, observers, deleting, fragmentation, storage-traits, spatial-data, reflection-and-scripts, networking, thinking-in-flecs, learn-more.
+Lessons in order: entities, archetypes, references, relationships, prefabs, query-language, query-caching, systems, commands, sync-points-and-threads, command-merging, observers, deleting, fragmentation, storage-traits, spatial-data, reflection-and-scripts, networking, thinking-in-flecs. "Where to learn more" is a section of the flecs index (`components/lesson/FlecsLearnMore.mdx`); `/flecs/learn-more/` redirects there.
 
 #### Building flecs.wasm (`flecs-wasm/`)
-- Source: flecs **master**, amalgamated `distr/flecs.c/.h` (currently commit 9062901, 19 Oct 2026). A second build at 68631db (just before the remove/add batching fix) is `public/flecs-68631db.wasm`, used only by the command-merging lesson's "Before the fix" variant.
+- Source: flecs **master**, amalgamated `distr/flecs.c/.h` (currently commit 1d5850a, 22 Oct 2026, built without `FLECS_DEBUG`, so asserts are compiled out). The commit is also set in `src/flecs/version.ts`, which every flecs lesson shows at the bottom; update both together. A second build at 68631db (just before the remove/add batching fix) is `public/flecs-68631db.wasm`, used only by the command-merging lesson's "Before the fix" variant.
 - Build: `pip install ziglang`, then `cd flecs-wasm && ./build.sh /path/to/flecs/distr && cp flecs.wasm ../site/public/flecs.wasm`. Uses `zig cc -target wasm32-wasi`.
 - `instrument.py` adds WASI detection and socket stubs (REST is called in-process via `ecs_http_server_request`), and injects about 15 `FW_TRACE(...)` calls inside named functions after short anchors (`flecs_table_init/fini`, `flecs_move_entity`, `flecs_observer_invoke`, `flecs_commands_flush`, sparse insert/remove, ...). If a flecs update moves an anchor, it prints which one; fix the anchor string.
 - `flecs_web.c` (one translation unit with the instrumented flecs.c) exports the `fw_*` API: init/reset, REST, scripts, JS systems and observers, iterator ops through `it->stage` (or `it->world` with `fw_it_use_world(1)`), dumps, benchmarks (`fw_bench_ladder/spatial`), raw components, and networking helpers (`fw_range_new/set`, `fw_make_alive`, ...; ids cross as BigInt).
 - Sparse/DontFragment fields in callbacks must be read per row with `ecs_field_at`.
 
 #### flecs master gotchas
-- Deferral is per target: ops on a stage (`it->stage`, C++ `.each()` handles) are queued; ops on the world apply **immediately**, even inside a system. C++ `it.world()` is the real world.
+- Deferral is per target: ops on a stage (`it->stage`, C++ `.each()` handles) are queued; ops on the world apply **immediately**. Writing through the world is only legal in an `immediate` system: in an ordinary system the world is readonly and debug builds assert (this build has asserts off, so check on a native debug build). `fw_system` flag 2 makes a system immediate; the commands lesson's *Immediate* variant uses it. C++ `it.world()` is the real world.
 - `ecs_entity_desc_t` has no `.add`; systems take `.phase` directly. Script struct syntax: `struct Position(x: f32, y: f32)`.
 - Moves: remove actions run before the row is appended to the destination table. The row-delete trace is recorded after `on_remove` hooks.
 - Command batching: the first command for an entity applies the whole batch (one move); since 9062901 a queued remove really removes.
-- DontFragment components aren't in the type and aren't serialised by REST/JSON.
+- DontFragment components aren't in the type and aren't serialised by REST/JSON. Since 1d5850a tables carry no DontFragment flag (`EcsTableHasDontFragment` is gone), so `fw_tables` reports `dontFragment: false` for every table; the sparse-set dump says whether a component is DontFragment.
 - Instantiating a prefab runs `OnSet` observers for copied components with `it->event` reported as `OnAdd`.
 - `make_alive` on an alive id with the same version is a silent no-op; with a different version it fails.
 - Hierarchical names print with `.`; REST paths use `/`.
@@ -144,7 +148,7 @@ Lessons in order: entities, archetypes, references, relationships, prefabs, quer
 - **Influence and threat maps** (`influence/`): knights against goblins; influence by straight line or walking distance, control and tension, threat (cells an enemy can hit within bow range and line of sight, spread for stale sightings), routes that weigh threat.
 - **Shared knowledge** (`knowledge/village.ts`, `viz.ts`, `knowledge.css`): adventuring parties and a guild board. Guild, party and adventurer blackboards; a versioned append-only guild log with a watermark per party; parties post and catch up only at the guild hall or a waystone. A troll wanders off, the clerk moves its notice, and party B keeps walking to the old bridge until its next waystone. Merge by when it was true; optional history cap with snapshots. `simple` (two parties) and `full` (four parties, two more waystones) presets; a toggle lets B read anywhere for comparison.
 - **Party roles** (`party/`): five heroes (tank, cleric, knight, crossbow knight, battle-mage) against an orc warchief with goblin-archer adds: a threat table with 110/130% switching and taunts, triage healing scored by need × danger × role × efficiency, damage dealers who hold under the pull threshold and kill adds first, and cleave/slam telegraphs dodged with context steering over a danger map. Each part has a naive switch; 20-fight batch (`npm run party-batch`). The widget runs the 10 Hz sim on a smooth clock.
-- **Sprites and missiles** (`sprites/`): Kenney's *Tiny Dungeon* (CC0) unit sprites as an inline atlas (`units.png` → `atlas.ts`; the orc and goblin archer are recoloured), and drawn crossbow bolts, arrows and arcane bolts. Used by the arena, party roles, shared knowledge and influence widgets; `scene.ts` adds party members in marching order (a shield knight leads), a speckled ground and stone walls for the steering course and formations. Purely visual: nothing feeds back into a simulation, so no lesson number depends on it.
+- **Sprites and missiles** (`sprites/`): Kenney's *Tiny Dungeon* (CC0) unit sprites as an inline atlas (`units.png` → `atlas.ts`; the orc and goblin archer are recoloured), and drawn crossbow bolts, arrows and arcane bolts. Used by the arena, party roles, shared knowledge and influence widgets; `scene.ts` adds party members in marching order (a shield knight leads), a speckled ground and stone walls for the steering course and formations, and `drawAgent` puts a sprite on an agent's real footprint for the Reynolds playground and local avoidance. The tactics lab draws its knight and goblin archers with them too. Purely visual: nothing feeds back into a simulation, so no lesson number depends on it.
 
 ### Labs
 - **Pathing lab** (`lab/`, page `pages/pathing-lab.astro`): mounted from `lab/ui/app.ts`; keeps settings in `localStorage` (`pathfinding-lab/v1`).
@@ -154,15 +158,14 @@ Lessons in order: entities, archetypes, references, relationships, prefabs, quer
   - `playback.ts` plus traces (`coverTraces.ts`, `chokeTrace.ts`, `dynamicTrace.ts`) step through algorithms with captions.
   - `app.ts`: UI and the best-cover query (scored with `ai/curves.ts`); `concepts.ts`: concept cards and glossary. Compare mode runs two lanes on one world.
 
+**Touch:** `engine/touch.ts` (`touchScroll()`): on touch screens a vertical swipe over a lab or AI canvas scrolls the page; touches that start on something draggable (or with a paint tool active) don't, and taps or sideways strokes still reach the widget. Engine widgets (profiler, octree, spatial) still use `touch-action: none`.
+
 Gotcha found twice: a Dijkstra that skips stale heap entries (`if (c > cost[i]) continue`) must store costs in a `Float64Array`; Float32 rounding makes it skip real entries.
 
 ## Known gaps and ideas
-- Labs: big maps and heavy planners block the main thread (move planning to a worker or show progress); no pinch-zoom on touch, and the canvas traps page scrolling on phones; tooltips explaining "Cost" vs "Length".
+- Labs: big maps and heavy planners block the main thread (move planning to a worker or show progress); no pinch-zoom on touch; in the pathing lab a vertical paint stroke on a phone has to start sideways; tooltips explaining "Cost" vs "Length".
 - A cover lab: discovering cover from navmesh boundary edges, storing it in a spatial index, scoring it and keeping it valid.
-- flecs: more short lessons on non-obvious behaviour (verify on master first; add a variant when a PR changes behaviour); pipeline sync points and threading; sandbox systems that modify values; save/share sandbox worlds via URL; relationships that aren't always Exclusive.
-- Benchmarks run on a debug flecs build (asserts on), so absolute numbers are inflated; a release build for benchmarks only is possible.
-- Site: no 404 page; lesson pages don't emit canonical links.
-- Shared knowledge on phones: the map is small.
+- flecs: more short lessons on non-obvious behaviour (verify on master first; add a variant when a PR changes behaviour); sandbox systems that modify values; save/share sandbox worlds via URL; relationships that aren't always Exclusive.
 - Networking: rollback and client prediction.
 
 ## Contributing

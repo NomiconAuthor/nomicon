@@ -1,0 +1,115 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Sync points and threads
+order: 10
+part: Systems, commands and reactions
+summary: How the pipeline decides where queued commands are merged, what read and write annotations tell it, and how multi_threaded and immediate systems fit around those merges.
+---
+import FlecsDebugger from '../../components/FlecsDebugger.astro';
+import ThreadSchedule from '../../components/lesson/ThreadSchedule.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[The commands lesson](/flecs/commands/) showed that a system's adds, removes and `set`s are queued on its stage and applied at a **sync point**. This lesson is about where those sync points go, and how threads fit around them.
+
+Two settings are easy to mix up. **Annotations** (`[in]`, `[out]`, `.read<T>()`, `.write<T>()`) tell the pipeline where to merge. **`multi_threaded`** tells it which systems may be split across threads. They are separate switches, but they meet at the sync point: a merge is also the moment every thread stops and waits.
+
+## Watch a merge move
+
+`Ignite` finds everything standing in lava that isn't burning yet and queues `set<Burning>({5})`. `Burn`, the next system, takes `dps` off `Health` for everything that is `Burning`. The Orc is already burning. Step through the first `world.progress()` with each setup.
+
+<FlecsDebugger scenario="syncPoints" />
+
+What to look for:
+
+- **No annotation.** `Ignite` enqueues two commands. `Burn` runs straight after it and only finds the Orc: the Knight and the Goblin are still in their old table. The sync point comes after `Burn`, at the end of the frame. They take their first damage in frame 2.
+- **With `.write<Burning>`.** Same systems, one extra line: `.write<Burning>()` on `Ignite`. Now the sync point sits between `Ignite` and `Burn`. The Knight and the Goblin move to `[Health, Burning, InLava]` *before* `Burn` runs, so they take damage in frame 1.
+- **Burn idle.** No annotation again, and nothing is burning when the frame starts, so `Burn` matches no tables and is left out of the schedule. The schedule is just `Ignite` and a merge. After that merge `Burn` matches a table, so flecs rebuilds the schedule and runs it in the same frame. It looks as if the annotation weren't needed. It is: as soon as one entity is already burning, you're back to the first setup.
+
+## How the pipeline places sync points
+
+flecs can't see inside your system's function. It only sees the query. When the set of active systems changes, the pipeline walks the systems in order and builds a schedule: runs of systems, each followed by a merge. It tracks which components may have commands queued for them, and inserts a merge before the next system that needs one of those components.
+
+The annotations the pipeline understands:
+
+| You write | Query language | Meaning to the pipeline |
+|---|---|---|
+| `.write<T>()` | `[out] T()` | This system may `add`, `set` or `remove` `T` through the stage. |
+| `.without<T>().write()` | `[out] !T` | It adds `T` to the entities it matches, which don't have it yet. |
+| `.read<T>()` | `[in] T()` | It reads `T` with `get()`, outside its query: merge first if `T` was queued. |
+
+The `()` means "no source": the term doesn't match anything, it's only a declaration. A system with no write annotation is assumed to queue nothing.
+
+What needs a merge, once `T` may have been queued:
+
+- **Any term that matches `T` on the system's own entities**, whatever its access: `T`, `[in] T`, `[none] T`, even `!T`. Which tables a system iterates depends on whether `T` is there, so the queue must be applied first. Only `[filter]` terms are skipped.
+- **A declared read**: `[in] T()` (`.read<T>()`), or `T` read from a fixed entity such as a singleton.
+
+Some things don't matter, and it's worth knowing which:
+
+- **Writing a field never causes a merge.** It's a store into the column, not a command (see [systems and the pipeline](/flecs/systems/)). `[out]` or `[inout]` on a term matched on the system's own entities says nothing about commands.
+- **`const` / `[in]` on your own matched terms doesn't move merges.** It feeds change detection (flecs marks the columns a system can write as changed) and documents the system. Worth doing, for other reasons.
+- **Inactive writers are ignored.** A system that matches no tables isn't scheduled and doesn't count as a writer. An inactive *reader* still gets its merge, because the merge may give it something to match; if it does, the schedule is rebuilt and the reader runs. In the third setup above, the end-of-frame merge does the same for `Burn`.
+- **One merge serves many writers.** Several systems can queue commands before a single merge, and after it every component counts as clean again.
+
+A merge is also inserted where the system kind changes: between a single-threaded system and a `multi_threaded` one, and before and after every `immediate` system. Phases don't add merges on their own. Without annotations, and with only one kind of system, all your systems share one run, and its merge comes after the last of them.
+
+<Tip kind="note" title="Print the schedule">
+In a debug build, with `flecs::log::set_level(1)` (`ecs_log_set_level(1)` in C), flecs prints the schedule whenever it rebuilds it: `schedule: threading: 0, staging: 1:`, the systems in that run, then `merge`. That's the quickest way to check where your merges went; flecs's own `sync_point` example does exactly this. (Release builds compile this logging out.)
+</Tip>
+
+## Threads: `multi_threaded` and `set_threads`
+
+`world.set_threads(n)` gives the world `n` **stages**. The main thread uses stage 0, and flecs starts `n − 1` worker threads for the others. Each stage has its own command queue, so threads never share one.
+
+Only systems marked `.multi_threaded()` are split. Single-threaded systems run on the main thread, and the workers sleep through them. A multi-threaded system runs on every stage at once, and each stage gets a slice of **every table** the system matches: contiguous rows, with the remainder going to the first stages. With three stages, a table of 10 entities is split 4, 3, 3. A table with one entity is only processed by stage 0. Since the split depends only on the table's row count, the same entity lands on the same thread in every system until the next merge.
+
+The barrier is not per system. It's per **run**, the systems between two merges. Within a run, each thread works through its own slices of all the run's systems, one after another, without waiting for the others. Then every thread stops at the end of the run. The main thread waits for the slowest, merges, and wakes the workers for the next run.
+
+```cpp
+world.set_threads(3);   // stage 0 (the main thread) and two workers
+
+world.system<Position, const Velocity>("Move").multi_threaded().each(/* ... */);
+world.system<const Position>("Collide").multi_threaded()
+  .write<Hit>()                       // queues e.set<Hit>()
+  .each(/* ... */);
+world.system<Health, const Hit>("Damage").multi_threaded().each(/* ... */);
+world.system<const Hit>("SpawnFx").each(/* ... */);   // single-threaded
+```
+
+flecs builds three runs from this. `Damage` matches `Hit`, which `Collide` may have queued, so it needs a merge. `SpawnFx` is single-threaded, so it starts a new run anyway.
+
+<ThreadSchedule />
+
+The merge always happens on the main thread, while the workers wait. It applies stage 0's queue, then stage 1's, then stage 2's, each in the order it was filled. So the result doesn't depend on which thread finished first. It does depend on the thread count: commands that a single thread would queue in row order now arrive grouped by slice.
+
+**`set_task_threads(n)`** gives you the same stages and the same schedule, but the `n − 1` workers aren't long-lived OS threads. At the start of each `progress()`, flecs creates them through the OS API's `task_new_` callback, and at the end it joins them with `task_join_`. Point those callbacks at your own job system and flecs borrows its workers for the frame. Your job system must be able to run all `n − 1` tasks at once, for the whole `progress()` call, because they wait for each other at every merge.
+
+<Tip kind="warn" title="This page runs single-threaded">
+The flecs on this site is compiled for WebAssembly without threads, so the debugger can't show workers. The drawing above is an illustration. The schedule, the 4, 3, 3 split and the stage-order merge come from the flecs source, and were checked against a native build of the same commit.
+</Tip>
+
+## Immediate systems
+
+An `immediate` system (`.immediate()` in C++, `.immediate = true` in C) runs while the world is **not** in readonly mode. It always gets a run of its own, so there's a merge before it, and its queue is applied as soon as it returns. Operations through `it.world()` (`it->world` in C) apply at once; operations through the stage (`it.stage()`, or the entity handles `.each()` gives you) are still queued. Anything that would move the entities being iterated must still go through the stage.
+
+Immediate systems are always single-threaded. Each one ends the run before it (a merge, and a barrier if that run was multi-threaded) and flushes its own queue when it returns. Keep them for the cases that need them, like handing out tasks where the next iteration must see who's already busy.
+
+In an ordinary system the world is readonly, and every change goes through the stage.
+
+## In practice
+
+- **Annotate when a later system in the same frame has to see the change.** If `Ignite` and `Burn` are in the same frame and you want burning to start this frame, `.write<Burning>()` is the whole fix.
+- **Annotate exactly.** Each annotation can add a merge, and with threads, every merge is a barrier. `.write<T>()` on a component the system never touches costs a merge for nothing. A wildcard write (`[out] *()`) puts a merge before the next system, whatever it matches.
+- **Or read it next frame.** Put the reader before the writer (or in an earlier phase) and leave the write unannotated. The reader sees the change one frame later, after the end-of-frame merge, and you avoid a merge in the middle of the frame. The delay is always exactly one frame, so it's deterministic. [Reading a frame later](/engine/jobs-and-task-graphs/#reading-a-frame-later) is the same idea for job systems.
+- **In a `multi_threaded` system, write only the rows you were given.** Each thread owns its slice of the columns and its own queue. Singletons, parents, globals and other entities are shared: writing them from a multi-threaded system is a data race, and an atomic counter makes the result depend on timing.
+- **Mind the missing barrier.** Within a run, one thread can be on the next system while another is still on the previous one. Reading another entity's data that an earlier system in the same run writes (a parent's transform through `up`, a `get` on a target) can see either value. If you need it settled, put a merge between them.
+- **Don't flip between kinds.** Alternating single-threaded and multi-threaded systems puts a merge and a barrier at every switch. Group the multi-threaded ones together.
+
+## Takeaways
+
+- Commands are merged at the end of the frame unless an annotation says a later system needs them sooner.
+- `.write<T>()` (`[out] T()`) and `.read<T>()` (`[in] T()`) are about **merges**. A merge is inserted before the next system that matches or reads `T`.
+- Field writes never queue anything; `const` on your own terms is for change detection, not merges.
+- `set_threads(n)` is the main thread plus `n − 1` workers. Only `multi_threaded` systems are split, by slicing every table.
+- Threads synchronise at merges, not after every system. The main thread merges every stage's queue in stage order.
+- `immediate` systems run single-threaded on a writable world, in a run of their own.

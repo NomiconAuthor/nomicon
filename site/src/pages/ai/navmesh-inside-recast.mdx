@@ -1,12 +1,14 @@
 ---
 layout: ../../layouts/Lesson.astro
 title: 'Inside Recast: from triangles to a navmesh'
-order: 9
+order: 6
 part: Navmeshes
 summary: 'Recast is a pipeline, not a black box: triangles, a voxel heightfield, filters, open spans, erosion, a distance field, regions, contours, polygons and a detail mesh. Every stage stepped through on a small scene, with what each one produces and when you could stop there and use it yourself.'
 ---
 import AiWidget from '../../components/AiWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
+
+The decision lessons say *what* an agent wants to do. Before it can go anywhere, something has to say where it can walk: in most engines that's a navmesh, and most navmeshes come from Recast.
 
 Recast is usually used as one function call: geometry in, navmesh out. Inside, it's a pipeline of ten stages, each producing a data structure that's useful on its own. Knowing them means you can stop early and use what Recast has prepared for something else (a walkability grid, a clearance field, region outlines), or keep the whole build and replace only the runtime.
 

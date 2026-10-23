@@ -31,6 +31,44 @@ const touchSystem = (name: string, query: string, code: string) => ({
 
 const frame: Op = { code: 'world.progress();', run: (c) => c.progress() };
 
+// ---------------------------------------------------------------- sync points
+const ORC_BURNING = `Orc {
+  Health: {hp: 80}
+  Burning: {dps: 2}
+}`;
+const ORC_BURNING_CPP = 'world.entity("Orc").set(Health{80}).set(Burning{2});';
+/** Ignite queues Burning through the stage; Burn reads it. `annotated` adds `[out] Burning()`. */
+function syncSystems(annotated: boolean): NonNullable<Scenario['systems']> {
+  return [
+    {
+      name: 'Ignite',
+      query: annotated ? 'InLava, !Burning, [out] Burning()' : 'InLava, !Burning',
+      code: `world.system("Ignite")
+  .with<InLava>()
+  .without<Burning>()${annotated ? '\n  .write<Burning>()' : ''}
+  .each([](flecs::entity e) {
+    e.set<Burning>({5});  // queued
+  });`,
+      fn: (it) => {
+        for (const e of it.entities) it.setComponent(e, 'Burning', { dps: 5 });
+      },
+    },
+    {
+      name: 'Burn',
+      query: 'Health, [in] Burning',
+      code: `world.system<Health, const Burning>("Burn")
+  .each([](Health& h, const Burning& b) {
+    h.hp -= b.dps;
+  });`,
+      fn: (it) => {
+        const h = it.field<{ hp: number }>(0);
+        const b = it.field<{ dps: number }>(1);
+        for (let i = 0; i < it.count; i++) it.set(0, i, { hp: h[i].hp - b[i].dps });
+      },
+    },
+  ];
+}
+
 // ---------------------------------------------------------------- hierarchy ops
 const parties = ['PartyA', 'PartyA', 'PartyB', 'PartyB', 'PartyC', 'PartyD'];
 const childOfOps: Op[] = parties.map((pt, i) => ({
@@ -214,9 +252,50 @@ world.entity("Rock").set(Position{2, 8});`,
     ops: [frame, frame, { code: 'rock.set<Velocity>({1, 1});', run: (c) => c.set('Rock', 'Velocity', { x: 1, y: 1 }) }, frame],
     variants: [
       { label: 'Enqueued (it->stage)' },
-      { label: 'Immediate (it->world)', opsOnWorld: true, note: 'Operations now go to it->world: applied mid-iteration.' },
+      { label: 'Immediate (it->world)', opsOnWorld: true, note: 'The systems are now immediate (.immediate()) and write through it->world: applied mid-iteration.' },
     ],
     tools: { components: ['Velocity', 'Moving'], frame: true },
+    breakOn: ['storage', 'commands', 'callbacks'],
+  },
+
+  syncPoints: {
+    id: 'syncPoints',
+    title: 'Where the pipeline merges',
+    setup: `struct Health(hp: f32)
+struct Burning(dps: f32)
+InLava {}
+Knight {
+  Health: {hp: 100}
+  InLava
+}
+Goblin {
+  Health: {hp: 40}
+  InLava
+}`,
+    setupCode: `struct Health { float hp; };
+struct Burning { float dps; };
+struct InLava { };
+
+world.entity("Knight").set(Health{100}).add<InLava>();
+world.entity("Goblin").set(Health{40}).add<InLava>();`,
+    systems: syncSystems(false),
+    variants: [
+      { label: 'No annotation', setup: ORC_BURNING, setupCode: ORC_BURNING_CPP },
+      {
+        label: 'With .write<Burning>',
+        setup: ORC_BURNING,
+        setupCode: ORC_BURNING_CPP,
+        systems: syncSystems(true),
+        note: 'Ignite now declares that it may queue Burning, so the pipeline merges before Burn.',
+      },
+      {
+        label: 'Burn idle',
+        setup: 'Orc { Health: {hp: 80} }',
+        setupCode: 'world.entity("Orc").set(Health{80});   // not burning: Burn matches nothing',
+        note: 'Nothing is burning yet, so Burn is inactive when the frame starts and the schedule has only Ignite in it.',
+      },
+    ],
+    ops: [frame, frame],
     breakOn: ['storage', 'commands', 'callbacks'],
   },
 

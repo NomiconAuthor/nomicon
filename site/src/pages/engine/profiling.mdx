@@ -1,9 +1,9 @@
 ---
 layout: ../../layouts/Lesson.astro
 title: 'Profiling: finding where the time goes'
-order: 9
+order: 10
 part: Measuring
-summary: 'Every lesson here ends with "measure it". This one is how: frames rather than averages, sampling against instrumentation and what each gets wrong, reading a call tree and a flame graph, doing it in Visual Studio, and which other tools to reach for (Superluminal, Tracy, VTune, PIX, RenderDoc) and when.'
+summary: 'Every lesson here ends with "measure it". This one is how: frames rather than averages, sampling against instrumentation and what each gets wrong, reading a call tree and a flame graph, and which tool to reach for (Visual Studio, Superluminal, Tracy, VTune, PIX, RenderDoc) and when.'
 ---
 import EngineWidget from '../../components/EngineWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
@@ -59,30 +59,18 @@ That's why the tools games use most combine them: zones for the frame's structur
 Halving a function that takes 3% of the frame saves 1.5%. Before optimising anything, check its share of the frame you care about, and whether that frame is even CPU-bound.
 </Tip>
 
-## In Visual Studio
+## Which tool does what
 
-Visual Studio ships everything needed for the first passes.
+Whatever the tool, profile an optimised build with debug information (so functions have names), and expect inlined functions to vanish into their callers. Select the spike, not the session, and read the call tree from the hot path down.
 
-**1. Build what you ship.** Profile the Release configuration (optimised, with debug information so the profiler can name functions: `/Zi` for the compiler and `/DEBUG` for the linker, which Release has by default in modern project templates). A Debug build's profile describes a different program. Expect heavily inlined functions not to appear on their own: their time shows up in their caller.
-
-**2. Run the Performance Profiler, not the debugger.** **Debug › Performance Profiler** (Alt+F2), choose **CPU Usage**, and **Start**. It launches the program without the debugger attached. The Diagnostic Tools window you see while debugging measures a debug session, with the debugger's own overhead included.
-
-**3. Collect around the problem.** Play to the part that's slow, then stop collection. In the report's CPU graph, **drag to select the time range** of the hitch, exactly like dragging across the frame chart above. Everything below then describes only that range.
-
-**4. Read it.** The summary lists the top functions by total and self time. **Open details** for the **Call tree** (with **Expand hot path**), **Functions**, **Caller/callee** (who calls this, and what does it call) and the **Flame graph**. **Show Just My Code** folds system and library code into a single *[External Call]* node; untick it when the time disappears into one.
-
-**5. Go deeper only when needed.**
-
-- The **Instrumentation** tool (C and C++ since Visual Studio 2022 17.6) gives exact call counts and times by instrumenting the binary. Point it at a small part of the program: everything it instruments pays the probe cost, as the widget shows.
-- The **Concurrency Visualizer** (a free extension) shows every thread over time: running, blocked on a lock, waiting on I/O, or preempted, and which thread unblocked which. It's the view that answers "why are my workers idle?" from [threads, pools and fibers](/engine/threads-pools-and-fibers/).
-- **Memory Usage** takes heap snapshots and compares them, for leaks and for allocation-heavy frames.
-- For system-wide problems (stutters caused by the disk, the OS or another process), **Windows Performance Recorder** and **Windows Performance Analyzer** record ETW traces of the whole machine. It's the heaviest tool here and the one that sees everything.
-
-## Other tools, and when
-
-| Tool | What it is | Reach for it when |
+| Tool | Kind | Reach for it when |
 |---|---|---|
-| **Superluminal** | Sampling plus optional instrumentation, built for games, on Windows, Xbox, PlayStation and Linux | You want Visual Studio's view but faster to navigate, with thread timelines and per-frame selection |
+| **Visual Studio Performance Profiler**: CPU Usage | Sampling, with call tree, caller/callee and flame graph views | The first pass on Windows: where does the time go in this range of frames? |
+| Visual Studio's **Instrumentation** tool | Instrumentation | You need exact call counts and times in a small part of the program |
+| **Concurrency Visualizer** (Visual Studio extension) | Every thread over time: running, blocked, waiting, preempted | "Why are my workers idle?" from [threads, pools and fibers](/engine/threads-pools-and-fibers/) |
+| **Windows Performance Recorder / Analyzer** | ETW traces of the whole machine | Stutters caused by the disk, the OS or another process. The heaviest tool, and the one that sees everything |
+| **`perf`** (Linux), **Instruments** (macOS) | Sampling | The same first pass on those platforms |
+| **Superluminal** | Sampling plus optional instrumentation, built for games, on Windows and consoles | You want thread timelines and per-frame selection that are quick to navigate |
 | **Tracy** | Open-source frame profiler: hand-placed zones on a timeline, plus sampling, locks, allocations and GPU zones | You want a live per-frame timeline of every thread, kept in the build |
 | **Unreal Insights**, **Optick** | Engine-integrated timelines | You're in Unreal, or want Tracy's style with engine integration |
 | **Intel VTune**, **AMD uProf** | Sampling with hardware counters: cache misses, branch mispredictions, memory bandwidth | You know which function is hot and need to know *why*: the [cache lesson](/engine/memory-and-cache/) in numbers |
@@ -131,5 +119,5 @@ Wrap these in your own macro (`PROFILE_SCOPE("Physics")`) so the same markers ca
 - **Frames, not averages:** milliseconds, worst frames and percentiles, and CPU work rather than frame time when vsync is on.
 - **Sampling** is cheap and broad but statistical and blind to waiting; **instrumentation** is exact but costs per call; **zones** are exact and cheap but only see what you marked. Use them together.
 - **Total time** finds the expensive branch; **self time** finds where the instructions are; **call counts** tell you whether to make it faster or do it less.
-- **In Visual Studio:** Release build, Alt+F2, CPU Usage, select the spike, read the call tree, hot path and flame graph; then the Instrumentation tool, the Concurrency Visualizer or WPA when you need them.
-- **Then the specialists:** Superluminal or Tracy for frame timelines, VTune or uProf for why code is slow, PIX and the GPU vendors' tools for the GPU, RenderDoc for what was drawn.
+- **Profile an optimised build without the debugger**, and select the spike before reading the tree.
+- **Pick the tool for the question:** a sampler (Visual Studio, Superluminal, `perf`) for where the time goes, Tracy or engine timelines for frames and threads, VTune or uProf for why code is slow, PIX and the GPU vendors' tools for the GPU, RenderDoc for what was drawn.

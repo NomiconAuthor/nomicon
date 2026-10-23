@@ -37,7 +37,7 @@ Writing through a field or a `T&` in `.each()` is just a memory write. Observers
 
 ## Say what you read and write
 
-Declare fields you only read as `const` in C++ (or `[in]` in the query language). It documents the system, and it's information flecs uses: the pipeline needs to know what each system reads and writes to insert sync points in the right places (next lesson). It has nothing to do with threading: a `multi_threaded` system splits its own rows across the worker threads, and systems still run one after another. A system that writes everything it touches gives the pipeline nothing to work with.
+Declare fields you only read as `const` in C++ (or `[in]` in the query language). It documents the system, and flecs uses it for change detection. Where queued commands get merged is a separate declaration: `.write<T>()` and `.read<T>()` for components a system changes or reads *outside* its query. The pipeline uses those to place sync points ([sync points and threads](/flecs/sync-points-and-threads/)). Neither has anything to do with threading: a `multi_threaded` system splits its own rows across the worker threads.
 
 <Tip>
 Watch the "callbacks this line" counter in the debugger. One callback per table is the normal shape of a system. When the counter climbs while the entity count stays the same, your entities are spread over many small tables. [The fragmentation lesson](/flecs/fragmentation/) is about why that happens.

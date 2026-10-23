@@ -1,0 +1,109 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Deadlines and async work
+order: 5
+part: Time
+summary: 'Work that takes longer than a tick, such as a long path search, a navmesh rebuild or a planner, run on worker threads without letting the machine''s speed leak into the simulation. Time budgets against work budgets, fixed deadlines in ticks, and a deadline scheduler in C++.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Some work takes longer than a tick: a long pathfinding request, a navmesh rebuild, an AI planner, a flow field for a thousand units. The natural thing is to hand it to a worker thread and use the result when it arrives. That's exactly what breaks [determinism](/engine/determinism/), because "when it arrives" depends on the machine.
+
+The previous lesson made each tick independent of thread timing. This one does the same across ticks. The goal: a slow or busy machine may take longer in wall time, but every machine applies every result on the same tick.
+
+## When does the result arrive?
+
+The widget runs six pathfinding jobs on two simulated machines. Each job needs the same amount of work on both; only how fast the worker happens to go differs. Compare the strategies:
+
+<EngineWidget kind="deadline" />
+
+- **Apply when ready.** The result enters the simulation on the first tick after the worker finishes. On a faster machine, or a less loaded one, units start moving a tick or two earlier, and the two simulations diverge. Fine for single-player games that don't replay; fatal for lockstep.
+- **A time budget per tick.** "Spend up to 4 ms per tick on pathfinding" sounds deterministic and isn't: how much work fits in 4 ms depends on the CPU, so the job finishes on a different tick on each machine. **A budget measured in time is never deterministic.**
+- **Fixed latency, wait if late.** Every request made at tick *T* is applied at tick *T + K*, always. If the worker hasn't finished when the simulation reaches *T + K*, the simulation **waits** for it. The result is deterministic, and the cost shows up as a stall in wall time, not as a different outcome. Pick *K* so stalls are rare on your minimum-spec hardware, and try lowering *K* in the widget to see the stalls grow.
+- **A budget in work units.** Do exactly 500 units of work per tick (nodes expanded, cells flooded, agents planned), however long that takes. Every machine finishes on the same tick. The cost moves to frame time: on a slow machine the tick takes longer, which the fixed-step loop absorbs, or slows down, as in [the clamp](/engine/game-loops/).
+
+The last two combine well, and that's the pattern most deterministic engines end up with: async jobs with a **fixed deadline in ticks**, sized in **work units**, with a stall only as the last resort.
+
+## Budgets: work, not milliseconds
+
+A work budget doesn't need a worker thread at all. The simulation can **time-slice** a long job itself: keep the search state (an open list, a partial plan) in the simulation, expand exactly N nodes per tick, and finish when it finishes. No threads, no stalls, fully deterministic, at the cost of using the simulation thread's time. Incremental pathfinders like the ones in the [pathing lab](/pathing-lab/) are a natural fit, because their state is already a resumable open list.
+
+Work units should track cost roughly, so a budget of N means about the same time on every request: nodes expanded rather than requests completed. A request that is ten times bigger then takes ten times as many ticks, on every machine.
+
+<Tip kind="note" title="Wall-clock budgets still have a place">
+Time-based budgets are the right tool for work that never feeds back into the simulation: streaming textures, rebuilding render caches, sorting particles, background LOD generation, presentation-only AI like crowd animation. The rule is simple: if the result can change what happens in the game, its timing must be measured in ticks and work, never in milliseconds.
+</Tip>
+
+## Implementing a frame deadline
+
+Here's what a deterministic async job system looks like in practice. The simulation requests work at tick *T*; the request carries the tick it's due. Workers do the work whenever they can. At the due tick, the simulation collects the result, waiting if it must, and applies results in a fixed order.
+
+```cpp
+struct AsyncJob {
+    uint64_t           id;          // assigned in request order: deterministic
+    uint64_t           due_tick;    // tick + latency, fixed when requested
+    std::function<void()> run;      // must only read the snapshot it was given
+    std::atomic<bool>  done{false};
+};
+
+class DeadlineScheduler {
+    static constexpr uint64_t Latency = 3;             // ticks between request and result
+    std::deque<std::unique_ptr<AsyncJob>> pending;     // in request order
+    uint64_t next_id = 0;
+    ThreadPool& pool;
+public:
+    explicit DeadlineScheduler(ThreadPool& p) : pool(p) {}
+
+    // Called from the simulation at tick `now`. The job gets a copy (or an immutable
+    // snapshot) of the inputs it needs, never a pointer into live simulation state.
+    // Returns the job's id; its result is applied at the due tick by collect().
+    uint64_t request(uint64_t now, std::function<void()> work) {
+        auto job = std::make_unique<AsyncJob>();
+        job->id = next_id++;
+        job->due_tick = now + Latency;
+        job->run = std::move(work);
+        AsyncJob& ref = *job;
+        pool.submit([&ref] { ref.run(); ref.done.store(true, std::memory_order_release); });
+        pending.push_back(std::move(job));
+        return ref.id;
+    }
+
+    // Called once per tick, at a fixed point in the tick, before systems that use results.
+    template <typename Apply>
+    void collect(uint64_t now, Apply&& apply, Telemetry& t) {
+        while (!pending.empty() && pending.front()->due_tick <= now) {
+            AsyncJob& job = *pending.front();
+            if (!job.done.load(std::memory_order_acquire)) {
+                auto start = now_seconds();
+                pool.help_until([&] { return job.done.load(std::memory_order_acquire); });
+                t.stall_ms += ms_since(start);            // late: we stalled, but stayed correct
+                t.late_jobs++;
+            }
+            apply(job);                                   // in request order, at the due tick
+            pending.pop_front();
+        }
+    }
+};
+```
+
+The details that make it work:
+
+- **Snapshot the inputs.** A job must read state as it was at tick *T*, not as it is when the worker gets round to it. Copy what it needs, or give it a read-only snapshot (double-buffered components, or a versioned navmesh) that the simulation won't modify until the job is collected.
+- **Apply at a fixed point.** `collect` runs at the same place in every tick, and jobs due on the same tick are applied in request order (or sorted by id). Never apply a result from inside the worker.
+- **Help while waiting.** `help_until` runs other pool jobs on the waiting thread rather than sleeping, so a stall costs as little as possible. [Threads, pools and fibers](/engine/threads-pools-and-fibers/) covers helping and its traps.
+- **Same latency for everyone.** The deadline is in ticks and the same on every machine. Don't adapt *K* at runtime based on how fast this machine is, or you've reintroduced the timing leak. If you must change it, change it as a simulation input, on a known tick, for every peer.
+- **Measure stalls.** Track how often jobs are late and by how much. If stalls are common, increase *K*, split the work, or make it cheaper; don't quietly switch to applying when ready.
+
+<Tip kind="warn" title="Faster than real time, again">
+Fixed-latency jobs interact with [headless and fast-forward runs](/engine/game-loops/): at ×16, the simulation reaches *T + K* sixteen times sooner in wall time, so jobs are late far more often and the simulation stalls on them. That's correct (the result is identical) but it caps your fast-forward speed at how fast the workers go. For replay scrubbing and AI training, run with `help_until` from the start, or with more workers.
+</Tip>
+
+## Takeaways
+
+- **"Apply when ready" lets the machine's speed into the simulation.** So does any budget measured in milliseconds.
+- **Give async work a fixed deadline in ticks**: requested at *T*, applied at *T + K* on every machine, in request order.
+- **Stall rather than apply late.** A late job costs wall time, never a different outcome; measure stalls and tune *K*, not the rule.
+- **Budget in work units** (nodes, cells, agents), or time-slice the job inside the simulation with a fixed amount of work per tick.
+- **Snapshot inputs and apply at a fixed point** in the tick, never from the worker.
+- **Milliseconds are fine for presentation-only work** that can't change what happens in the game.

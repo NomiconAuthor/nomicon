@@ -1,6 +1,7 @@
 /** The influence and threat maps widget: a town, two sides, and a route that can weigh danger. */
 import { drawSprite, onSprites, spriteSize } from '../sprites/sprites';
 import { fmt, h, seg } from '../engine/dom';
+import { touchScroll } from '../engine/touch';
 import { MOVE_SPEED, influence, makeScene, possiblePositions, route, threatMap, type Route, type Scene, type Spread, type Unit } from './sim';
 
 type Layer = 'control' | 'tension' | 'threat';
@@ -93,6 +94,7 @@ export class InfluenceViz {
       this.note,
       h('p', { class: 'll-muted' }, 'Drag the units, the start (S) or the objective (flag). The dashed line is the shortest route; the solid one weighs threat.'),
     );
+    touchScroll(this.cnv, { grab: (e) => this.grabs(e), panX: true });
     this.cnv.addEventListener('pointerdown', (e) => this.down(e));
     this.cnv.addEventListener('pointermove', (e) => this.move(e));
     this.cnv.addEventListener('pointerup', () => this.up());
@@ -121,6 +123,14 @@ export class InfluenceViz {
   private cellAt(e: PointerEvent): { x: number; y: number } {
     const b = this.cnv.getBoundingClientRect();
     return { x: Math.floor((e.clientX - b.left) / this.S), y: Math.floor((e.clientY - b.top) / this.S) };
+  }
+
+  /** Is there a unit, the start or the objective under this press? */
+  private grabs(e: PointerEvent): boolean {
+    const p = this.cellAt(e);
+    const s = this.scene;
+    const near = (q: { x: number; y: number }) => Math.hypot(q.x - p.x, q.y - p.y) <= 2;
+    return near(s.start) || near(s.goal) || s.units.some(near);
   }
 
   private down(e: PointerEvent): void {

@@ -23,6 +23,7 @@ import {
 } from './brains';
 import { type ActionId, type Factors, ACTION_COL, ACTION_NAMES, CHARGES, RESERVE_MAX, TICK_HZ, World } from './world';
 import { History, Runner, type Speed, whenSprites, actionChip, arenaCanvas, chartCanvas, drawArena, drawScores, drawStrip, h, legend, onTheme, stat, statsRow, stripCanvas } from './ui';
+import { touchScroll } from '../engine/touch';
 
 const fx = (n: number, d = 2) => (Math.round(n * 10 ** d) / 10 ** d).toFixed(d);
 
@@ -82,6 +83,7 @@ export class CurveEditor {
     this.title = h('div', { class: 'll-h' });
     this.controls = h('div', { class: 'ai-curve-ctl' });
     this.el = h('div', { class: 'ai-curve-ed' }, this.title, h('div', { class: 'ai-curve-grid' }, h('div', {}, this.cnv, this.out), this.controls), this.desc);
+    touchScroll(this.cnv, { defer: true });
     this.cnv.addEventListener('pointerdown', (e) => this.pick(e));
     this.cnv.addEventListener('pointermove', (e) => e.buttons && this.pick(e));
     onTheme(() => this.draw());

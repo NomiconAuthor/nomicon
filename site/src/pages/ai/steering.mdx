@@ -1,16 +1,14 @@
 ---
 layout: ../../layouts/Lesson.astro
 title: Steering
-order: 6
+order: 8
 part: Movement
 summary: 'A decision says where to go and a path says which way; steering moves the agent along it, a little every frame, without hitting anything. It isn''t one algorithm but four choices: how the agent moves, where on the path it aims, how it notices walls, and how those combine. Compared on one course, including how many directions it really needs.'
 ---
 import AiWidget from '../../components/AiWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
-The earlier lessons chose *what* to do: attack, take cover, fetch the potion. A pathfinder turns that into *where*: a route of waypoints. **Steering** is the last step: turning "I want to be over there" into a velocity, smoothly, every frame, without walking into anything on the way.
-
-"Steering" sounds like one algorithm, but it's a stack of four separate choices:
+The decision lessons chose *what* to do; a pathfinder, such as [Detour](/ai/navmesh-detour-or-your-own/) over a Recast navmesh, turns that into a route of waypoints. **Steering** turns "I want to be over there" into a velocity, smoothly, every frame, without walking into anything. It isn't one algorithm but a stack of four choices:
 
 1. **The motion model**: what the agent can physically do. Slide in any direction, turn on the spot, or drive like a car.
 2. **Path following**: where on the path to aim right now.
@@ -45,7 +43,7 @@ The arrows are the vehicle's **velocity** (blue), its **desired velocity** (gree
 - **Avoid obstacles** casts one feeler ahead and pushes sideways from whatever it hits.
 - **Flock** is Reynolds' *boids* (1987): separation, alignment and cohesion with neighbours. Set any to zero and see what's lost.
 
-These are the vocabulary. The rest of this lesson is about putting them together for an agent that has to get somewhere.
+The rest of this lesson puts this vocabulary together for an agent that has to get somewhere.
 
 ## The course
 
@@ -59,7 +57,7 @@ Click an agent to see what it senses. The tables below are measured on this widg
 
 - **Point mass.** Reynolds' model: the agent accelerates in any direction, up to a maximum force. It slides round corners. Right for spaceships and fish, floaty for people.
 - **Turns on the spot.** The agent has a heading and a maximum turn rate, moves only forwards, and slows down to turn: no speed at all when facing away from where it wants to go. Most characters work like this, especially with root-motion animation.
-- **Car.** The agent can't turn faster than its speed divided by its minimum turning radius, so it can't turn standing still at all. It has to notice a wall while it can still turn away from it, and a real vehicle in a dead end needs to reverse (the [Reeds–Shepp](/pathing-lab/) planners in the pathing lab).
+- **Car.** Turn rate is limited to speed over the minimum turning radius, so it can't turn standing still. It must notice a wall while it can still turn away, and in a dead end it needs to reverse (the [Reeds–Shepp](/pathing-lab/) planners in the pathing lab).
 
 | Moves like | Context steering: time, contact | Three whiskers: time, contact |
 |---|---|---|
@@ -67,7 +65,7 @@ Click an agent to see what it senses. The tables below are measured on this widg
 | Turns on the spot | 28.1 s, 0.0% | 33.2 s, 5.6% |
 | Car | 29.1 s, 1.1% | 28.6 s, 1.2% |
 
-The motion model changes what the sensing has to cope with. Whiskers suit the car, whose wide turns rarely bring a wall close to the side, and suit the agent that turns on the spot least: it swings its heading round sharply, and three rays fixed to the heading swing with it, so walls beside it go unseen. Context steering looks all the way round and does well with all three.
+The motion model changes what sensing has to cope with. Whiskers suit the car, whose wide turns rarely bring a wall close to its side, and suit the agent that turns on the spot least: three rays fixed to a sharply swinging heading leave walls beside it unseen. Context steering looks all the way round and does well with all three.
 
 ## Following a path
 
@@ -81,18 +79,18 @@ The motion model changes what the sensing has to cope with. Whiskers suit the ca
 | Carrot on the path | 28.2 s | 0 |
 | Straight at the goal | 97.4 s | 12 |
 
-Without a path, every agent on the dead-end map walks into the cup and stays there, and context steering can't save it: it chooses well among nearby directions, but escaping a dead end means going *away* from the goal for a while, which only a planner knows to do. Local steering and pathfinding do different jobs.
+Without a path, every agent on the dead-end map walks into the cup and stays there. Escaping means going *away* from the goal for a while, which only a planner knows to do; no local method can.
 
 Production systems go one step further. Detour (Recast's runtime) keeps a **path corridor**, the list of navmesh polygons the path runs through, and every frame steers towards the furthest corner it can see along it. That's string pulling done on the fly, so the path stays valid as the agent is pushed off it.
 
 ## Noticing walls
 
-The path was planned around the walls it knew about. Steering still has to notice what it didn't: props left out of the navmesh, things that move, and the agent drifting off the path because something pushed it.
+Steering still has to notice what the planner didn't: props left out of the navmesh, things that move, and the agent being pushed off the path.
 
 - **Nothing.** Trust the path. Fine on the corridor map; on the pillars map, the planner's straight line runs through a pillar it didn't know about, and agents pile into it.
 - **One feeler.** Cast a ray along the velocity, as long as the agent travels in a moment. On a hit, push off the surface, and sideways (a wall hit head-on has a normal pointing straight back, which only brakes). It sees nothing that isn't dead ahead, so it clips corners.
 - **Three whiskers.** A centre ray and two shorter ones angled out. Catches corners for three rays per cast.
-- **Wall query (no rays).** Ask the geometry for wall segments within a radius, and push away from each. No rays at all: with a navmesh, these are its boundary edges (Detour's crowd collects the same segments, and treats them as obstacles when it chooses a velocity). Pushing away from them is smooth and cheap, but it's a *potential field*, and potential fields have local minima: a pillar dead ahead pushes straight back exactly as hard as the path pulls forward, and the agent stops.
+- **Wall query (no rays).** Ask the geometry for wall segments within a radius, and push away from each. With a navmesh, these are its boundary edges (Detour's crowd collects the same segments as obstacles). It's smooth and cheap, but it's a *potential field*, and potential fields have local minima: a pillar dead ahead pushes back exactly as hard as the path pulls forward, and the agent stops.
 - **Context steering** (described by Andrew Fray). A ring of directions round the agent. Each ray writes **danger** into its direction, and into the neighbouring directions the agent's body would sweep through. The path writes **interest**: how well each direction matches where it wants to go. Then *mask*: throw away every direction more dangerous than the safest one, and take the most interesting of what's left, interpolated with its neighbours so the heading is smooth.
 
 | Walls found by | Time | Stuck | Contact | Wobble | Rays per agent per second |
@@ -121,15 +119,15 @@ Context steering casts the most rays in the table, so how small can the ring be?
 
 With 16 or more, little changes. With fewer, two directions often score almost the same, and without a preference the agent flips between them every tick and can get stuck dithering in front of a pillar. **Preferring the last direction** (a bonus to directions close to the one chosen last tick: 0.3 here) is [hysteresis](/ai/choosing-and-committing/), the same fix as for decisions, and it makes a ring of 8 rays nearly as good as one of 32.
 
-Rays only see the world as it was when they were cast, which is fine for walls and poor for things that move. There are better tools for moving things than rays, though: anything the game simulates has a known position and velocity, and [local avoidance](/ai/local-avoidance/) uses them directly.
+Rays see the world as it was when they were cast: fine for walls, poor for things that move. Anything the game simulates has a known position and velocity, and [local avoidance](/ai/local-avoidance/) uses them directly.
 
 ## Combining
 
 Context steering is itself a way of combining wants. The other common ways:
 
-- A **weighted sum** of forces, as Reynolds' behaviours and the feelers here do. Simple, and it works, until forces cancel: "follow the path" and "avoid the pillar" in exactly opposite directions sum to nothing.
+- A **weighted sum** of forces, as Reynolds' behaviours and the feelers here do. Simple, until forces cancel.
 - **Priorities.** Ask behaviours in order of importance (avoid collisions, then separation, then path following), and fill the force budget from the top; lower priorities only get what's left. No cancelling, but a high priority can starve everything else.
-- **Context maps**, as above: every behaviour writes interest or danger into the same ring, and one direction is picked. Several behaviours combine without cancelling, because the result is a choice, not a sum.
+- **Context maps**, as above: every behaviour writes interest or danger into the same ring, and one direction is picked.
 
 ## In an ECS
 
@@ -145,7 +143,7 @@ Every agent writes only its own components, so all of these parallelise. Keep th
 ## Takeaways
 
 - **Steering is four choices**: motion model, path following, sensing and combining. Changing one changes what the others have to cope with.
-- **Follow the path with a carrot**, and let the planner handle dead ends; no local method can.
+- **Follow the path with a carrot**, and let the planner handle dead ends.
 - **Choose a direction rather than summing pushes.** Context steering doesn't cancel into a standstill, and its rings are easy to debug.
 - **Prefer the last direction.** It stops a small ring dithering; 12–16 directions is plenty.
 - **Use rays for what nothing else knows about.** Walls can come from the navmesh, other agents from the spatial index.

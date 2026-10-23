@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Lesson.astro
 title: Jobs and task graphs
-order: 7
+order: 8
 part: Threads
 summary: 'Spreading a frame across every core. Job systems and how big a job should be, static splits against shared queues against work stealing, turning a frame''s systems into a task graph from what they read and write, the critical path, reading results a frame later, and keeping all of it deterministic. With how flecs fits in.'
 ---
@@ -63,7 +63,7 @@ Anything else can run at the same time. That turns the frame into a **task graph
 
 Here the critical path runs through the path queries, because Decide needs this frame's paths. If Decide reads **last frame's** results instead, the dependency disappears: the queries only have to finish by the end of the frame, and they overlap everything else. An agent starts along a new path one frame later, which at 30–60 Hz nobody can see; many games already spread path requests over several frames for exactly this reason.
 
-This works for any expensive, batchable query whose consumer can wait: collect the requests during frame *N*, run them as jobs, and hand the results over at the start of frame *N + 1*. It's also deterministic, which "use the result whenever it happens to be ready" is not: the delay is always exactly one frame, whatever the timing.
+This works for any expensive, batchable query whose consumer can wait: collect the requests during frame *N*, run them as jobs, and hand the results over at the start of frame *N + 1*. It's also deterministic, which "use the result whenever it happens to be ready" is not: the delay is always exactly one frame, whatever the timing. [Deadlines and async work](/engine/deadlines-and-async-work/) extends the idea to work that takes several ticks.
 
 ## Keeping it deterministic
 
@@ -76,9 +76,9 @@ A parallel frame gives the same result as a serial one only if nothing depends o
 
 ## In flecs
 
-flecs takes the declared-access route. A system's query says what it reads (`[in]`, `const` in C++) and writes, and the pipeline uses that to place **sync points**, where queued commands are merged into storage, only where a later system needs to see them (the [commands lesson](/flecs/commands/) shows them). Commands are queued per thread and merged in order, so the result doesn't depend on timing.
+flecs takes the declared-access route. A system declares the components it changes through commands or reads outside its query (`.write<T>()`, `.read<T>()`), and the pipeline uses that to place **sync points**, where queued commands are merged into storage, only where a later system needs to see them ([sync points and threads](/flecs/sync-points-and-threads/) shows them). Commands are queued per thread and merged in a fixed order, so the result doesn't depend on timing.
 
-For threads, flecs runs the pipeline's systems in order and parallelises *inside* each system marked `multi_threaded`: with `world.set_threads(n)`, the matched entities are divided across the worker threads, and the same entity stays on the same thread until the next sync point. That's the **System by system** mode above. It's simple, safe and deterministic, and with wide, even systems the barriers cost little. If you already have a job system, `set_task_threads` makes flecs run its work as tasks on yours instead of its own threads.
+For threads, flecs runs the pipeline's systems in order and parallelises *inside* each system marked `multi_threaded`: with `world.set_threads(n)`, the matched entities are divided across the threads, and the same entity stays on the same thread until the next sync point. Threads only wait for each other at sync points, not after every system, so it's the **System by system** mode above with fewer barriers. It's simple, safe and deterministic, and with wide, even systems the barriers cost little. If you already have a job system, `set_task_threads` makes flecs run its work as tasks on yours instead of its own threads.
 
 The places where a full task graph wins most, a long serial stage or one uneven pass like a batch of path queries, are also where the **read-next-frame** pattern helps whatever the scheduler: run that pass as its own jobs, outside the pipeline's barriers, and let next frame's systems read the results.
 

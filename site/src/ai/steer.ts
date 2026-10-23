@@ -6,7 +6,8 @@
 import { seg, fmt } from '../engine/dom';
 import { h, onTheme } from './ui';
 import { type V, v, add, sub, mul, len, norm, trunc, dot, rng } from './vec';
-import { LEADER_LOOK, PARTY_LOOKS, drawGround, drawMember, drawStone } from '../sprites/scene';
+import type { SpriteId } from '../sprites/sprites';
+import { LEADER_LOOK, PARTY_LOOKS, drawAgent, drawGround, drawMember, drawStone } from '../sprites/scene';
 import { AV_LIMIT, AV_SIZE, AvoidSim, type AvAgent, type AvoidMethod, type AvoidScene } from './avoid';
 
 // ---------------------------------------------------------------------------
@@ -120,18 +121,10 @@ export function arrow(ctx: CanvasRenderingContext2D, from: V, d: V, colour: stri
   ctx.lineWidth = 1;
 }
 
-export function drawVehicle(ctx: CanvasRenderingContext2D, a: Vehicle, colour: string): void {
-  const f = len(a.vel) > 1 ? norm(a.vel) : v(1, 0);
-  const s = v(-f.y, f.x);
-  const r = a.r;
-  ctx.fillStyle = colour;
-  ctx.beginPath();
-  ctx.moveTo(a.p.x + f.x * r * 1.5, a.p.y + f.y * r * 1.5);
-  ctx.lineTo(a.p.x - f.x * r + s.x * r, a.p.y - f.y * r + s.y * r);
-  ctx.lineTo(a.p.x - f.x * r * 0.5, a.p.y - f.y * r * 0.5);
-  ctx.lineTo(a.p.x - f.x * r + s.x * -r, a.p.y - f.y * r + s.y * -r);
-  ctx.closePath();
-  ctx.fill();
+/** A steering agent as a sprite standing on its footprint, facing along its velocity. */
+function drawUnit(ctx: CanvasRenderingContext2D, a: Vehicle, sprite: SpriteId, colour: string): void {
+  const f = len(a.vel) > 1 ? a.vel : v(1, 0);
+  drawAgent(ctx, sprite, a.p.x, a.p.y, a.r, Math.atan2(f.y, f.x), colour, { size: a.r < 7 ? 16 : 24 });
 }
 
 /** Shared animation shell: runs `step(dt)` and `draw()` while visible. */
@@ -288,10 +281,10 @@ export class SteerLab {
     this.info.textContent = {
       seek: 'Move the pointer. Seek steers at full speed straight for the target, so it overshoots and circles it.',
       arrive: 'Arrive slows down inside the slowing radius (dashed ring) and stops on the target.',
-      flee: 'The vehicle runs from the pointer when it comes within the panic radius, and drifts otherwise.',
-      pursue: 'The red vehicle wanders and evades; the pursuer aims at where it will be (the cross), not where it is.',
-      wander: 'A point on a circle ahead of the vehicle jitters a little each step; seeking it gives smooth, natural meandering.',
-      obstacles: 'Vehicles seek the pointer through a field of obstacles. A feeler ahead of each one looks for the first obstacle in its path.',
+      flee: 'The knight runs from the pointer when it comes within the panic radius, and drifts otherwise.',
+      pursue: 'The goblin archer wanders and evades; the knight aims at where it will be (the cross), not where it is.',
+      wander: 'A point on a circle ahead of the knight jitters a little each step; seeking it gives smooth, natural meandering.',
+      obstacles: 'A party seeks the pointer through a field of stone pillars. A feeler ahead of each one looks for the first obstacle in its path.',
       flock: 'Boids: separation, alignment and cohesion with neighbours within 50 px. Each rule alone is simple; together they flock.',
     }[this.mode];
     this.loop.start();
@@ -366,11 +359,10 @@ export class SteerLab {
   private draw(): void {
     const ctx = this.cnv.getContext('2d')!;
     const c = cols(this.root);
-    ctx.fillStyle = c.bg;
-    ctx.fillRect(0, 0, W, SH);
+    drawGround(ctx, W, SH, c);
     // A faint grid gives a sense of speed and scale.
     ctx.strokeStyle = c.soft;
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.3;
     ctx.beginPath();
     for (let x = 50; x < W; x += 50) (ctx.moveTo(x + 0.5, 0), ctx.lineTo(x + 0.5, SH));
     for (let y = 50; y < SH; y += 50) (ctx.moveTo(0, y + 0.5), ctx.lineTo(W, y + 0.5));
@@ -385,13 +377,20 @@ export class SteerLab {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
+    // Obstacles: round stone pillars.
     for (const o of this.obs) {
-      ctx.fillStyle = c.raised;
-      ctx.strokeStyle = c.line;
+      ctx.save();
       ctx.beginPath();
       ctx.arc(o.p.x, o.p.y, o.r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.clip();
+      drawStone(ctx, o.p.x - o.r, o.p.y - o.r, o.p.x + o.r, o.p.y + o.r, c);
+      ctx.restore();
+      ctx.strokeStyle = c.line;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(o.p.x, o.p.y, o.r, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.lineWidth = 1;
     }
     const t = this.target;
     if (this.mode !== 'wander' && this.mode !== 'flock' && this.mode !== 'pursue') {
@@ -427,7 +426,7 @@ export class SteerLab {
       ctx.fill();
     }
     if (this.mode === 'pursue') {
-      drawVehicle(ctx, this.prey, c.alert);
+      drawUnit(ctx, this.prey, 'goblinArcher', c.alert);
       if (L.aux) {
         ctx.strokeStyle = c.warn;
         ctx.lineWidth = 2;
@@ -462,7 +461,11 @@ export class SteerLab {
         ctx.lineWidth = 1;
       }
     }
-    for (const ag of this.agents) drawVehicle(ctx, ag, c.accent);
+    // Party members: a lone knight, a party through the obstacles, or a whole flock of them.
+    if (this.mode === 'flock' || this.mode === 'obstacles') {
+      const order = this.agents.map((ag, i) => ({ ag, i })).sort((p, q) => p.ag.p.y - q.ag.p.y);
+      for (const { ag, i } of order) drawUnit(ctx, ag, PARTY_LOOKS[i % PARTY_LOOKS.length].sprite, c.accent);
+    } else drawUnit(ctx, a, LEADER_LOOK.sprite, c.accent);
     if (this.mode !== 'flock') {
       arrow(ctx, a.p, a.vel, c.accent, 0.5);
       if (L.desired) arrow(ctx, a.p, L.desired, c.good, 0.5, true);
@@ -552,8 +555,7 @@ export class CrowdLab {
     const ctx = this.cnv.getContext('2d')!;
     const c = cols(this.root);
     const S = AV_SIZE;
-    ctx.fillStyle = c.bg;
-    ctx.fillRect(0, 0, S, S);
+    drawGround(ctx, S, S, c);
     if (this.scene === 'circle') {
       ctx.strokeStyle = c.soft;
       ctx.beginPath();
@@ -564,26 +566,20 @@ export class CrowdLab {
     const colour = (a: AvAgent) => (this.scene === 'circle' ? hues[a.hue % 6] : a.hue ? c.warn : c.accent);
     for (const a of this.sim.agents) {
       ctx.strokeStyle = colour(a);
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = 0.5;
       ctx.beginPath();
       ctx.arc(a.goal.x, a.goal.y, 3, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    const live = this.sim.agents.filter((a) => !a.done);
-    for (const a of live) {
+    // Party members on their real footprints, drawn back to front; an ink outline marks overlap.
+    const live = this.sim.agents.map((a, i) => ({ a, i })).filter((x) => !x.a.done);
+    live.sort((p, q) => p.a.p.y - q.a.p.y);
+    for (const { a, i } of live) {
       let touching = false;
-      for (const o of live) if (o !== a && len(sub(o.p, a.p)) < a.r + o.r - 0.5) touching = true;
-      ctx.fillStyle = colour(a);
-      ctx.beginPath();
-      ctx.arc(a.p.x, a.p.y, a.r, 0, Math.PI * 2);
-      ctx.fill();
-      if (touching) {
-        ctx.strokeStyle = c.ink;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.lineWidth = 1;
-      }
+      for (const { a: o } of live) if (o !== a && len(sub(o.p, a.p)) < a.r + o.r - 0.5) touching = true;
+      const dir = len(a.vel) > 1 ? a.vel : sub(a.goal, a.p);
+      drawAgent(ctx, PARTY_LOOKS[i % PARTY_LOOKS.length].sprite, a.p.x, a.p.y, a.r, Math.atan2(dir.y, dir.x), colour(a), { size: 16, outline: touching ? c.ink : undefined });
     }
     const a0 = this.sim.agents[0];
     if (!a0.done) this.drawVelocitySpace(ctx, c, a0);

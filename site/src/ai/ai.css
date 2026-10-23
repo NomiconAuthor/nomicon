@@ -147,7 +147,7 @@
 }
 .ai .ai-curve {
   cursor: crosshair;
-  touch-action: none;
+  touch-action: pan-y pinch-zoom; /* engine/touch.ts: taps and sideways drags edit */
 }
 .ai-curve-out {
   margin-top: 4px;
@@ -424,7 +424,8 @@
 
 /* steering */
 .ai canvas.ai-steer {
-  touch-action: none;
+  /* Pointer and taps only steer or select: a vertical swipe scrolls the page on phones. */
+  touch-action: pan-y pinch-zoom;
 }
 .st-sliders .ai-slider {
   min-width: 260px;
@@ -590,7 +591,7 @@
   display: block;
   border-radius: 8px;
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-x pan-y pinch-zoom; /* engine/touch.ts: drags that start on a unit block scrolling */
 }
 .im-keys {
   display: flex;
@@ -686,6 +687,21 @@
 }
 .kn-mapwrap {
   overflow: hidden;
+}
+@media (max-width: 700px) {
+  /* Phones: the map keeps a readable scale and scrolls sideways (knowledge/viz.ts follows the chosen party). */
+  .kn-mapwrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border-radius: 8px;
+  }
+  .kn canvas.kn-map {
+    max-width: none;
+  }
+}
+.kn-pan {
+  margin: 4px 0 0;
+  font-size: 12px;
 }
 .kn-clock {
   font-family: var(--f-mono);

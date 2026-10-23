@@ -15,6 +15,8 @@ export interface SystemDef {
   query: string;
   phase?: string;
   cached?: boolean;
+  /** Run on a writable world (`.immediate()`). Defaults to on in variants with `opsOnWorld`. */
+  immediate?: boolean;
   /** Shown in the code pane. */
   code?: string;
   fn: IterCallback;
@@ -47,7 +49,19 @@ export interface Scenario {
   queries?: Array<{ name: string; expr: string; cached?: boolean }>;
   ops: Op[];
   /** Alternative setups the reader can switch between (e.g. with and without a trait). */
-  variants?: Array<{ label: string; setup?: string; sparse?: string[]; note?: string; ops?: Op[]; setupCode?: string; opsOnWorld?: boolean; /** Another flecs build, e.g. '/flecs-pr2315.wasm'. */ wasm?: string }>;
+  variants?: Array<{
+    label: string;
+    setup?: string;
+    sparse?: string[];
+    note?: string;
+    ops?: Op[];
+    setupCode?: string;
+    opsOnWorld?: boolean;
+    /** Systems for this variant instead of the scenario's (e.g. with a write annotation). */
+    systems?: SystemDef[];
+    /** Another flecs build, e.g. '/flecs-pr2315.wasm'. */
+    wasm?: string;
+  }>;
   /** Which interactive tools to offer under the timeline. */
   tools?: { components?: string[]; frame?: boolean; spawn?: boolean };
   /** Components to show sparse storage for (Sparse / DontFragment ones). */
@@ -341,8 +355,9 @@ export class Session {
     const s = w.script(this.scenario.setup + (v?.setup ? `\n${v.setup}` : '') + (this.scenario.setupAfter ? `\n${this.scenario.setupAfter}` : ''), 'setup');
     if (!s.ok) this.setupError = s.error ?? 'setup failed';
     for (const c of this.scenario.hooks ?? []) if (!w.hooks(c)) this.setupError ||= `Couldn't add hooks to ${c}`;
-    for (const def of this.scenario.systems ?? []) {
-      const id = w.system(def.name, def.query, def.fn, { phase: def.phase, cached: def.cached });
+    for (const def of v?.systems ?? this.scenario.systems ?? []) {
+      // Writing through it->world is only legal in an immediate system (the world is readonly otherwise).
+      const id = w.system(def.name, def.query, def.fn, { phase: def.phase, cached: def.cached, immediate: def.immediate ?? !!v?.opsOnWorld });
       if (id) this.systems.set(id, def);
       else this.setupError ||= `System ${def.name}: ${w.log.at(-1)?.text ?? 'bad query'}`;
     }

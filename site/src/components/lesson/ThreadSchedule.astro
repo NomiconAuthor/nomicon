@@ -1,0 +1,186 @@
+---
+/**
+ * A drawing of one frame of a flecs pipeline on three threads (set_threads(3)):
+ * runs of systems between sync points, the wait at the end of each run, and the
+ * merge on the main thread. Illustrative timings; the shape follows flecs_run_pipeline.
+ */
+type Seg = { at: number; to: number; kind: 'sys' | 'wait' | 'merge' | 'idle'; label?: string };
+const lanes: Array<{ name: string; segs: Seg[] }> = [
+  {
+    name: 'main',
+    segs: [
+      { at: 0, to: 13, kind: 'sys', label: 'Move' },
+      { at: 13, to: 29, kind: 'sys', label: 'Collide' },
+      { at: 29, to: 34, kind: 'wait' },
+      { at: 34, to: 41, kind: 'merge', label: 'merge' },
+      { at: 41, to: 55, kind: 'sys', label: 'Damage' },
+      { at: 55, to: 58, kind: 'wait' },
+      { at: 58, to: 65, kind: 'merge', label: 'merge' },
+      { at: 65, to: 90, kind: 'sys', label: 'SpawnFx' },
+      { at: 90, to: 97, kind: 'merge', label: 'merge' },
+    ],
+  },
+  {
+    name: 'worker 1',
+    segs: [
+      { at: 0, to: 15, kind: 'sys', label: 'Move' },
+      { at: 15, to: 34, kind: 'sys', label: 'Collide' },
+      { at: 34, to: 41, kind: 'idle' },
+      { at: 41, to: 58, kind: 'sys', label: 'Damage' },
+      { at: 58, to: 97, kind: 'idle', label: 'idle' },
+    ],
+  },
+  {
+    name: 'worker 2',
+    segs: [
+      { at: 0, to: 11, kind: 'sys', label: 'Move' },
+      { at: 11, to: 25, kind: 'sys', label: 'Collide' },
+      { at: 25, to: 34, kind: 'wait' },
+      { at: 34, to: 41, kind: 'idle' },
+      { at: 41, to: 52, kind: 'sys', label: 'Damage' },
+      { at: 52, to: 58, kind: 'wait' },
+      { at: 58, to: 97, kind: 'idle', label: 'idle' },
+    ],
+  },
+];
+const runs = [
+  { at: 0, to: 34, label: 'multi-threaded: Move, Collide' },
+  { at: 34, to: 41, label: 'sync', sync: true },
+  { at: 41, to: 58, label: 'multi: Damage' },
+  { at: 58, to: 65, label: 'sync', sync: true },
+  { at: 65, to: 90, label: 'single-threaded: SpawnFx' },
+  { at: 90, to: 97, label: 'sync', sync: true },
+];
+const pos = (s: { at: number; to: number }) => `left:${s.at}%;width:${s.to - s.at}%`;
+---
+
+<figure class="tsch" aria-label="One frame on three threads: two multi-threaded runs and one single-threaded run, each ended by a merge on the main thread">
+  <div class="tsch-scroll">
+    <div class="tsch-grid">
+      <div class="tsch-name"></div>
+      <div class="tsch-lane tsch-runs">
+        {runs.map((r) => <span class:list={['tsch-run', { sync: r.sync }]} style={pos(r)}>{r.label}</span>)}
+      </div>
+      {
+        lanes.map((l) => (
+          <>
+            <div class="tsch-name">{l.name}</div>
+            <div class="tsch-lane">
+              {l.segs.map((s) => (
+                <span class={`tsch-seg ${s.kind}`} style={pos(s)}>
+                  {s.label ?? ''}
+                </span>
+              ))}
+            </div>
+          </>
+        ))
+      }
+    </div>
+  </div>
+  <figcaption>
+    <span class="key sys"></span> a system's slice of every matched table
+    <span class="key wait"></span> waiting for the slowest thread
+    <span class="key merge"></span> merge on the main thread: stage 0's queue, then 1, then 2
+    <br />The main thread is stage 0; the workers are stages 1 and 2. Timings are made up; the shape is what flecs does. Within a run, a thread starts its next system as soon as its own slice of the last one is done.
+  </figcaption>
+</figure>
+
+<style>
+  .tsch {
+    margin: 24px 0;
+  }
+  .tsch-scroll {
+    overflow-x: auto;
+  }
+  .tsch-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 10px;
+    align-items: center;
+    min-width: 520px;
+    font-family: var(--f-mono);
+    font-size: 0.72rem;
+  }
+  .tsch-name {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .tsch-lane {
+    position: relative;
+    height: 26px;
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    border-radius: 4px;
+  }
+  .tsch-runs {
+    background: none;
+    border: none;
+    height: 20px;
+  }
+  .tsch-run {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-bottom: 2px solid var(--accent);
+    color: var(--body);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 4px;
+    box-sizing: border-box;
+  }
+  .tsch-run.sync {
+    border-bottom-color: var(--good);
+    color: var(--good);
+  }
+  .tsch-seg {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    overflow: hidden;
+    box-sizing: border-box;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  .tsch-seg.sys,
+  .key.sys {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .tsch-seg.wait,
+  .key.wait {
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--warn) 45%, transparent) 0 3px, transparent 3px 7px);
+  }
+  .tsch-seg.merge,
+  .key.merge {
+    background: color-mix(in srgb, var(--good) 30%, transparent);
+    border: 1px solid color-mix(in srgb, var(--good) 75%, transparent);
+  }
+  .tsch-seg.idle {
+    background: none;
+    color: var(--muted);
+    font-style: italic;
+  }
+  figcaption {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 10px;
+    line-height: 1.6;
+  }
+  .key {
+    display: inline-block;
+    width: 14px;
+    height: 10px;
+    border-radius: 2px;
+    margin: 0 4px 0 10px;
+    vertical-align: baseline;
+  }
+  .key:first-child {
+    margin-left: 0;
+  }
+</style>

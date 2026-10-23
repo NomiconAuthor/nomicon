@@ -6,6 +6,8 @@
 import { h } from '../lab/ui/dom';
 import { CellImage, Palette, parseColor } from '../lab/ui/renderer';
 import { curve, evalCurve } from '../ai/curves';
+import { type SpriteId, drawSprite, onSprites, spriteSize } from '../sprites/sprites';
+import { touchScroll } from '../engine/touch';
 import {
   MonteCarloExposure,
   OPEN_KINDS,
@@ -193,12 +195,16 @@ export class TacticsApp {
       const shared = stateInUrl();
       if (shared) void this.openShared(shared);
     }
+    // On touch screens a vertical swipe scrolls the page unless it starts on a unit or a threat,
+    // or a paint tool or the wagon is in hand; taps still place and sideways strokes still drag.
+    touchScroll(this.cnv, { grab: (e) => this.grabs(e), defer: true });
     this.cnv.addEventListener('pointerdown', (e) => (this.pointer(e, 'down'), this.notify()));
     this.cnv.addEventListener('pointermove', (e) => (this.pointer(e, 'move'), this.drag !== null && this.notify()));
     window.addEventListener('pointerup', () => (this.drag = null));
     this.cnv.addEventListener('pointerleave', () => ((this.hover = null), this.draw()));
     this.cnv.addEventListener('contextmenu', (e) => e.preventDefault());
     new ResizeObserver(() => this.fit()).observe(lane);
+    onSprites(() => this.draw());
     new MutationObserver(() => {
       this.pal.refresh();
       this.baseKey = '';
@@ -675,6 +681,22 @@ export class TacticsApp {
     return inside(this.t, x, y) ? { x, y } : null;
   }
 
+  /** How many cells from a unit a press may land and still pick it up: one, or about a fingertip on touch. */
+  private reach(e: PointerEvent): number {
+    return e.pointerType === 'touch' ? Math.max(1, Math.round(12 / this.cs)) : 1;
+  }
+
+  /** Would a press here start a drag (so a touch must not scroll the page)? Mirrors `pointer`. */
+  private grabs(e: PointerEvent): boolean {
+    const c = this.cellAt(e);
+    if (!c) return false;
+    const k = this.reach(e);
+    const near = (p: P) => Math.abs(p.x - c.x) <= k && Math.abs(p.y - c.y) <= k;
+    if (this.layer === 'dynamic' && this.dynTool === 'wagon' && this.wagon) return true;
+    if (near(this.t.unit) || this.t.threats.some(near)) return true;
+    return typeof this.tool === 'number';
+  }
+
   private pointer(e: PointerEvent, phase: 'down' | 'move'): void {
     const c = this.cellAt(e);
     this.hover = c;
@@ -682,7 +704,8 @@ export class TacticsApp {
     const t = this.t;
     if (phase === 'down') {
       this.cnv.setPointerCapture(e.pointerId);
-      const near = (p: P) => Math.abs(p.x - c.x) <= 1 && Math.abs(p.y - c.y) <= 1;
+      const k = this.reach(e);
+      const near = (p: P) => Math.abs(p.x - c.x) <= k && Math.abs(p.y - c.y) <= k;
       const ti = t.threats.findIndex(near);
       if (e.button === 2 && ti >= 0) {
         t.threats.splice(ti, 1);
@@ -1075,8 +1098,12 @@ export class TacticsApp {
       }
     }
     // Units on top.
-    for (const q of t.threats) this.marker(ctx, q, '--alert', 'T');
-    this.marker(ctx, t.unit, '--walker', 'U');
+    // Units on top, back to front: goblin archers facing the knight, the knight facing the nearest of them.
+    const near = t.threats.reduce<P | null>((b, q) => (!b || Math.hypot(q.x - t.unit.x, q.y - t.unit.y) < Math.hypot(b.x - t.unit.x, b.y - t.unit.y) ? q : b), null);
+    const marks: Array<[P, string, SpriteId, boolean]> = t.threats.map((q) => [q, '--alert', 'goblinArcher', t.unit.x < q.x]);
+    marks.push([t.unit, '--walker', 'knight', !!near && near.x < t.unit.x]);
+    marks.sort((a, b) => a[0].y - b[0].y);
+    for (const [p, token, sprite, flip] of marks) this.marker(ctx, p, token, sprite, flip);
     this.stats.replaceChildren(...stats.map(([v, k, cls]) => h('div', { class: 'stat' }, h('span', { class: 'k' }, k), h('span', { class: `v${cls ? ' ' + cls : ''}` }, v))));
     if (info !== this.lastInfo) {
       // Only rebuild when the text changes, so hovering a term during playback isn't interrupted.
@@ -1090,24 +1117,25 @@ export class TacticsApp {
     return h('span', {}, h('i', { class: 'swatch', style: `background: var(${token})` }), label);
   }
 
-  private marker(ctx: CanvasRenderingContext2D, p: P, token: string, label: string): void {
+  /** A unit on its cell: a ring in its colour round the cell, and its sprite standing on it, scaled with the cells. */
+  private marker(ctx: CanvasRenderingContext2D, p: P, token: string, sprite: SpriteId, flip: boolean): void {
     const cs = this.cs;
     const r = Math.max(4, cs * 0.75);
-    ctx.fillStyle = this.col(token);
+    const x = (p.x + 0.5) * cs;
+    const y = (p.y + 0.5) * cs;
+    ctx.fillStyle = this.col(token, 0.55);
     ctx.strokeStyle = this.col('--bg');
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc((p.x + 0.5) * cs, (p.y + 0.5) * cs, r, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.fill();
+    ctx.strokeStyle = this.col(token);
+    ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.lineWidth = 1;
-    if (r >= 6) {
-      ctx.fillStyle = this.col('--bg');
-      ctx.font = `700 ${Math.round(r * 1.1)}px ${this.pal.get('--f-body')}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, (p.x + 0.5) * cs, (p.y + 0.5) * cs + 0.5);
-    }
+    const size = spriteSize(Math.max(12, cs * 2.2));
+    drawSprite(ctx, sprite, x, y - size * 0.3, size, { flip });
   }
 
   private sightLine(ctx: CanvasRenderingContext2D, from: P, to: P): void {

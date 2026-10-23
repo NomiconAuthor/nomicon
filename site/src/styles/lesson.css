@@ -218,3 +218,16 @@
   text-align: right;
   margin-left: auto;
 }
+
+/* Which flecs build a lesson was checked against (flecs lessons only). */
+.lesson .lesson-ver {
+  margin-top: 32px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+/* The flecs index's "Where to learn more" reuses the lesson prose styles. */
+.flecs-index .learn-more {
+  max-width: none;
+  margin: 48px 0 0;
+  padding: 0;
+}

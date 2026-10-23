@@ -448,7 +448,7 @@ export class DebuggerView {
     const lines: El[] = [];
     const setupCode = [sc.setupCode, sc.variants?.[this.s.variant]?.setupCode].filter(Boolean).join('\n');
     if (setupCode) lines.push(h('details', { class: 'fdbg-setup' }, h('summary', {}, 'Setup'), h('pre', {}, setupCode)));
-    const defs = [...(sc.systems ?? []), ...(sc.observers ?? [])].filter((d) => d.code);
+    const defs = [...(sc.variants?.[this.s.variant]?.systems ?? sc.systems ?? []), ...(sc.observers ?? [])].filter((d) => d.code);
     if (defs.length)
       lines.push(
         h(

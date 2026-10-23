@@ -220,14 +220,16 @@ static ecs_entity_t fw_phase(const char *phase) {
     return e ? e : EcsOnUpdate;
 }
 
-/** A system matching `expr` that calls back into JavaScript. Returns 0 on a bad query. */
-FW_EXPORT(fw_system) double fw_system(const char *name, const char *expr, const char *phase, int32_t cached) {
+/** A system matching `expr` that calls back into JavaScript. `flags`: 1 = cached query,
+ * 2 = immediate system (runs on a writable world). Returns 0 on a bad query. */
+FW_EXPORT(fw_system) double fw_system(const char *name, const char *expr, const char *phase, int32_t flags) {
     ecs_entity_t e = ecs_entity(world, { .name = name });
     ecs_entity_t s = ecs_system(world, {
         .entity = e,
         .phase = fw_phase(phase),
         .query.expr = expr,
-        .query.cache_kind = cached ? EcsQueryCacheAuto : EcsQueryCacheNone,
+        .query.cache_kind = (flags & 1) ? EcsQueryCacheAuto : EcsQueryCacheNone,
+        .immediate = (flags & 2) != 0,
         .callback = fw_system_cb,
     });
     if (!s) ecs_delete(world, e);
@@ -355,7 +357,8 @@ FW_EXPORT(fw_tables) char *fw_tables(int32_t max_rows) {
         ecs_strbuf_list_appendlit(&out, "\"capacity\":");
         ecs_strbuf_appendint(&out, ecs_table_size(table));
         ecs_strbuf_list_appendlit(&out, "\"dontFragment\":");
-        ecs_strbuf_appendstr(&out, table->flags & EcsTableHasDontFragment ? "true" : "false");
+        /* Tables are no longer flagged for DontFragment components (flecs 1d5850a8). */
+        ecs_strbuf_appendstr(&out, "false");
         ecs_strbuf_list_appendlit(&out, "\"sparse\":");
         ecs_strbuf_appendstr(&out, table->flags & EcsTableHasSparse ? "true" : "false");
         ecs_strbuf_list_appendlit(&out, "\"type\":");
