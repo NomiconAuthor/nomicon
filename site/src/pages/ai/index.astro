@@ -21,17 +21,11 @@ for (const l of lessons) {
     <p class="kicker">Lessons</p>
     <h1>How game agents decide, move and read the map</h1>
     <p class="lede">
-      Four ways of making decisions, built from scratch and running live: utility scoring, where every option gets a number
-      from response curves; behaviour trees, where a hand-built priority structure is walked every tick; goal-oriented action
-      planning, where the agent searches for a sequence of actions that reaches a goal; and hierarchical task networks, where
-      the agent picks among designer-written recipes and checks ahead that they'll work. They all drive the same agent in the same
-      small arena, so you can see what each one gets right, what it gets wrong, and what it costs. Then navmeshes: Recast's
-      build stepped through stage by stage, and Detour against writing your own planner. Movement: steering as a
-      stack of choices (how an agent moves, follows a path and notices walls, and how those combine), avoiding
-      other agents from a separation force to ORCA, and parties that hold a formation through a doorway. And terrain analysis:
-      chokes, cover generation stepped through algorithm by algorithm, keeping cover valid as the world changes, and choosing it.
-      Influence and threat maps: whose ground is whose, where an enemy could hit you from, and routes that keep out of sight. Shared knowledge: what a guild, a party and an adventurer each know when parties can only read the guild board at waystones.
-      And party roles: a tank, a cleric and three damage dealers against an orc warchief, with a threat table, triage healing and telegraphed attacks.
+      Everything here runs live in the page. <b>Decisions</b>: utility scoring, behaviour trees, GOAP and HTN planning, each
+      driving the same agent in the same arena, then how to choose. <b>Navmeshes</b>, <b>movement</b> and <b>terrain
+      analysis</b>: where agents can walk, how they get there without bumping into things, and how to read the map for chokes
+      and cover. <b>Reading the world</b>: influence maps and shared knowledge. And <b>parties</b>: a tank, a healer and damage
+      dealers against a boss.
     </p>
     {
       parts.map((p) => (

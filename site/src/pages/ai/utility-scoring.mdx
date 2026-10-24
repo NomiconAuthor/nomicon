@@ -2,7 +2,7 @@
 layout: ../../layouts/Lesson.astro
 title: Utility AI, scoring with curves
 order: 1
-part: Utility
+part: Decisions
 summary: 'Replace hand-tuned score arithmetic with a structure that scales: factors describe the world, considerations turn one factor into a 0 to 1 score through a response curve, and a behaviour''s score is the product of its considerations. With a live inspector to poke at.'
 ---
 import AiWidget from '../../components/AiWidget.astro';
@@ -110,15 +110,9 @@ The weight multiplies the final score. It's tempting to use weights to fix every
 The inspector above is the most useful debugging tool a utility system can have. Log or draw every behaviour's score, and every consideration's value, for the selected agent each decision. When an agent does something odd, the reason is right there: which consideration was too high, which curve too flat. Without it, utility AI is as opaque as the "vibes" version.
 </Tip>
 
-## Factors as data, and in an ECS
+## Factors as data
 
-Separating factors from considerations also tells you how to lay this out in an engine. In flecs terms:
-
-- A **sensing** system computes each agent's factors into a component (`Factors`, a struct of floats), from whatever it needs: queries for nearby enemies, the agent's own components, the navmesh.
-- A **decision** system reads `Factors` and the behaviour set (shared data, one per agent type, ideally in a prefab) and writes the chosen action. It touches no other entities, so it parallelises trivially.
-- **Action** systems run every tick and do the chosen action.
-
-Decisions don't need to run every tick: 2–5 times a second is common, and staggering agents (`entity_id % N == tick % N`) spreads the cost. Store the current action as a value, not as a tag per action, or every decision change moves the entity between tables (see [choosing storage](/flecs/storage-traits/)).
+Separating factors from considerations also tells you how to lay this out in an engine: one system computes each agent's factors into a component, another reads them and the behaviour set (shared per agent type) and picks an action, and the action runs every tick. [Choosing an architecture](/ai/choosing-an-architecture/) lays that pipeline out in flecs, for every kind of brain.
 
 <Tip title="Beyond the arena">
 The arena is a small skirmish because that keeps it compact, but nothing in the structure is about shooting. *The Sims* is the classic example: each object **advertises** how much it satisfies each need, and a Sim scores the adverts against its own needs through curves, so a new object adds behaviour without anyone touching the Sims. Strategy games score what to build next and where to send workers the same way, and a creature in a survival game scores hunting, fleeing and sleeping like the arena agent scores attacking and taking cover.
