@@ -1,5 +1,7 @@
 # Nomicon
 
+https://nomicon.app/
+
 **Interactive explainers for game programmers.** Every lesson has something running in the page that you can poke: a real ECS compiled to WebAssembly, engine mechanisms modelled step by step, game-AI techniques running on small deterministic worlds, a physics engine you can pause and step (plus real Jolt, Box3D and Bullet side by side), and two labs for pathfinding and terrain analysis.
 
 Every number a lesson quotes from a simulation is checked by the test suite against the code the widget runs, so the text can't quietly drift from the behaviour it describes.
