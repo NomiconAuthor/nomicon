@@ -1,0 +1,56 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Choosing a physics engine
+order: 8
+part: Choosing an engine
+summary: 'The short version: which engine to start with for your situation, the handful of questions that actually separate Jolt, Box3D, PhysX, Chaos, Bullet and Havok, a sensible first configuration, and how to keep the choice reversible.'
+---
+import Tip from '../../components/lesson/Tip.astro';
+
+The concept lessons are about what every engine has in common, and that's most of it. This lesson is about the few differences that should decide which one you use. The two lessons after it go into the engines in depth, with three of them running side by side; you don't need them to make the choice.
+
+## Start here
+
+1. **Using Unreal or Unity?** You already have an engine: **Chaos** in Unreal 5, **PhysX** in Unity's built-in 3D physics. Learn its defaults rather than replacing it. Swapping the physics under a game engine means fighting every system built on top of it (characters, vehicles, networking, the editor). The exception is a studio-sized need with a budget to match, like Havok's drop-in replacement for Unreal's physics.
+2. **Making a 2D game?** **Box2D** (version 3). It's the engine this site's concept lessons are modelled on, it's MIT-licensed, and it's been the standard 2D engine for well over a decade.
+3. **Your own engine, 3D?** Start with **Jolt**. It's mature, MIT-licensed, ships in large games, covers the most ground (characters, vehicles, ragdolls, soft bodies, large worlds), and plugs into your own job system. Godot made it the default for new projects. Pick something else only for one of these reasons:
+   - **Box3D** if you want a small C API in Box2D's style, determinism across machines, and recording and replay built in, and you can live with an alpha (0.1.0, mid-2026) whose API may still change.
+   - **PhysX** if you need GPU simulation of very large scenes, or your team already knows it. It's BSD-licensed and fully open source.
+   - **Havok** if you want commercial support and a long list of shipped games behind it, and can pay for it.
+   - **Bullet** for robotics or machine learning, through PyBullet. Not for a new game: its last SDK release (3.25) was in 2022, and only PyBullet still gets occasional updates.
+
+That's the whole decision for most projects. The rest of this lesson is for when the defaults above don't settle it.
+
+## The questions that separate them
+
+| If you need… | Look at | Notes |
+|---|---|---|
+| A ready-made player controller | Jolt, PhysX, Unreal | Jolt's `CharacterVirtual` walks stairs and sticks to floors. Box3D gives you the casts and a plane solver and leaves the controller to you. |
+| Rollback networking | Box3D, Jolt, Havok | Box3D: deterministic across platforms, plus replay. Jolt: state save and restore; cross-platform determinism is a build option. Chaos can resimulate, but only with its async fixed tick. |
+| Very large worlds | Jolt, Box3D, Chaos | All three support large worlds (double-precision positions in Jolt and Box3D, Unreal's large world coordinates in Chaos), so physics doesn't get jittery kilometres from the origin. |
+| Destruction | Chaos | The only one with fracture built into the engine itself; PhysX pairs with NVIDIA's Blast, a separate library, and Havok sells destruction too. Otherwise, swap an object for pre-broken pieces when it breaks. |
+| Vehicles, ragdolls, soft bodies | Jolt, PhysX | Jolt has all three built in and on the CPU; PhysX has a vehicle SDK, articulations and deformable bodies. |
+| Tall stacks out of the box | Box3D | Its substepped solver holds stacks with default settings; Jolt needs its iteration count raised. |
+| A C API | Box3D | The other game engines are C++ (Jolt has community C bindings). |
+| Fitting your threading | Jolt, Box3D | Jolt runs on a job system you subclass; Box3D asks for two task callbacks. Both are easy to plug into an existing scheduler. |
+
+Notice what's missing: raw speed. All the engines here are fast enough for typical game scenes, and how fast one is on *your* content depends on shapes, stack heights and settings more than on the engine's name. If performance is the deciding factor, build your worst scene in both and measure it.
+
+<Tip title="A first configuration">
+Whatever you pick, start the same way. Step at a fixed **60 Hz** and interpolate for drawing. Keep sizes in **metres**, with moving things between about 10 cm and 10 m. Make **two broadphase layers**, moving and static, and add more only when a filter needs one. Turn on **continuous collision** for projectiles and anything small and fast. Use a **kinematic mover** for the player. Leave iteration counts at their defaults until a real scene needs more. The [what goes wrong lesson](/physics/when-physics-goes-wrong/) is the checklist for when something doesn't behave.
+</Tip>
+
+## Keep the choice reversible
+
+You won't know for certain that you chose right until you build real content, so make changing your mind cheap:
+
+- **Talk to the engine through your own handles.** Game code holds an id from your physics layer, never a `JoltBody*` or a `b3BodyId`. The [physics in flecs lesson](/physics/physics-in-flecs/) shows that layer in an ECS: a few components, observers and systems, and the only place the engine's API appears.
+- **Keep game rules out of contact callbacks.** Record events in the callback and act on them in your own systems, after the step. Callbacks differ the most between engines and are the hardest part to port.
+- **Build your hardest case first.** The tallest stack, the fastest projectile, the busiest scene, the player on a moving platform. These are exactly the cases where engines' defaults differ, and an afternoon spent on them tells you more than any comparison table.
+
+## Takeaways
+
+- In **Unreal or Unity**, use the engine you have and learn its defaults.
+- **2D**: Box2D. **3D, your own engine**: Jolt, unless you specifically need Box3D's determinism and C API, PhysX's GPU scale, or Havok's support.
+- The differences that matter are **characters, determinism, large worlds, destruction** and **API style**, not raw speed.
+- Keep it reversible: **your own handles**, logic **outside callbacks**, and your **hardest case built first**.

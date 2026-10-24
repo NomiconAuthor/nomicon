@@ -5,9 +5,9 @@
 #   cd site && npm run build
 #   python3 tools/make-og-images.py [--fonts DIR]
 #
-# Fonts: pass a folder holding cinzel-latin-700-normal.woff2, roboto-latin-400-normal.woff2
-# and roboto-latin-500-normal.woff2 (from the @fontsource/cinzel and @fontsource/roboto npm
-# packages) to render offline; without it the Google Fonts versions are used.
+# Fonts: by default the cards use the site's own @fontsource packages from site/node_modules
+# (run npm install first). --fonts DIR points at a folder holding cinzel-latin-700-normal.woff2,
+# roboto-latin-400-normal.woff2 and roboto-latin-500-normal.woff2 instead.
 import base64, html, json, re, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -16,17 +16,21 @@ ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / 'site' / 'dist'
 OUT = ROOT / 'site' / 'public' / 'og'
 LIST = ROOT / 'site' / 'src' / 'og-cards.json'
-SECTIONS = {'engine': 'Engine fundamentals', 'flecs': 'flecs', 'ai': 'Game AI', 'labs': 'Labs', 'pathing-lab': 'Labs', 'tactics-lab': 'Labs'}
+SECTIONS = {'engine': 'Engine fundamentals', 'flecs': 'flecs', 'ai': 'Game AI', 'physics': 'Physics', 'labs': 'Labs', 'pathing-lab': 'Labs', 'tactics-lab': 'Labs'}
 
 fonts = None
 if '--fonts' in sys.argv:
     fonts = Path(sys.argv[sys.argv.index('--fonts') + 1])
+FONTSOURCE = ROOT / 'site' / 'node_modules' / '@fontsource'
+
+def font_file(file: str) -> Path:
+    if fonts:
+        return fonts / file
+    return FONTSOURCE / file.split('-latin')[0] / 'files' / file
 
 def font_css() -> str:
-    if not fonts:
-        return "@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&family=Cinzel:wght@700&display=block');"
     def face(family, weight, file):
-        data = base64.b64encode((fonts / file).read_bytes()).decode()
+        data = base64.b64encode(font_file(file).read_bytes()).decode()
         return f"@font-face{{font-family:'{family}';font-weight:{weight};src:url(data:font/woff2;base64,{data}) format('woff2');}}"
     return face('Cinzel', 700, 'cinzel-latin-700-normal.woff2') + face('Roboto', 400, 'roboto-latin-400-normal.woff2') + face('Roboto', 500, 'roboto-latin-500-normal.woff2')
 

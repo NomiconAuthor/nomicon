@@ -1,0 +1,56 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Queries and characters
+order: 7
+part: Concepts
+summary: 'Asking the physics world questions (rays, shape casts, overlaps) and building characters from the answers: kinematic movers that collide and slide, climb steps and stick to slopes, against characters that are ordinary rigid bodies.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Games ask the physics world questions far more often than they simulate anything. Can the turret see the player? Where does this footstep land? Is there room to stand up? Will this capsule fit through the door? These are **scene queries**: they use the broadphase and narrowphase, but they don't change anything.
+
+## Rays, shape casts and overlaps
+
+There are three basic questions:
+
+- A **ray cast** follows a line and returns the first hit: the body, the point, the surface normal and the distance. Line of sight, bullets, mouse picking, finding the ground under a foot.
+- A **shape cast** (or sweep) moves a whole shape along a line and returns where it first touches something. It answers "can a body this size get from here to there?", which a ray can't: a ray fits through gaps a character can't.
+- An **overlap** test asks what a shape at a position is touching right now: trigger volumes, "is there room to stand up", explosion radius.
+
+<PhysicsWidget kind="queries" />
+
+Drag the ends. As a **Ray**, the cast slips between shapes; as a **Circle** it stops at the first gap too narrow for it. A shape cast against a polygon is a ray cast against the polygon grown by the circle's radius: each edge pushed out, and a circle at every corner. That's the idea behind every capsule sweep, and it's why sweeps cost more than rays.
+
+Queries take the same filters as contacts, so a sight-line ray can ignore glass and foliage while a bullet ray hits it. Some engines add per-hit callbacks that mark a hit as "touch" (record it and keep going) or "block" (stop here), which is how a single ray returns every window it passed through and the wall that stopped it.
+
+## Two kinds of character
+
+A player character is the one object whose motion has to feel *designed* rather than physical: instant starts and stops, no sliding down gentle slopes, climbing stairs without hopping, never pushed off a ledge by a stray crate. There are two ways to build one, and the widget below has one of each. Control them with the buttons, or click the widget and use the arrow keys and space.
+
+<PhysicsWidget kind="character" />
+
+**The kinematic mover** (orange) isn't part of the simulation at all. Every step, game code works out where it wants to go and moves it there with shape casts, **collide and slide**:
+
+1. Cast the shape along the desired move. If it hits, move up to the hit, then remove the part of the remaining move that goes into the surface, and cast again with what's left (a few times at most).
+2. Blocked by something wall-like while on the ground? Try a **step**: cast up by the step height, forward, then down, and if it lands on walkable ground, take the step.
+3. **Walkable** means the surface normal is within a slope limit of straight up, 45° here. Steeper surfaces are walls: the mover won't slide up them.
+4. Walking off a downward slope or step, cast down a short way and **snap** to the ground if it's there, so the mover doesn't launch off every bump.
+5. Push dynamic bodies it walks into with a **capped** impulse, and push itself out of anything that moved into it.
+
+Walk the mover right: it climbs the four 0.25 m steps, crosses the platform, shoves the crates, and stops at the 55° wedge because that's too steep to count as ground. Left, the ramp is 25°, so it walks up without slowing. Stand still on the ramp and it stays exactly put. **Show the mover's casts** draws every query it makes: grey for moves, green for the step attempt, blue for the ground snap.
+
+**The dynamic character** (pink) is an ordinary rigid body: a circle with rotation locked, moved by setting its horizontal velocity. Everything just happens: it collides, it's pushed by crates, it pushes back with real mass. But "everything" includes the unwanted parts. It stops dead at the first 0.25 m step, because nothing tells it to step up; on the ramp it slides down when you let go; and a falling crate can knock it sideways. Each of those needs code to undo, and that code ends up looking like the mover's.
+
+Engines vary a lot here: some ship a finished mover, some a rigid-body character as well, some only the casts and plane solvers to build your own. It's one of the bigger practical differences between them, and [choosing an engine](/physics/choosing-an-engine/) comes back to it.
+
+<Tip title="Why most games use a mover for the player">
+A mover does exactly what the code says, which is what a player character needs: designers tune speeds and jump arcs directly, networking only has to predict the game's own code, and nothing in the simulation can shove the player somewhere unfair. The cost is that every interaction with the world (being pushed, riding platforms, standing on a moving body) is something you implement. Rigid-body characters suit physics-led games, vehicles and AI crowds, where reacting to everything for free is the point.
+</Tip>
+
+## Takeaways
+
+- **Ray casts, shape casts and overlaps** answer questions without changing the world; they share the contact filters.
+- A **shape cast** is a ray against shapes grown by the cast shape: it finds gaps a body can actually fit through.
+- A **kinematic mover** collides and slides with queries, **steps up**, enforces a **slope limit**, **snaps** to the ground and pushes with a **capped** impulse.
+- A **rigid-body character** reacts to everything, including what you didn't want.

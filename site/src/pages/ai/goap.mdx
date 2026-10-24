@@ -95,7 +95,7 @@ A plan is a guess about the future, and the arena doesn't cooperate. Most of the
 - **Replan when the plan breaks.** If the next step's preconditions are false (the staff ran dry mid-*CastBolt*), or a step takes far too long, or the goal changes, plan again from the current facts.
 - **Choose the goal.** GOAP plans *how*; something else decides *what for*. Here it's a short priority list (heal if hurt, fight if enemies, restock if idle), and in real games it's often utility scoring.
 
-In the arena (next lesson), the GOAP agent replans about 33 times in a three-minute fight and expands 6.5 states per plan. That's its cost profile: nothing most ticks, a small search occasionally. A behaviour tree, by contrast, does a little work every tick.
+In the arena ([Choosing an architecture](/ai/choosing-an-architecture/)), the GOAP agent replans about 33 times in a three-minute fight and expands 6.5 states per plan. That's its cost profile: nothing most ticks, a small search occasionally. A behaviour tree, by contrast, does a little work every tick.
 
 ## Strengths and weaknesses
 
@@ -107,7 +107,7 @@ In the arena (next lesson), the GOAP agent replans about 33 times in a three-min
 
 **Where it struggles:**
 
-- **Designers lose direct control.** "Why did it do that?" needs the plan and the search on screen, not just the current action.
+- **Designers lose direct control.** "Why did it do that?" needs the plan and the search on screen, not just the current action. [HTN planners](/ai/htn/) (next lesson) give that control back.
 - **The symbolic model is a lie.** Facts are a coarse summary, and the gap between "in cover" the fact and cover the geometry is where the bugs live. Every fact is a small sensing problem.
 - **State spaces grow.** Each fact doubles the number of possible states. Keep the facts few and the actions per agent type small.
 - **Plans go stale.** A fast-changing fight means frequent replanning, and an agent that replans every tick is a slow, confusing utility system.

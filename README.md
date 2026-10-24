@@ -1,6 +1,6 @@
 # Nomicon
 
-**Interactive explainers for game programmers.** Every lesson has something running in the page that you can poke: a real ECS compiled to WebAssembly, engine mechanisms modelled step by step, game-AI techniques running on small deterministic worlds, and two labs for pathfinding and terrain analysis.
+**Interactive explainers for game programmers.** Every lesson has something running in the page that you can poke: a real ECS compiled to WebAssembly, engine mechanisms modelled step by step, game-AI techniques running on small deterministic worlds, a physics engine you can pause and step (plus real Jolt, Box3D and Bullet side by side), and two labs for pathfinding and terrain analysis.
 
 Every number a lesson quotes from a simulation is checked by the test suite against the code the widget runs, so the text can't quietly drift from the behaviour it describes.
 
@@ -16,12 +16,13 @@ npm run dev        # http://localhost:4321
 
 | Section | URL | What it is |
 |---|---|---|
-| **engine** | `/engine/` | 10 lessons on what the hardware and the engine underneath do: cache lines and data layout, handles and allocators, game loops, determinism, deadlines and async work, spatial partitioning, octrees, jobs and task graphs, threads/pools/fibers, profiling. |
-| **flecs** | `/flecs/` | 19 lessons on the flecs ECS (plus further reading on the index page), each running **real flecs master** in the browser with its internals instrumented, plus a free-form **sandbox** at `/flecs/sandbox/`. |
-| **game ai** | `/ai/` | 16 lessons: utility AI, behaviour trees, GOAP, steering, local avoidance, formations, Recast and Detour, terrain analysis, cover, influence and threat maps, shared knowledge (blackboards), party roles (tank, healer, damage). Set in one fantasy world. |
+| **engine** | `/engine/` | 11 lessons on what the hardware and the engine underneath do: cache lines and data layout, handles and allocators, game loops, determinism, deadlines and async work, spatial partitioning, octrees, jobs and task graphs, threads/pools/fibers, profiling, hot reloading code. |
+| **flecs** | `/flecs/` | 19 lessons on the flecs ECS (plus further reading on the index page), each running **real flecs master** in the browser with its internals instrumented, plus a free-form **sandbox** at `/flecs/sandbox/` whose worlds can be shared as links. |
+| **game ai** | `/ai/` | 17 lessons: utility AI, behaviour trees, GOAP, HTN planning, steering, local avoidance, formations, Recast and Detour, terrain analysis, cover, influence and threat maps, shared knowledge (blackboards), party roles (tank, healer, damage). Set in one fantasy world. |
+| **physics** | `/physics/` | 12 lessons in three parts. **Concepts**: seven lessons on a small deterministic 2D engine written for the site (the step, broadphase and filtering, narrowphase with SAT/GJK/EPA and manifolds, solving contacts with Baumgarte vs soft step, sleeping and fast bodies, joints, queries and characters), kept free of engine-by-engine detail. **Choosing an engine**: a short decision lesson, then deep dives with **real Jolt, Box3D and Bullet** side by side in 3D, and Chaos and PhysX (with a six-engine comparison including Havok). **In practice**: when physics goes wrong (four mistakes live with their fixes, and a symptom table), and physics wired into **real flecs** through handles. |
 | **labs** | `/labs/` | **Pathing lab** (`/pathing-lab/`): grid A*/JPS/Theta*, HPA*, Recast navmesh, PRM/RRT roadmaps, multi-unit, vehicles with Hybrid A* / state lattice / car RRT. **Tactics lab** (`/tactics-lab/`): clearance, chokes, traffic, openness, cover generation, exposure and best-cover queries on a 2.5D grid. |
 
-There are also site-wide search (Ctrl/⌘ K or `/`), shareable lab links, and three themes: **Nomicon** (the default: violet and gold, Cinzel headings), Dusk and Visual Studio. The whole site is static: no server code, no accounts, no tracking.
+There are also site-wide search (Ctrl/⌘ K or `/`), shareable lab and sandbox links, and three themes: **Nomicon** (the default: violet and gold, Cinzel headings), Dusk and Visual Studio. The whole site is static: no server code, no accounts, no tracking, and no third-party requests (fonts are served from the site). `sitemap.xml` and `robots.txt` are generated from the pages, so search engines find new lessons with no upkeep.
 
 ## Repository layout
 
@@ -31,12 +32,14 @@ LICENSE              MIT
 site/                the website: Astro 7 + MDX, TypeScript widgets
   src/pages/         lessons (.mdx) and pages (.astro); one folder per section
   src/components/    custom elements that mount widgets into lessons
-  src/engine/ src/flecs/ src/ai/ src/recast/ src/tactics/ src/influence/ src/knowledge/ src/party/ src/sprites/ src/lab/
+  src/engine/ src/flecs/ src/ai/ src/physics/ src/recast/ src/tactics/ src/influence/ src/knowledge/ src/party/ src/sprites/ src/lab/
                      widget and simulation code, by topic (see "Code map")
   src/styles/        site chrome, lesson layout, themes
-  public/            flecs.wasm builds, themes.js (runtime theme switch), favicon.svg/.ico, apple-touch and 192/512 icons
+  public/            flecs.wasm builds, box3d.wasm, bullet.wasm, themes.js (runtime theme switch), favicon.svg/.ico, apple-touch and 192/512 icons
   test/              Node checks and batch runs (see "Tests")
 flecs-wasm/          how flecs.wasm is built: instrumentation script, C glue, build.sh
+box3d-wasm/          how box3d.wasm is built: a small C API over Box3D, build.sh
+bullet-wasm/         how bullet.wasm is built: a small C API over Bullet, build.sh
 tools/               ad-hoc Playwright browser checks (Python) used during development
 ```
 
@@ -44,7 +47,7 @@ Build output (`site/dist/`, and `distr/` if you keep a deploy copy), `node_modul
 
 ## Building, running, testing
 
-Requires Node 22 or later. Pinned: astro 7.4.0, @astrojs/mdx 8.1.0, @astrojs/check 0.9.10, recast-navigation 0.43.1, typescript 5.6.3.
+Requires Node 22 or later. Pinned: astro 7.4.0, @astrojs/mdx 8.1.0, @astrojs/check 0.9.10, recast-navigation 0.43.1, jolt-physics 1.1.0, typescript 5.6.3, @fontsource/roboto, roboto-mono and cinzel 5.3.0.
 
 ```
 cd site
@@ -65,7 +68,7 @@ Batch runs that produce the numbers lessons quote: `npm run ai-batch`, `steer-ba
 
 - **`test/runtime-check.ts`**: the flecs runtime (scripts, REST, JS systems and observers, deferred ops through `it->stage`, reset, multiple worlds).
 - **`test/debugger-check.ts`**: for every debugger scenario and variant, replaying the recorded trace onto the "before" snapshot must reproduce the real "after" storage. This keeps the step-through debugger truthful.
-- **`test/lesson-claims.ts`**: **every number a lesson quotes from a simulation.** Each claim recomputes the value with the same code the widget runs, formats it as the lesson writes it, and checks that exact text is in the MDX. Changing a simulation therefore fails the build and prints the sentence or table row the lesson should now contain. Groups: `ai goap steering formations cover avoidance jobs waiting profiling influence knowledge party recast`. **When you add a measured number to a lesson, add a claim for it.** Numbers measured live in the browser (memory benchmarks, the flecs spatial benchmark, µs timings) aren't checked, because they vary by machine.
+- **`test/lesson-claims.ts`**: **every number a lesson quotes from a simulation.** Each claim recomputes the value with the same code the widget runs, formats it as the lesson writes it, and checks that exact text is in the MDX. Changing a simulation therefore fails the build and prints the sentence or table row the lesson should now contain. Groups: `ai goap htn hotreload physics engines chaos ecs trouble steering formations cover avoidance jobs waiting profiling influence knowledge party recast`. **When you add a measured number to a lesson, add a claim for it.** Numbers measured live in the browser (memory benchmarks, the flecs spatial benchmark, µs timings) aren't checked, because they vary by machine.
 
 Browser checks in `tools/` are optional and need Python with Playwright and Chromium, plus a static server on the built site. `tools/browser-step-all-lessons.py [port]` (default 4330: `cd site/dist && python3 -m http.server 4330`) steps every debugger and variant to the end, clicks query presets, runs benchmarks, script presets and the networking demo, and reports page errors.
 
@@ -80,7 +83,7 @@ The site is static files only; the server has no Node.
 5. Serve `404.html` for missing pages instead of falling back to the home page. In nginx: `try_files $uri $uri/ =404;` in `location /`, and `error_page 404 /404.html;` in the `server` block.
 6. Optional: real 301s for the old engine URLs: `rewrite ^/low-level/?(.*)$ /engine/$1 permanent;`. The site already forwards them with small pages that keep the `#anchor`.
 
-**Link previews:** every page has `og:`/Twitter tags, and its own 1200 × 630 card in `site/public/og/` (listed in `src/og-cards.json`; pages without one use the home card). When lessons are added or renamed, regenerate them: `npm run build`, then `python3 tools/make-og-images.py [--fonts DIR]` from the repo root, then build again. The script needs Playwright with Chromium; `--fonts` points at local Cinzel/Roboto `.woff2` files (from the `@fontsource` npm packages) so cards render without Google Fonts.
+**Link previews:** every page has `og:`/Twitter tags, and its own 1200 × 630 card in `site/public/og/` (listed in `src/og-cards.json`; pages without one use the home card). When lessons are added or renamed, regenerate them: `npm run build`, then `python3 tools/make-og-images.py [--fonts DIR]` from the repo root, then build again. The script needs Playwright with Chromium and takes the fonts from `site/node_modules/@fontsource` (or `--fonts DIR`). It rewrites every card, so if only some pages changed, keep the others from git to avoid churn.
 
 **Themes without rebuilding:** edit `themes.js` in the web root (source `site/public/themes.js`). `enabled` lists the offered themes and `default` is the first-visit theme; with one theme enabled the menu disappears. Pages load it as `/themes.js?v=<build id>` (`BUILD_ID` in `themes.ts`), so each deploy gets a fresh URL past browser and CDN caches; an edit made on the server between builds still needs a hard refresh (or a short-TTL cache rule for `/themes.js`).
 
@@ -88,13 +91,14 @@ The site is static files only; the server has no Node.
 
 | Path (under `site/src/`) | What |
 |---|---|
-| `layouts/Base.astro` | Shell, navbar (`engine`, `flecs`, `ai`, `labs`), search, theme menu. `[data-nav-slot]` is where pages put buttons (the labs' Concepts button). Always renders `.frame`, `.statusbar` and `.clock`; themes decide whether they show. |
+| `layouts/Base.astro` | Shell, navbar (`engine`, `flecs`, `ai`, `physics`, `labs`), search, theme menu. `[data-nav-slot]` is where pages put buttons (the labs' Concepts button). Always renders `.frame`, `.statusbar` and `.clock`; themes decide whether they show. |
 | `layouts/Lesson.astro`, `styles/lesson.css` | Lesson layout: sidebar built from MDX frontmatter (`order`, `part`, `title`, `summary`), grouped into parts, prev/next, collapsible list on phones. Lesson numbers come from position, not from `order`. |
-| `styles/site.css`, `styles/themes/*.css`, `themes.ts` | Dusk is the unscoped `site.css`; each other theme (`nomicon.css`, the default, and `vs.css`) is scoped to `html[data-theme='<id>']` and mostly re-points colour tokens. The Nomicon theme's heading face is one token, `--f-display` (Cinzel, loaded from Google Fonts in `Base.astro`). Code blocks are highlighted for all themes at once (Shiki dark/light/vs). |
+| `styles/site.css`, `styles/themes/*.css`, `themes.ts` | Dusk is the unscoped `site.css`; each other theme (`nomicon.css`, the default, and `vs.css`) is scoped to `html[data-theme='<id>']` and mostly re-points colour tokens. The Nomicon theme's heading face is one token, `--f-display` (Cinzel). Fonts come from the `@fontsource` packages, imported in `Base.astro` and bundled into `_astro/`. Code blocks are highlighted for all themes at once (Shiki dark/light/vs). |
 | `components/EngineWidget.astro`, `AiWidget.astro`, `TacticsWidget.astro` | Custom elements that lazy-load a widget by `kind` (`data-kind`, plus `data-preset` JSON for options such as `scenario="simple"`). AI pages also load `engine.css` and `ai.css`. |
 | `components/Flecs*.astro` | `FlecsDebugger` (step-through storage debugger), `FlecsQuery` (query playground), `FlecsBench` (benchmarks in a Web Worker), `FlecsScript` (script playground), `FlecsNet` (two worlds as server and client). |
 | `components/lesson/Tip.astro`, `TryIt.astro` | Callouts; "Try it in the sandbox" links (`/flecs/sandbox/?preset=...`). |
 | `pages/search-index.json.ts`, `components/Search.astro` | Search index: every lesson split at `##` headings plus both labs' concept cards (anchors via github-slugger, like Astro's heading ids). |
+| `pages/sitemap.xml.ts`, `pages/robots.txt.ts` | Built from the lesson files and `site:` in the config; redirect pages are left out. |
 | `lab/ui/share.ts` | Shareable lab links: state → JSON → deflate-raw → base64url in `#s=`. |
 | `engine/dom.ts` | `h()` and `seg()` helpers and the shared `.ll*` widget styles used across sections. |
 
@@ -113,13 +117,14 @@ Widget kinds and what they model:
 - `parfor`, `taskgraph` (`jobsim.ts`: discrete-event job system, simulated µs so results match on every machine) → *Jobs and task graphs*.
 - `waiting` (`waitsim.ts`: a job waiting on its children, handled by blocking, helping, fibers, stackless coroutines or one OS thread per task) and `pipeline` (named game and render threads, pipelined) → *Threads, pools and fibers*.
 - `profiler` (`profsim.ts`: a made-up game with known true costs, profiled by sampling, full instrumentation and hand-placed zones) → *Profiling*. Ends with a table of which profiling tool does what (Visual Studio, WPA, Superluminal, Tracy, VTune, PIX, RenderDoc and others).
+- `hotreload` (`hotreload.ts`: `ReloadSim`, a host, a game module and six orbs whose state is real bytes in a `DataView` and whose pointers are addresses in a modelled address space; three edits (code only, add a field, state holding pointers) × five strategies (restart, swap with state in the DLL, swap with host-owned state, patch in place, serialise and rebuild)) → *Hot reloading code*. The `hotreload` claims group checks the outcome of each combination the lesson describes.
 
 ### flecs (`src/flecs/`, lessons in `pages/flecs/`)
 - `runtime.ts`: `FlecsWorld` loads a wasm build; REST in-process, scripts, systems and observers with JS callbacks, iterator ops, table / sparse / query-cache dumps, and the **trace**.
 - `debugger/`: `session.ts` runs ops and snapshots, `model.ts` is the storage model plus event replay, `describe.ts` explains events, `view.ts` is the UI. `scenarios.ts` holds every lesson scenario (with optional *variants*: alternate setup, ops on the world instead of the stage, or a different wasm build).
 - A scenario is Flecs Script `setup` (plus the C++ shown to readers), optional systems/observers/queries/hooks, and a list of `ops` (a C++ line plus `run(ctx)` via REST). Ops run lazily as the reader steps; any cursor position is `before + replay(events[0..n])`. "Lesson entities" exclude ids and name-only entities. Internal flecs systems are hidden unless "flecs internals" is ticked.
 - Variants may replace `systems` (the `syncPoints` scenario adds `[out] Burning()`); `debugger-check.ts` asserts where its merge lands in each variant.
-- `sandbox/sandbox.ts`: define components (column, Sparse, DontFragment), create entities, add observers and systems, run frames; shows tables with FLIP-animated row moves, sparse sets, observer counters and a per-action log. Presets via `?preset=basics|fragmentation|traits|empty`.
+- `sandbox/sandbox.ts`: define components (column, Sparse, DontFragment), create entities, add observers and systems, run frames; shows tables with FLIP-animated row moves, sparse sets, observer counters and a per-action log. Presets via `?preset=basics|fragmentation|traits|empty`. **Share** records the preset plus every action since (an `Op` list), packs it into `#s=` with `lab/ui/share.ts`, and replays it quietly on load, so the tables, rows and observer counts come back exactly.
 
 Lessons in order: entities, archetypes, references, relationships, prefabs, query-language, query-caching, systems, commands, sync-points-and-threads, command-merging, observers, deleting, fragmentation, storage-traits, spatial-data, reflection-and-scripts, networking, thinking-in-flecs. "Where to learn more" is a section of the flecs index (`components/lesson/FlecsLearnMore.mdx`); `/flecs/learn-more/` redirects there.
 
@@ -141,14 +146,30 @@ Lessons in order: entities, archetypes, references, relationships, prefabs, quer
 - Hierarchical names print with `.`; REST paths use `/`.
 
 ### Game AI (`src/ai/` and friends, lessons in `pages/ai/`)
-- **Decision arena** (`ai/world.ts`, `brains.ts`, `curves.ts`, `ui.ts`, `widgets.ts`): one deterministic 10 Hz arena shared by every brain. A battle-mage with health, a staff of 6 charges, spare mana crystals and one potion; crates give cover; waves of 1–4 goblins; a potion shrine and a crystal cache. Seven actions (attack, cover, recharge, heal, potion, crystals, patrol). `UtilityBrain` (considerations, compensation, best/weighted/dual selection, inertia, commitment), `TreeBrain` (reactive or memory composites), `PlannerBrain` (forward A* over 8 boolean facts). Lesson numbers come from `npm run ai-batch` (seeds 1001–1040).
+- **Decision arena** (`ai/world.ts`, `brains.ts`, `curves.ts`, `ui.ts`, `widgets.ts`): one deterministic 10 Hz arena shared by every brain. A battle-mage with health, a staff of 6 charges, spare mana crystals and one potion; crates give cover; waves of 1–4 goblins; a potion shrine and a crystal cache. Seven actions (attack, cover, recharge, heal, potion, crystals, patrol). `UtilityBrain` (considerations, compensation, best/weighted/dual selection, inertia, commitment), `TreeBrain` (reactive or memory composites), `PlannerBrain` (forward A* over 8 boolean facts). `htn.ts`: `htnPlan` (total-order forward decomposition with backtracking over the same facts, GOAP's actions as primitive tasks, a 6-task domain whose root methods are the priorities) and `HtnBrain` (replans on fact changes and switches only to a plan with a smaller method traversal record; `interrupt: false` turns that off); `htnViz.ts` steps through a decomposition beside the domain. The side-by-side widget takes `lanes="goap,htn,htn-plain"` (default: utility, bt, goap, htn). Lesson numbers come from `npm run ai-batch` (seeds 1001–1040).
 - **Movement** (`ai/vec.ts`, `course.ts`, `courseLab.ts`, `avoid.ts`, `steer.ts`): steering course (follow modes, wall sensing from feelers to context steering), local avoidance (separation, social forces, VO, RVO, ORCA), Reynolds playground, crowds, formations (`FormationSim` runs headless for the claims; 20 px = 1 m; the formation's facing turns at a limited rate and the leader never waits below 40% speed). The course plays at half speed by default (*Walk*), in simulated seconds, so its numbers are unchanged.
 - **Navmeshes** (`recast/`): the real Recast (recast-navigation WASM) run stage by stage on a hand-built scene and read back at every stage; `test/recast-stages.ts` prints counts.
-- **Terrain analysis** (`tactics/`): see the tactics lab below; AI lessons 11–13 embed it with `<TacticsWidget preset=... layer=... />`.
+- **Terrain analysis** (`tactics/`): see the tactics lab below; AI lessons 12–14 embed it with `<TacticsWidget preset=... layer=... />`.
 - **Influence and threat maps** (`influence/`): knights against goblins; influence by straight line or walking distance, control and tension, threat (cells an enemy can hit within bow range and line of sight, spread for stale sightings), routes that weigh threat.
 - **Shared knowledge** (`knowledge/village.ts`, `viz.ts`, `knowledge.css`): adventuring parties and a guild board. Guild, party and adventurer blackboards; a versioned append-only guild log with a watermark per party; parties post and catch up only at the guild hall or a waystone. A troll wanders off, the clerk moves its notice, and party B keeps walking to the old bridge until its next waystone. Merge by when it was true; optional history cap with snapshots. `simple` (two parties) and `full` (four parties, two more waystones) presets; a toggle lets B read anywhere for comparison.
 - **Party roles** (`party/`): five heroes (tank, cleric, knight, crossbow knight, battle-mage) against an orc warchief with goblin-archer adds: a threat table with 110/130% switching and taunts, triage healing scored by need × danger × role × efficiency, damage dealers who hold under the pull threshold and kill adds first, and cleave/slam telegraphs dodged with context steering over a danger map. Each part has a naive switch; 20-fight batch (`npm run party-batch`). The widget runs the 10 Hz sim on a smooth clock.
 - **Sprites and missiles** (`sprites/`): Kenney's *Tiny Dungeon* (CC0) unit sprites as an inline atlas (`units.png` → `atlas.ts`; the orc and goblin archer are recoloured), and drawn crossbow bolts, arrows and arcane bolts. Used by the arena, party roles, shared knowledge and influence widgets; `scene.ts` adds party members in marching order (a shield knight leads), a speckled ground and stone walls for the steering course and formations, and `drawAgent` puts a sprite on an agent's real footprint for the Reynolds playground and local avoidance. The tactics lab draws its knight and goblin archers with them too. Purely visual: nothing feeds back into a simulation, so no lesson number depends on it.
+
+### Physics (`src/physics/`, lessons in `pages/physics/`)
+- **Teaching engine** (`math.ts`, `collide.ts`, `world.ts`): 2D rigid bodies behind generational handles (`BodyHandle`, index + generation like Jolt's `BodyID`), circles and convex polygons, brute or sort-and-sweep broadphase with category/mask filtering, SAT manifolds with reference-face clipping and feature ids, sequential impulses with warm starting in two flavours (**Baumgarte**, and Box2D v3's **soft step**: substeps, soft contacts, relax, restitution at the end), revolute/distance/mouse joints, union-find islands and sleep, continuous modes none/speculative/sweep (circle bullets against static), ray/circle casts and overlaps. **No `Math.sin`/`cos`/`atan2`/`hypot` in the simulation**: rotations are integrated and renormalised with `sqrt`, and `makeRot` uses its own polynomial, so scenes replay bit for bit in every browser. Display code may use trig.
+- `scenes.ts` (pyramid, tower, bin, tunnel, bridge, joints, crowd), `view.ts` (`PhysicsView`: fixed-step loop, interpolation, mouse-joint dragging, overlays), `widgets.ts`, `narrowViz.ts` (SAT, GJK/EPA on the Minkowski difference, manifolds), `character.ts` (`KinematicMover`: collide and slide, step-up with a reach, slope limit, ground snap, capped pushing; `DynamicCharacter`), `charViz.ts` (queries and the character level).
+- **Real engines** (`engines.ts`, `render3d.ts`, `enginesViz.ts`): `JoltEngine` over JoltPhysics.js (`jolt-physics/wasm`, single-threaded; the wasm comes in through Vite's `?url`; body ids must be copied because the binding returns them in a shared temporary) `Box3DEngine` over `public/box3d.wasm` and `BulletEngine` over `public/bullet.wasm`. The fast-ball scene starts the ball at z = 10.37 so that no discrete step lands it inside the plate (otherwise tunnelling results depend on float rounding). Scenes are plain data (`SCENES`). A painter-sorted canvas renderer draws them.
+- `trouble.ts` / `troubleViz.ts`: four common mistakes (heavy on light, heavy on a chain, spawning inside, moving a platform by position) with a fix toggle each; each scene records its worst symptom.
+- `asyncTick.ts`: game-thread vs async fixed-tick input latency model (Chaos lesson). `ecsBridge.ts` / `ecsViz.ts`: real flecs (`FlecsWorld`) with observers creating/destroying engine bodies from `RigidBody`/`BodyHandle`, PreUpdate/OnUpdate/PostUpdate systems, contact events emitted as flecs events after `progress`.
+- Claims: `physics` (solver table, broadphase counts, tunnelling, bridge, characters), `engines` (loads all three real engines in Node and checks the pyramid, tower and fast-ball statements), `chaos` (latency table), `ecs` (the bridge's lifecycle facts), `trouble` (each mistake and its fix in `trouble.ts`).
+
+#### Building box3d.wasm (`box3d-wasm/`)
+- `./build.sh /path/to/box3d` with `pip install ziglang`: Box3D's `src/*.c` plus `box3d_web.c` compiled with `zig cc -target wasm32-wasi -O2 -DBOX3D_DISABLE_SIMD` as a reactor. Currently built from Box3D commit f36d061 (20 Oct 2026); the lesson's tip says SIMD is off. Copy `box3d.wasm` to `site/public/`.
+- `box3d_web.c` exports `bw_create` (gravity, sleep, contact hertz, continuous), `bw_add_box`/`bw_add_sphere`, `bw_step(dt, substeps)`, `bw_transforms` (8 floats per body), `bw_counters`, impulses and a scratch buffer. Only four WASI imports, all stubbed in `engines.ts`.
+
+#### Building bullet.wasm (`bullet-wasm/`)
+- `./build.sh /path/to/bullet3`: Bullet's unity sources (`btLinearMathAll.cpp`, `btBulletCollisionAll.cpp`, `btBulletDynamicsAll.cpp`) plus `bullet_web.cpp`, with `zig c++ -target wasm32-wasi -O2 -fno-exceptions -fno-rtti`. Currently built from bullet3 master d3afe76 (9 Oct 2026; VERSION 3.27, last tagged release 3.25). Copy `bullet.wasm` to `site/public/`.
+- `bullet_web.cpp` mirrors `box3d_web.c`: `bt_create` (gravity, solver iterations, split impulse), `bt_add_box`/`bt_add_sphere` (spheres can get CCD: motion threshold and swept-sphere radius), `bt_step(dt, internal steps)`, `bt_transforms`, `bt_counters`.
 
 ### Labs
 - **Pathing lab** (`lab/`, page `pages/pathing-lab.astro`): mounted from `lab/ui/app.ts`; keeps settings in `localStorage` (`pathfinding-lab/v1`).
@@ -165,7 +186,8 @@ Gotcha found twice: a Dijkstra that skips stale heap entries (`if (c > cost[i]) 
 ## Known gaps and ideas
 - Labs: big maps and heavy planners block the main thread (move planning to a worker or show progress); no pinch-zoom on touch; in the pathing lab a vertical paint stroke on a phone has to start sideways; tooltips explaining "Cost" vs "Length".
 - A cover lab: discovering cover from navmesh boundary edges, storing it in a spatial index, scoring it and keeping it valid.
-- flecs: more short lessons on non-obvious behaviour (verify on master first; add a variant when a PR changes behaviour); sandbox systems that modify values; save/share sandbox worlds via URL; relationships that aren't always Exclusive.
+- Physics: a ragdoll or vehicle lesson on Jolt; Box3D with WebAssembly SIMD (needs Emscripten's SSE headers or a port to `wasm_simd128.h`); move-event based transform sync in the Box3D adapter.
+- flecs: more short lessons on non-obvious behaviour (verify on master first; add a variant when a PR changes behaviour); sandbox systems that modify values; relationships that aren't always Exclusive.
 - Networking: rollback and client prediction.
 
 ## Contributing
@@ -182,5 +204,8 @@ Nomicon's own code and lesson text are released under the [MIT licence](LICENSE)
 
 - [flecs](https://github.com/SanderMertens/flecs) by Sander Mertens (MIT), compiled to WebAssembly and instrumented by `flecs-wasm/`.
 - [Recast & Detour](https://github.com/recastnavigation/recastnavigation) (zlib), via [recast-navigation-js](https://github.com/isaac-mason/recast-navigation-js) (MIT).
+- [Jolt Physics](https://github.com/jrouwe/JoltPhysics) by Jorrit Rouwe (MIT), via [JoltPhysics.js](https://github.com/jrouwe/JoltPhysics.js) (MIT).
+- [Box3D](https://github.com/erincatto/box3d) by Erin Catto (MIT), compiled to WebAssembly by `box3d-wasm/`.
+- [Bullet](https://github.com/bulletphysics/bullet3) by Erwin Coumans and contributors (zlib), compiled to WebAssembly by `bullet-wasm/`.
 - [Tiny Dungeon](https://kenney.nl/assets/tiny-dungeon) sprites by Kenney (CC0); see `site/src/sprites/LICENSE-kenney-tiny-dungeon.txt`.
-- [Astro](https://astro.build) and `@astrojs/mdx` (MIT), TypeScript (Apache 2.0), and the Roboto, Roboto Mono and Cinzel fonts from Google Fonts (Apache 2.0 and SIL Open Font Licence).
+- [Astro](https://astro.build) and `@astrojs/mdx` (MIT), TypeScript (Apache 2.0), and the Roboto, Roboto Mono and Cinzel fonts (Apache 2.0 and SIL Open Font Licence), served from the site via the [Fontsource](https://fontsource.org) packages.

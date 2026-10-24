@@ -1,4 +1,5 @@
 import { FlecsWorld, type TableInfo, type TraceEvent } from '../runtime';
+import { pack, unpack, stateInUrl, clearUrlState } from '../../lab/ui/share';
 
 /**
  * flecs sandbox: a live world you change directly. Define components (with
@@ -37,6 +38,26 @@ interface LogLine {
 interface LogEntry {
   code: string;
   lines: LogLine[];
+}
+
+/**
+ * One thing the reader did, recorded so a world can be shared as a link: the starting preset
+ * plus this list, replayed in order, rebuilds the same tables, rows, observer counts and all.
+ */
+type Op =
+  | ['c', CompDef]
+  | ['e', string]
+  | ['a', string, string, string?]
+  | ['s', string, string, unknown]
+  | ['r', string, string]
+  | ['d', string]
+  | ['o', string, string, string[]]
+  | ['y', string, string]
+  | ['f'];
+interface Shared {
+  v: 1;
+  preset: string;
+  ops: Op[];
 }
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, unknown> = {}, ...kids: Array<Node | string | null | undefined | false>): HTMLElementTagNameMap[K] {
@@ -151,6 +172,10 @@ export class Sandbox {
   private flashRows = new Map<number, string>();
   private silent = false;
   private counter = 1;
+  /** What the reader has done since the preset loaded (see Op). */
+  private history: Op[] = [];
+  private presetId = 'basics';
+  private shareNote!: El;
   private root: El;
   private presetSel!: HTMLSelectElement;
   private els!: Record<'comps' | 'ents' | 'insp' | 'obs' | 'sys' | 'tables' | 'sparse' | 'stats' | 'log', El>;
@@ -177,7 +202,83 @@ export class Sandbox {
       /* no URL (preview) */
     }
     this.presetSel.value = start;
+    // A shared link (#s=...) carries a preset and everything done after it.
+    const packed = stateInUrl();
+    const shared = packed ? await unpack<Shared>(packed) : null;
+    if (shared && shared.v === 1 && shared.preset in PRESETS && Array.isArray(shared.ops)) {
+      this.presetSel.value = shared.preset;
+      this.loadPreset(shared.preset, shared.ops);
+      clearUrlState();
+      this.addLog('// opened a shared world', [{ text: `Rebuilt from the ${PRESETS[shared.preset].label} preset plus ${shared.ops.length} step${shared.ops.length === 1 ? '' : 's'}.`, cls: 'muted' }]);
+      return;
+    }
     this.loadPreset(start);
+  }
+
+  /** Remember a reader action for share links. Consecutive edits of one value collapse into one. */
+  private record(op: Op): void {
+    if (this.silent) return;
+    const last = this.history.at(-1);
+    if (op[0] === 's' && last?.[0] === 's' && last[1] === op[1] && last[2] === op[2]) this.history[this.history.length - 1] = op;
+    else this.history.push(op);
+  }
+
+  private replay(ops: Op[]): void {
+    this.quiet(() => {
+      for (const op of ops) {
+        switch (op[0]) {
+          case 'c':
+            this.defineComp(op[1], true);
+            break;
+          case 'e':
+            this.createEntity(op[1]);
+            break;
+          case 'a':
+            this.addComp(op[1], op[2], op[3] ?? undefined);
+            break;
+          case 's':
+            this.setComp(op[1], op[2], op[3]);
+            break;
+          case 'r':
+            this.removeComp(op[1], op[2]);
+            break;
+          case 'd':
+            this.deleteEntity(op[1]);
+            break;
+          case 'o':
+            this.addObserver(op[1], op[2], op[3]);
+            break;
+          case 'y':
+            this.addSystem(op[1], op[2]);
+            break;
+          case 'f':
+            this.runFrame();
+            break;
+        }
+      }
+    });
+    this.history = ops.slice();
+    // New entities carry on from the highest E<n> the shared world used.
+    for (const op of ops) {
+      const m = op[0] === 'e' ? /^E(\d+)$/.exec(op[1]) : null;
+      if (m) this.counter = Math.max(this.counter, Number(m[1]) + 1);
+    }
+  }
+
+  private async share(): Promise<void> {
+    const state: Shared = { v: 1, preset: this.presetId, ops: this.history };
+    const url = `${location.origin}${location.pathname}#s=${await pack(state)}`;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      copied = true;
+    } catch {
+      /* clipboard blocked: put it in the address bar instead */
+    }
+    if (!copied) history.replaceState(null, '', url);
+    this.shareNote.textContent = copied ? 'Link copied' : 'Link is in the address bar';
+    window.clearTimeout(Number(this.shareNote.dataset.t));
+    this.shareNote.dataset.t = String(window.setTimeout(() => (this.shareNote.textContent = ''), 2500));
   }
 
   // ---------------- World operations (all logged unless quiet) ----------------
@@ -192,8 +293,11 @@ export class Sandbox {
     }
   }
 
-  private loadPreset(id: string): void {
+  private loadPreset(id: string, ops: Op[] = []): void {
     const p = PRESETS[id];
+    this.presetId = id;
+    this.history = [];
+    this.counter = 1;
     this.w.reset();
     this.comps = [];
     this.entities = [];
@@ -205,6 +309,7 @@ export class Sandbox {
     this.selected = '';
     for (const c of p.components) this.defineComp(c, true);
     p.run(this);
+    if (ops.length) this.replay(ops);
     this.selected = this.entities.length ? this.w.name(this.entities[0]) : '';
     this.render(true);
   }
@@ -234,6 +339,7 @@ export class Sandbox {
     }
     this.comps.push(c);
     if (c.trait !== 'none') this.sparseIds.add(c.name);
+    if (!quiet) this.record(['c', c]);
     if (!quiet) {
       const cpp = `world.component<${c.name}>()${c.trait !== 'none' ? `.add(flecs::${c.trait})` : ''}${c.exclusive ? '.add(flecs::Exclusive)' : ''};`;
       this.addLog(cpp, [{ text: `Defined ${c.kind === 'tag' ? 'tag' : c.kind === 'rel' ? 'relationship' : 'component'} ${c.name}${c.trait !== 'none' ? ` (${c.trait})` : ''}`, cls: 'muted' }]);
@@ -243,6 +349,7 @@ export class Sandbox {
 
   createEntity(name?: string): string {
     const n = name ?? `E${this.counter++}`;
+    this.record(['e', n]);
     this.op(`world.entity("${n}");`, () => {
       const r = this.w.rest('PUT', `/entity/${n}`);
       if (r.status !== 200) throw new Error(JSON.stringify(r.body));
@@ -258,20 +365,24 @@ export class Sandbox {
 
   addComp(e: string, comp: string, target?: string): void {
     const id = this.idOf(comp, target);
+    this.record(target ? ['a', e, comp, target] : ['a', e, comp]);
     this.op(target ? `${lc(e)}.add<${comp}>(${lc(target)});` : `${lc(e)}.add<${comp}>();`, () => this.restOk('PUT', `/component/${path(e)}`, { component: id }));
   }
 
   setComp(e: string, comp: string, value: unknown): void {
+    this.record(['s', e, comp, value]);
     this.op(`${lc(e)}.set<${comp}>({${fmt(value)}});`, () => this.restOk('PUT', `/component/${path(e)}`, { component: comp, value: JSON.stringify(value) }));
   }
 
   removeComp(e: string, id: string): void {
+    this.record(['r', e, id]);
     const m = /^\((\w+),\s*(.+)\)$/.exec(id);
     this.op(m ? `${lc(e)}.remove<${m[1]}>(${lc(m[2])});` : `${lc(e)}.remove<${id}>();`, () => this.restOk('DELETE', `/component/${path(e)}`, { component: id }));
   }
 
   deleteEntity(e: string): void {
     const id = this.w.lookup(e);
+    this.record(['d', e]);
     this.op(`${lc(e)}.destruct();`, () => this.restOk('DELETE', `/entity/${path(e)}`));
     this.entities = this.entities.filter((x) => x !== id);
     if (this.selected === e) this.selected = '';
@@ -288,6 +399,7 @@ export class Sandbox {
     }
     def = { id, name, query, events, calls: 0 };
     this.observers.push(def);
+    this.record(['o', name, query, events]);
     if (!this.silent) this.addLog(`world.observer("${name}").with("${query}").event(${events.join(', ')})`, [{ text: `Observer ${name} listening`, cls: 'muted' }]);
     return true;
   }
@@ -304,11 +416,13 @@ export class Sandbox {
     }
     def = { id, name, query, calls: 0 };
     this.systems.push(def);
+    this.record(['y', name, query]);
     if (!this.silent) this.addLog(`world.system("${name}").with("${query}")`, [{ text: `System ${name} added (runs on "Run a frame")`, cls: 'muted' }]);
     return true;
   }
 
   runFrame(): void {
+    this.record(['f']);
     for (const s of this.systems) s.calls = 0;
     this.op('world.progress();', () => this.w.progress());
   }
@@ -481,6 +595,8 @@ export class Sandbox {
         h('button', { type: 'button', class: 'sbx-btn', onclick: () => this.loadPreset(presetSel.value) }, 'Reset'),
         h('button', { type: 'button', class: 'sbx-btn primary', onclick: () => this.runFrame() }, 'Run a frame'),
         h('label', { class: 'sbx-chk' }, hideEmpty, 'Hide empty tables'),
+        h('button', { type: 'button', class: 'sbx-btn', title: 'Copy a link that rebuilds this exact world', onclick: () => void this.share() }, 'Share'),
+        (this.shareNote = h('span', { class: 'sbx-muted sbx-note', role: 'status', 'aria-live': 'polite' })),
         this.els.stats,
       ),
       h(

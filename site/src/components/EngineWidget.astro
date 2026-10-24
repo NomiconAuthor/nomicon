@@ -1,7 +1,7 @@
 ---
 /** Mounts one of the engine lesson widgets (src/engine/). */
 interface Props {
-  kind: 'cache' | 'bench-layout' | 'bench-order' | 'bench-stride' | 'falseshare' | 'slotmap' | 'alloc' | 'loop' | 'floatorder' | 'rngstreams' | 'deadline' | 'spatial' | 'octree' | 'parfor' | 'taskgraph' | 'waiting' | 'pipeline' | 'profiler';
+  kind: 'cache' | 'bench-layout' | 'bench-order' | 'bench-stride' | 'falseshare' | 'slotmap' | 'alloc' | 'loop' | 'floatorder' | 'rngstreams' | 'deadline' | 'spatial' | 'octree' | 'parfor' | 'taskgraph' | 'waiting' | 'pipeline' | 'profiler' | 'hotreload';
 }
 const { kind } = Astro.props;
 ---
@@ -32,6 +32,7 @@ const { kind } = Astro.props;
       else if (k === 'waiting') new (await import('../engine/waiting')).WaitViz(this);
       else if (k === 'pipeline') new (await import('../engine/waiting')).PipelineViz(this);
       else if (k === 'profiler') new (await import('../engine/profiler')).ProfilerViz(this);
+      else if (k === 'hotreload') new (await import('../engine/hotreload')).HotReloadViz(this);
     }
   }
   if (!customElements.get('engine-widget')) customElements.define('engine-widget', EngineWidget);

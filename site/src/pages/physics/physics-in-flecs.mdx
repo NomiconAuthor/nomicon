@@ -1,0 +1,166 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Physics in flecs
+order: 12
+part: In practice
+summary: 'Wiring a physics engine into an ECS through handles: who owns what, observers that create and destroy bodies, systems on either side of the step, copying back only what moved, contact events as flecs events, a fixed step, and the mistakes that make physics and ECS fight. Running on real flecs, with the teaching engine standing in for Jolt or Box3D.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A physics engine is a database of its own. It stores bodies in its own layout (Box3D in solver sets, Jolt in its body manager), it decides when they sleep, and it hands out ids. An ECS is also a database, with its own layout. Integrating the two is mostly a question of **who owns which data**, and of moving the right data across at the right moment.
+
+The widget below runs real flecs (the same master build as the [flecs lessons](/flecs/)) with the teaching engine from the [concept lessons](/physics/the-step/) as the physics engine. The code in this lesson is the C++ version of what it does.
+
+<PhysicsWidget kind="ecs" />
+
+## Who owns what
+
+- **Gameplay owns the description.** A `RigidBody` component says what the body should be: its shape, whether it's dynamic. Gameplay code sets it, changes it, removes it.
+- **The engine owns the simulation state.** Velocities, contacts, sleep state and the body itself live in the engine, and stay there.
+- **The integration owns the link.** A `BodyHandle` component holds the engine's id for the body. It's an id, never a pointer: Jolt's `BodyID` and Box3D's `b3BodyId` are both [generational handles](/engine/handles-and-allocators/), so a stale one is detected instead of dereferenced.
+- **Position and rotation are shared**, and the direction matters. For dynamic bodies the engine is the authority and the integration copies its results into `Position` and `Rotation` after every step. Gameplay that wants to move a dynamic body asks the engine (an impulse, a velocity) rather than writing `Position`, which the next copy would overwrite.
+
+```cpp
+struct RigidBody { float half_w, half_h, radius; bool dynamic; };   // gameplay's description
+struct BodyHandle { uint32_t id; };                                  // the engine's id, never a pointer
+struct Impulse { float x, y; };                                      // a request for the engine
+struct PhysicsWorld { };                                             // tag for the one entity the step system matches
+```
+
+## Observers create and destroy bodies
+
+Bodies follow components, so the natural place to create and destroy them is an observer:
+
+```cpp
+// Gameplay set (or changed) RigidBody: create the body, or replace it.
+world.observer<const RigidBody>("CreateBody")
+    .event(flecs::OnSet)
+    .each([&](flecs::entity e, const RigidBody& rb) {
+        if (const BodyHandle* old = e.try_get<BodyHandle>()) physics.destroy_body(old->id);
+        const Position& p = e.get<Position>();
+        e.set<BodyHandle>({ physics.create_body(rb, p) });
+    });
+
+// The handle is going away (entity deleted, or RigidBody removed): destroy the body.
+world.observer<const BodyHandle>("DestroyBody")
+    .event(flecs::OnRemove)
+    .each([&](const BodyHandle& h) { physics.destroy_body(h.id); });
+
+// No description, no body.
+world.observer<const RigidBody>("DropHandle")
+    .event(flecs::OnRemove)
+    .each([](flecs::entity e, const RigidBody&) { e.remove<BodyHandle>(); });
+```
+
+Try each one in the widget, and watch **What ran**:
+
+- **Spawn a crate** sets `Position`, `Rotation` and then `RigidBody` on a new entity. `CreateBody` runs and sets `BodyHandle`.
+- **Change RigidBody** turns a ball into a crate or back. `CreateBody` runs again, destroys the old body and creates a new one. The new handle usually has the same slot and a **higher generation**: the engine reused the slot, and anything still holding the old handle would now be told it's stale.
+- **Remove RigidBody** runs `DropHandle`, which removes `BodyHandle`, which runs `DestroyBody`. The entity survives, without a body.
+- **Delete entity** runs the `OnRemove` observers for every component it had, so the body is destroyed with it. Nothing else has to remember to clean up.
+
+Observers that change other components (`DropHandle` removing `BodyHandle`) are fine inside a frame: if the change happens while systems are running, flecs defers it like any other command and the next observer runs at the sync point.
+
+<Tip title="Create bodies in batches when loading">
+An observer creates one body at a time, which is right during play. When a level loads thousands of bodies at once, go through the engine's batch path instead (Jolt's `AddBodiesPrepare` and `AddBodiesFinalize` build the broadphase tree properly; adding bodies one by one leaves it inefficient), and set the handles afterwards. Flecs observers can be disabled while you do it.
+</Tip>
+
+## Systems around the step
+
+Three systems, in three phases, so the order is part of the pipeline rather than a convention:
+
+```cpp
+// 1. Before the step: requests from gameplay go into the engine.
+world.system<const Impulse, const BodyHandle>("ApplyImpulses")
+    .kind(flecs::PreUpdate)
+    .each([&](flecs::entity e, const Impulse& i, const BodyHandle& h) {
+        physics.add_impulse(h.id, i.x, i.y);
+        e.remove<Impulse>();                       // a command: applied at the next sync point
+    });
+
+// 2. The step. One entity has PhysicsWorld, so this runs once a frame.
+world.system<PhysicsWorld>("PhysicsStep")
+    .kind(flecs::OnUpdate)
+    .each([&](flecs::iter& it, size_t, const PhysicsWorld&) { physics.step(it.delta_time()); });
+
+// 3. After the step: copy back what moved.
+world.system<Position, Rotation, const BodyHandle>("ReadTransforms")
+    .kind(flecs::PostUpdate)
+    .each([&](Position& p, Rotation& r, const BodyHandle& h) {
+        if (!physics.is_awake(h.id)) return;       // a sleeping body hasn't moved
+        physics.get_transform(h.id, p, r);
+    });
+```
+
+**Add Impulse** in the widget sets an `Impulse` component; the next frame `ApplyImpulses` hands it to the engine and removes it. That's the general pattern for gameplay talking to physics: a short-lived component as a request, consumed by a system before the step.
+
+Watch **transforms copied to flecs last frame** as the bodies settle: once everything is asleep it drops to zero, and the integration costs almost nothing. Real engines make this cheaper still by telling you what moved instead of making you ask each body:
+
+- **Box3D** returns **body move events** from `b3World_GetBodyEvents`: the body, its new transform, its user data (put the entity id there), and whether it fell asleep this step.
+- **Jolt** gives you the list of active bodies with `GetActiveBodies`.
+
+Either way, the post-step system walks a list of moved bodies and writes into the entities they belong to, instead of iterating every entity with a body.
+
+## Contacts as events
+
+The engine reports contacts its own way: Box3D as begin and end event arrays you read after the step (`b3World_GetContactEvents`); Jolt as `ContactListener` callbacks, which run on its worker threads *during* the step, so you buffer them and handle them afterwards. Either way, after the step the integration turns them into flecs events on the entities involved:
+
+```cpp
+struct ContactBegin { };
+for (const Contact& c : physics.contact_begins()) {
+    world.event<ContactBegin>().id<BodyHandle>().entity(entity_of(c.a)).emit();
+    world.event<ContactBegin>().id<BodyHandle>().entity(entity_of(c.b)).emit();
+}
+
+world.observer<const BodyHandle>("Footsteps")
+    .event<ContactBegin>()
+    .each([](flecs::entity e, const BodyHandle&) { play_impact_sound(e); });
+```
+
+Gameplay then reacts with ordinary observers, filtered by whatever components it cares about. From inside a system, use `.enqueue()` instead of `.emit()` so the event is delivered at the sync point.
+
+<Tip title="Don't store contacts as relationships">
+It's tempting to add a `(TouchingContact, other)` pair for every contact. Each distinct pair is a different archetype, so a pile of bodies touching different neighbours fragments into one table per body, and every contact starting or ending moves an entity between tables. The [fragmentation lesson](/flecs/fragmentation/) shows the cost. Events, a `DontFragment` component or relationship, or a contact list in a singleton keep the tables stable.
+</Tip>
+
+## A fixed step
+
+Physics wants a [fixed step](/physics/the-step/); a frame doesn't have one. The widget cheats by running one frame per step. A game gives the physics systems their own pipeline and runs it as many times as the accumulated time allows, with the rest of the frame's systems in the main pipeline:
+
+```cpp
+// A plain tag, not a Phase, so the main pipeline doesn't pick these systems up.
+struct FixedStep { };
+flecs::entity fixed_pipeline = world.pipeline()
+    .with(flecs::System)
+    .with<FixedStep>()
+    .build();
+// Create the three physics systems with .kind<FixedStep>() instead of PreUpdate, OnUpdate and
+// PostUpdate. Within one pipeline they run in the order they were created.
+
+accumulator += frame_seconds;
+while (accumulator >= kStep) {
+    world.run_pipeline(fixed_pipeline, kStep);     // ApplyImpulses, PhysicsStep, ReadTransforms
+    emit_contact_events();
+    accumulator -= kStep;
+}
+world.progress(frame_seconds);                     // gameplay, interpolation, rendering
+```
+
+Rendering then interpolates between the last two physics transforms, which means keeping the previous one: a `PreviousTransform` component written just before `ReadTransforms` overwrites the current one.
+
+## What goes wrong
+
+- **Writing `Position` for a dynamic body.** The next `ReadTransforms` overwrites it. Teleports go through the engine, then the component.
+- **Pointers in components.** A `JPH::Body*` or a `b3Body*` in a component is wrong as soon as the engine moves or frees the body. Store the id.
+- **Touching the engine from multithreaded systems.** Jolt's locking `BodyInterface` makes that safe at a cost, and its `NoLock` interface makes it fast but your problem. Box3D's API isn't thread-safe during a step at all. Keep engine calls in single-threaded systems, or batch them into the sync systems.
+- **Handling contact callbacks immediately.** Jolt's listener runs on worker threads in the middle of the step. Buffer, then handle after the step.
+- **One table per body type.** Tags like `Dynamic` and `Static` are fine (a handful of archetypes). A tag per material, per layer and per state soon multiplies; keep rarely-queried state in the engine, not in the ECS type.
+
+## Takeaways
+
+- **Gameplay owns the description, the engine owns the simulation, a `BodyHandle` links them.**
+- **Observers** create and destroy bodies; deleting the entity cleans up.
+- **Systems before and after the step** push requests in and copy results out; copy only **what moved**.
+- **Contacts become flecs events**, delivered after the step.
+- Run physics in **its own fixed-step pipeline**, and interpolate for rendering.

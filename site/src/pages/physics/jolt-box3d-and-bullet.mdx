@@ -1,0 +1,136 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Jolt, Box3D and Bullet
+order: 9
+part: Choosing an engine
+summary: 'Three open-source 3D engines running side by side in your browser on the same scenes: the newest (Box3D), the one big games ship with now (Jolt) and the one a generation of engines and tools grew up on (Bullet). Where each comes from, handles, the step and threading, tall stacks, fast bodies, determinism, characters, and what each has that the others don''t.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The deep dive behind [choosing an engine](/physics/choosing-an-engine/): you don't need it to choose, but it's where the differences show. Everything in the concept lessons, done for real, in 3D, three times over. **Jolt**, **Box3D** and **Bullet** are the three open-source rigid-body engines most worth knowing: one young, one at the height of its use in games, one that shaped a decade of engines and tools. All three run below on the same scenes, compiled to WebAssembly.
+
+## Where they come from
+
+**Jolt** is Jorrit Rouwe's engine (MIT licence). Its README lists *Horizon Forbidden West* and *Death Stranding 2: On the Beach* among the games using it. It's mature (version 5.6 at the time of writing) and broad: vehicles, soft bodies, ragdolls, characters, double precision for large worlds. Godot made it the default 3D physics engine for new projects in 4.6.
+
+**Box3D** is Erin Catto's (MIT), announced on 30 June 2026 and tagged 0.1.0 days later, so it's young and its author calls it alpha. It grew out of a practical problem: at his studio, working on an Unreal Engine 5 game, they plugged in Dirk Gregorius's Rubikon-Lite (derived from Valve's Rubikon, the engine behind *Half-Life: Alyx*), and Catto then replaced most of it with code from Box2D v3. It's a C17 library with Box2D's API style and its "soft step" solver, and its announcement lists early users including Facepunch's s&box.
+
+**Bullet** is Erwin Coumans's (zlib licence), started in the mid-2000s while he worked at Sony and continued at AMD. For years it was *the* open-source 3D engine: it's behind physics plugins for Blender, Maya, Houdini and Cinema 4D, and Godot 3.0 made it its default 3D engine in 2017. Godot 4 then dropped it for its own engine. Its last tagged release is 3.25 (September 2022). The repository still sees occasional commits, but its README now points newcomers to **PyBullet**, its Python bindings for robotics and machine learning, which is where most of its use is today.
+
+<PhysicsWidget kind="engines" />
+
+All three step at 60 Hz with their default settings: Jolt with one collision step and 10 velocity iterations, Box3D with 4 substeps, Bullet with one step of 10 solver iterations. All three start the **Pyramid** (78 boxes) at rest and hold it. Jolt's is asleep after 0.50 s, Box3D's after 0.72 s and Bullet's after 2.03 s, because Bullet only puts a body to sleep after 2 seconds below its thresholds (0.8 m/s and 1 rad/s by default), where Jolt and Box3D wait half a second.
+
+## The tall stack
+
+Switch to **Tower of 20**: twenty cubes, every other one turned 45°. Box3D holds it with its defaults, and so does Bullet. Jolt, with its default 10 velocity steps, slowly lets it lean and topple; with 30 velocity steps it stands and is asleep after 0.50 s. Set Box3D to **1** substep and its tower falls too.
+
+That's the [solver lesson](/physics/solving-contacts/) in three real engines. All three are sequential-impulse solvers with warm starting, and they differ in how they get rid of overlap:
+
+- **Jolt** solves velocities with a fixed number of iterations, then runs 2 position iterations that correct overlap directly (scaled by a Baumgarte factor of 0.2).
+- **Bullet** uses **split impulse** by default: overlap is fixed with a separate "push" velocity that moves bodies apart in the position update and is then thrown away, so it never becomes real momentum. It's the same idea as a position pass, done inside the velocity solver.
+- **Box3D**'s soft step spends its effort on substeps, each of which also moves the bodies, with soft contacts and a relax pass.
+
+None of the defaults is wrong: a 20-high stack of unsupported cubes is rare in a game, and Jolt's defaults favour a lower cost per step. If you need tall stacks in Jolt, raise `mNumVelocitySteps`, or add collision steps.
+
+## Fast bodies
+
+Switch to **Fast ball**: a 30 cm steel ball at 600 m/s towards a 10 cm plate, starting where no step lands it inside the plate. Box3D stops it with its defaults, and loses it if you untick **Continuous collision**. Jolt and Bullet both lose it by default, and stop it with their continuous options ticked.
+
+That's the [sleeping and fast bodies lesson](/physics/sleeping-and-fast-bodies/) again, as three different defaults:
+
+- **Box3D** sweeps any dynamic body that moves far enough in a step to risk tunnelling (more than half its size, by default) against static geometry, unless you turn continuous collision off for the whole world. Marking a body as a *bullet* also sweeps it against moving bodies.
+- **Jolt** sets a **motion quality** per body: `Discrete` by default, or `LinearCast`, which sweeps the body's shape along its motion and moves it to the time of impact.
+- **Bullet**'s continuous collision is opt-in per body: give it a **motion threshold** (sweep when it moves further than this in a step) and a **swept-sphere radius** (sweep a sphere this size, inside the shape). It's a conservative sphere sweep rather than an exact shape cast, which is why the radius has to fit inside the body.
+
+Jolt's and Box3D's speculative contacts don't help here: both keep contacts a fixed couple of centimetres apart (for resting stability), which a ball moving metres per step jumps straight past. Without their continuous options, all three lose this ball even at 30 m/s, where it moves half a metre a step.
+
+## Handles
+
+Jolt and Box3D hand out ids, not pointers, exactly like the [generational handles](/engine/handles-and-allocators/) in the engine section. Bullet, older, hands out pointers:
+
+- A Jolt **`BodyID`** is 32 bits: a 23-bit index, an 8-bit sequence number that changes when a slot is reused, and one bit the broadphase uses internally.
+- A Box3D **`b3BodyId`** is a small struct: a 32-bit index (stored plus one, so a zeroed id is null), a 16-bit world index and a 16-bit generation. Every Box3D object has one, and using a stale one asserts in debug builds.
+- A Bullet body is a **`btRigidBody*`** you allocate yourself, along with its shape and motion state, and delete yourself after removing it from the world. A stale pointer is a crash, not a check.
+
+```cpp
+// Jolt: settings object, then the body interface.
+BodyCreationSettings settings(new BoxShape(Vec3(0.5f, 0.5f, 0.5f)), RVec3(0, 10, 0), Quat::sIdentity(),
+                              EMotionType::Dynamic, Layers::MOVING);
+BodyID id = physics_system.GetBodyInterface().CreateAndAddBody(settings, EActivation::Activate);
+
+// Box3D: a def struct for the body, another for the shape.
+b3BodyDef body_def = b3DefaultBodyDef();
+body_def.type = b3_dynamicBody;
+body_def.position = { 0, 10, 0 };
+b3BodyId body = b3CreateBody(world, &body_def);
+b3BoxHull box = b3MakeBoxHull(0.5f, 0.5f, 0.5f);
+b3ShapeDef shape_def = b3DefaultShapeDef();
+b3CreateHullShape(body, &shape_def, &box.base);
+
+// Bullet: you own the shape, the motion state and the body.
+btBoxShape* shape = new btBoxShape(btVector3(0.5f, 0.5f, 0.5f));
+btVector3 inertia;
+shape->calculateLocalInertia(1000.0f, inertia);
+btTransform start(btQuaternion::getIdentity(), btVector3(0, 10, 0));
+btRigidBody* rb = new btRigidBody(1000.0f, new btDefaultMotionState(start), shape, inertia);
+dynamics_world->addRigidBody(rb);
+```
+
+Jolt's `BodyInterface` comes in two flavours: the default one takes a lock (from an array of mutexes shared between bodies), and `GetBodyInterfaceNoLock()` doesn't, for code that knows nothing else is touching those bodies. The [flecs lesson](/physics/physics-in-flecs/) builds on ids like these, and on why pointers are the wrong thing to keep in a component.
+
+## The step and threads
+
+```cpp
+// Jolt: you supply a temp allocator and a job system.
+physics_system.Update(1.0f / 60.0f, 1 /* collision steps */, &temp_allocator, &job_system);
+
+// Box3D: the world was created with task callbacks (or none, for single-threaded).
+b3World_Step(world, 1.0f / 60.0f, 4 /* substeps */);
+
+// Bullet: pass the frame time; it runs as many fixed steps as fit (up to 10 here).
+dynamics_world->stepSimulation(frame_seconds, 10, 1.0f / 60.0f);
+```
+
+- **Jolt** builds each step as a graph of jobs and runs it on a `JobSystem` you provide: subclass it to use your engine's scheduler, or use the bundled `JobSystemThreadPool`. Collision detection, then one island per job in the velocity solver, with very large islands split into parallel batches.
+- **Box3D** asks for two callbacks in its world definition, `enqueueTask` and `finishTask`, and calls them to spread work over your workers; there's an optional built-in scheduler. Inside the solver it **colours the constraint graph** so that constraints in one colour share no bodies and can be solved in parallel and in SIMD batches.
+- **Bullet**'s `stepSimulation` has the [fixed-step loop](/physics/the-step/) built in: give it the frame's time, a maximum number of steps and the fixed step, and it accumulates, steps, and by default hands your motion states a transform a step behind, interpolated from each body's velocity. The core library is single-threaded; multithreaded solvers came later as optional extras.
+
+All three run single-threaded on this page.
+
+## Determinism and replay
+
+- **Jolt** is deterministic on one platform if you make the same API calls in the same order. Cross-platform determinism is a build option, `CROSS_PLATFORM_DETERMINISTIC`, off by default and about 8% slower. `SaveState` and `RestoreState` snapshot what the step changes, which is enough for rollback networking as long as the game handles bodies added or removed between snapshots.
+- **Box3D** lists cross-platform determinism as a feature, along with **recording and replay**: record every API call into a buffer, then play it back frame by frame or seek to a frame, and validate that a replay reproduces the recording. Box2D, which it shares code with, explicitly doesn't offer rollback determinism.
+- **Bullet** makes no cross-platform promise. It's repeatable on one machine for the same calls in the same order, which is what most tools and robotics uses needed.
+
+## Characters
+
+The [characters lesson](/physics/queries-and-characters/) covers this in detail. **Jolt** ships two finished controllers, `CharacterVirtual` (a mover that walks stairs and sticks to floors) and `Character` (a rigid body). **Box3D** ships a mover *toolkit*: a capsule cast, a plane collector and a plane solver, with stepping, jumping and everything else up to you. **Bullet** has `btKinematicCharacterController`, a kinematic capsule with a step height and a maximum slope; it's simple, and many projects that used Bullet wrote their own.
+
+## Side by side
+
+| | Jolt | Box3D | Bullet |
+|---|---|---|---|
+| **Language, licence** | C++, MIT | C17, MIT | C++, zlib |
+| **Maturity** | 5.6; shipping in large games | 0.1.0, alpha (June 2026) | 3.25 (2022); now mostly PyBullet |
+| **Handles** | 32-bit `BodyID` | `b3BodyId` struct | raw pointers |
+| **Solver** | sequential impulses: 10 velocity + 2 position iterations | soft step: 4 substeps with relax | sequential impulses: 10 iterations, split impulse |
+| **Fast bodies** | per body: `Discrete` or `LinearCast` | sweep against static for fast bodies; bullets against everything | per body: swept sphere above a motion threshold |
+| **Threading** | job graph on your `JobSystem` | task callbacks; graph colouring and SIMD | single-threaded core; optional parallel solvers |
+| **Determinism** | same platform; cross-platform as a build option; state save/restore | cross-platform; recording and replay | same machine |
+| **Characters** | `CharacterVirtual` and `Character` | mover toolkit | `btKinematicCharacterController` |
+| **Also** | vehicles, soft bodies, ragdolls, double precision | double-precision positions | soft bodies, Featherstone articulated bodies, vehicles, robotics through PyBullet |
+
+<Tip title="How these builds were made">
+Jolt here is the official JoltPhysics.js package (version 1.1.0), in its single-threaded WebAssembly flavour, which doesn't use WebAssembly SIMD: about 2 MB of WebAssembly. Box3D and Bullet are built for this site from their latest source with Zig's clang, single-threaded and without SIMD: about 0.5 MB and 0.4 MB. So the "per step" times under each view are a rough guide, measured in your browser, and not a benchmark.
+</Tip>
+
+## Takeaways
+
+- **Jolt**: mature, broad, shipping now, C++; tune iterations and collision steps for your content.
+- **Box3D**: new, compact C API, Box2D v3's soft-step solver, determinism and replay built in.
+- **Bullet**: the long-time open-source standard, with the fixed step built into its world; today mostly robotics, through PyBullet.
+- Jolt and Box3D hand out **generational ids**; Bullet hands out **pointers**.
+- Their **defaults differ** in ways that matter: stack stiffness, continuous collision, sleep timing, characters.

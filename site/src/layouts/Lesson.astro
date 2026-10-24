@@ -17,11 +17,12 @@ const { frontmatter } = Astro.props;
 const SECTIONS: Record<string, { name: string; note?: string }> = {
   flecs: { name: 'flecs lessons', note: `Running flecs master (commit ${FLECS_COMMIT}, ${FLECS_DATE}), compiled to WebAssembly.` },
   engine: { name: 'engine fundamentals', note: 'Measurements run in your browser, so absolute numbers vary; the ratios are the point.' },
+  physics: { name: 'physics', note: 'The concept lessons run a small 2D engine written for this site, deterministic and stepped in your browser; the engine lessons run real Jolt, Box3D and Bullet compiled to WebAssembly.' },
   ai: { name: 'game AI', note: 'Deciding, moving and reading the map. Every comparison runs on the same small, deterministic worlds, so the techniques can be compared fairly.' },
 };
 const sectionId = Astro.url.pathname.split('/').filter(Boolean)[0] ?? 'flecs';
 const section = SECTIONS[sectionId] ?? SECTIONS.flecs;
-const modules = import.meta.glob<{ frontmatter: Frontmatter; url: string }>(['../pages/flecs/*.mdx', '../pages/engine/*.mdx', '../pages/ai/*.mdx'], { eager: true });
+const modules = import.meta.glob<{ frontmatter: Frontmatter; url: string }>(['../pages/flecs/*.mdx', '../pages/engine/*.mdx', '../pages/ai/*.mdx', '../pages/physics/*.mdx'], { eager: true });
 const lessons = Object.values(modules)
   .filter((m) => m.url.startsWith(`/${sectionId}/`))
   .map((m) => ({ ...m.frontmatter, url: m.url }))

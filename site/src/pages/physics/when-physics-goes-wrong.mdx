@@ -1,0 +1,76 @@
+---
+layout: ../../layouts/Lesson.astro
+title: When physics goes wrong
+order: 11
+part: In practice
+summary: 'A symptom-first checklist. Crushed boxes, stretching chains, explosions on spawn and crates sliding off platforms, each live with its fix, then a table of the other usual suspects and where to look first.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+When a physics engine misbehaves it's rarely the engine. Most bugs come from a handful of mistakes, and they're the same in every engine because they follow from how every engine works: one contact at a time, one step at a time, trusting that bodies only move the way the solver moved them.
+
+Here are four of the commonest, each with its fix one tick away. Each runs for a few seconds; the line underneath keeps the worst it's seen.
+
+<PhysicsWidget kind="trouble" />
+
+## Things sink into each other or get crushed
+
+**Heavy on light** drops a block 2,000 times heavier than the box under it. Within six seconds the box is pushed 28.1 cm into the ground or the block, and it's only 50 cm tall. With the fix, the box is denser and the ratio is 10 to 1: it sinks 1.5 cm, which is what any ordinary stack does at first before it settles.
+
+The cause is the solver going round the contacts one at a time ([solving contacts](/physics/solving-contacts/)). A light body squeezed between something heavy and the ground can't pass on a large impulse in one pass, so most of the weight never reaches the ground, and with a limited number of passes the box loses. More substeps or iterations barely help here; changing the masses does.
+
+- **Keep mass ratios between touching or jointed bodies under about 10 to 1.** Nobody can tell that a crate is three times denser than a real crate, so cheat.
+- If something really must be huge, consider making it **kinematic** while it's resting on things that matter, or making the light things heavier only while they're under it.
+
+## Chains stretch or explode
+
+**Heavy on a chain** hangs a weight 250 times heavier than each link from ten links. The chain stretches by up to 1.23 m: over a quarter of its length. It's the same problem along a line of joints: each joint can only pass a link's worth of correction to the next one per pass.
+
+The fix is one extra constraint: a **rope**, a distance limit from the anchor straight to the weight, so the weight's pull goes to the anchor in one step instead of through ten joints. With it, the chain stays within 2 mm of its length. The links still swing and fold, because the rope only limits the maximum distance. Heavier links help too, and so does a chain of fewer, longer links. The [joints lesson](/physics/joints/) covers the rest.
+
+## Things explode when they appear
+
+**Spawned inside** creates three boxes inside a settled stack, as you would by spawning an item at a fixed point without looking. The engine finds deep overlaps and pushes the boxes apart, fast enough to throw them up to 7.6 m/s. With the fix (check for room first and spawn above whatever's in the way) the fastest box only reaches 2.5 m/s, from falling onto the stack.
+
+Most engines limit how fast they push overlapping bodies apart, which is why this is a scatter rather than an explosion. Without that limit (or with a solver that corrects overlap through velocity, as Baumgarte does), the same overlap can launch things across the level.
+
+- **Check before spawning**: an overlap query with the new body's shape, then move it or wait.
+- The same goes for **teleporting**: setting a body's position puts it wherever you said, inside a wall if that's where you said.
+
+## Things on moving platforms slide off
+
+**Moved by position** moves a platform by setting its position every step. The crate on top slides up to 2.03 m from the centre and falls off. As far as the engine can tell, the platform's velocity is zero, it just appears somewhere new each step. Friction depends on relative velocity, so it can't carry the crate along; the platform slides out from under it, and when it moves up it pops into the crate from below.
+
+The fix is to move it by **velocity**: work out the velocity that reaches the target in one step, and set that. Now the solver knows the platform is moving, friction carries the crate, and it drifts only about 0.2 m. Most engines have a call for exactly this ("move this kinematic body to this pose over the next step"), and it's the right way to move doors, lifts and anything animated that should push things.
+
+The same reasoning is why game code shouldn't set **positions of dynamic bodies** to move them: set velocities, apply forces or impulses, or use a joint (the mouse joint that drags bodies in these lessons is one).
+
+## The usual suspects
+
+| Symptom | Likely cause | First thing to try |
+|---|---|---|
+| Stacks jitter, lean or slowly topple | too few iterations or substeps | raise them ([solving contacts](/physics/solving-contacts/)) |
+| Things sink into each other or get crushed | mass ratios | keep under 10 to 1 (above) |
+| Chains, ropes and ragdolls stretch | heavy loads on light links | a rope limit, heavier links, fewer links |
+| Things explode when created or moved | starting overlapped | check for room; don't teleport into things |
+| Fast things pass through walls | tunnelling | continuous collision for those bodies ([fast bodies](/physics/sleeping-and-fast-bodies/)) |
+| Small things jitter, big things look floaty | the wrong scale | metres, with moving things between 10 cm and 10 m ([the step](/physics/the-step/)) |
+| Things never go to sleep | something wakes them every step (often game code setting a velocity or position) | only touch bodies when something changes |
+| Bounces never die down | restitution of 1 or more | keep it below 1 |
+| Things slide on gentle slopes or never stop rolling | no friction, or round shapes with nothing to slow them | friction above zero; rolling resistance or angular damping |
+| Things snag on the seams between floor pieces | "ghost" collisions with internal edges | one mesh instead of many pieces; the engine's internal edge option ([narrowphase](/physics/narrowphase/)) |
+| Behaviour changes with the frame rate | stepping with the frame's time | a fixed step ([the step](/physics/the-step/)) |
+| Different results each run | variable steps, call order, threads | [determinism](/engine/determinism/) |
+
+<Tip title="Turn on the debug draw first">
+Every engine can draw what it thinks is happening: shapes, contacts and their normals, bounding boxes, sleeping bodies, joint limits. Half of these bugs are obvious the moment you see a contact normal pointing the wrong way, or a collision shape that isn't where the mesh is. Many engines also record frames for playback in a separate debugger tool, which turns "it exploded once" into something you can step through.
+</Tip>
+
+## Takeaways
+
+- Most physics bugs are **mistakes in how the engine is fed**, not in the engine.
+- **Mass ratios** over about 10 to 1 crush stacks and stretch chains: cheat the masses, or add a **rope**.
+- **Overlaps** become explosions: check for room before spawning or teleporting.
+- **Move with velocities**, not positions, so the solver knows what's moving.
+- When in doubt, **debug draw**.

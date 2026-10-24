@@ -1,4 +1,14 @@
 ---
+// Fonts are served from the site itself (no third-party requests). Each file covers a unicode
+// range, so browsers only download the subsets a page actually uses.
+import '@fontsource/roboto/400.css';
+import '@fontsource/roboto/500.css';
+import '@fontsource/roboto/700.css';
+import '@fontsource/roboto-mono/400.css';
+import '@fontsource/roboto-mono/500.css';
+import '@fontsource/cinzel/500.css';
+import '@fontsource/cinzel/600.css';
+import '@fontsource/cinzel/700.css';
 import '../styles/site.css';
 import '../styles/themes/nomicon.css';
 import '../styles/themes/vs.css';
@@ -10,14 +20,15 @@ interface Props {
   title: string;
   description?: string;
   /** Which navbar entry is current. */
-  section?: 'engine' | 'flecs' | 'ai' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'home';
+  section?: 'engine' | 'flecs' | 'ai' | 'physics' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'home';
 }
-const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
+const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, physics, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
 const fullTitle = section === 'home' ? title : `${title} · nomicon`;
 const nav = [
   { id: 'engine', label: 'engine', href: '/engine/' },
   { id: 'flecs', label: 'flecs', href: '/flecs/' },
   { id: 'ai', label: 'ai', href: '/ai/' },
+  { id: 'physics', label: 'physics', href: '/physics/' },
   { id: 'labs', label: 'labs', href: '/labs/' },
 ];
 // Both labs live under the one "labs" tab.
@@ -55,12 +66,6 @@ const pageUrl = new URL(Astro.url.pathname, site).href;
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#120f1b" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Cinzel:wght@500;600;700&display=swap"
-    />
     <!-- Which themes are on (editable on the server), then pick one before first paint. -->
     <script is:inline src={`/themes.js?v=${BUILD_ID}`}></script>
     <script is:inline define:vars={{ themes }}>

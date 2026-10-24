@@ -1,0 +1,84 @@
+---
+layout: ../../layouts/Lesson.astro
+title: What a physics step does
+order: 1
+part: Concepts
+summary: 'The shape of every rigid-body engine: bodies and shapes, the six phases of a step, why games step physics at a fixed rate and draw between steps, substeps, and the units the tolerances assume.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A rigid-body physics engine is a function. It takes every body's position, rotation and velocity at time *t*, and returns them at *t* + *dt*. Everything else (shapes, contacts, joints, sleeping) exists to make that function fast, stable and believable. Jolt, Box3D, PhysX, Havok and Chaos differ in a thousand details and agree on this shape.
+
+These lessons build the ideas up on a small 2D engine written for this site. It works like the real ones (its solver follows Box2D v3's closely), it runs in your browser, and you can pause it between any two steps. Once the ideas are in place, [choosing an engine](/physics/choosing-an-engine/) turns them into a decision, and [when physics goes wrong](/physics/when-physics-goes-wrong/) into fixes.
+
+## Bodies and shapes
+
+The engine stores two kinds of thing:
+
+- **Shapes** are geometry: a circle, a box, a convex polygon (in 3D: spheres, capsules, boxes, convex hulls, triangle meshes, height fields). A shape knows its outline and nothing about motion.
+- **Bodies** carry motion: a position and rotation, a linear and angular velocity, a mass and a rotational inertia. A body has one or more shapes attached, and its mass comes from their area (or volume) times a density.
+
+Bodies come in three kinds:
+
+- **Static** bodies never move: the ground, walls, level geometry. They have infinite mass, and the engine never integrates or solves them.
+- **Dynamic** bodies are simulated: gravity pulls them, contacts push them.
+- **Kinematic** bodies move because the game moves them, by setting a velocity. They push dynamic bodies around but nothing pushes them back: a moving platform, a door, an animated lift.
+
+The solver works with **inverse** mass and inertia almost everywhere. Static and kinematic bodies have an inverse mass of zero, which makes them immovable in every equation without a special case.
+
+## The six phases
+
+Every step runs the same pipeline. Play the bin, then pause and **Step** one physics step at a time, and watch the counts underneath change:
+
+<PhysicsWidget kind="step" />
+
+1. **Broadphase.** Find which pairs of bodies might be touching, using cheap bounding boxes. Out of thousands of possible pairs, only a few dozen survive. ([Broadphase and filtering](/physics/broadphase/).)
+2. **Narrowphase.** For each candidate pair, run the exact shape-against-shape test and produce a **contact manifold**: a normal and one or two contact points (up to four in 3D). ([Narrowphase](/physics/narrowphase/).)
+3. **Integrate velocities.** Add gravity and any forces to each awake body's velocity. Positions don't move yet.
+4. **Solve.** Adjust velocities so that contacts stop approaching and joints stay together, while respecting friction. This is where most of the time and all of the subtlety go. ([Solving contacts](/physics/solving-contacts/).)
+5. **Integrate positions.** Move and rotate each body by its corrected velocity.
+6. **Islands and sleep.** Group bodies that touch into islands, and put islands that have stopped moving to sleep so they cost nothing until something disturbs them. ([Sleeping and fast bodies](/physics/sleeping-and-fast-bodies/).)
+
+With substeps (below), steps 3 to 5 repeat several times inside one step, reusing the contacts from steps 1 and 2.
+
+Turn on **Contacts** to see the manifolds the narrowphase found, and **Bounding boxes** for what the broadphase worked with. Green contact points started from last step's impulses (warm starting, also in the solver lesson), red ones are new this step, and grey ones are speculative: close, but not touching yet.
+
+## A fixed rate, drawn between steps
+
+Physics runs at a **fixed** rate, usually 60 Hz, whatever the frame rate does. A solver tuned for one step size behaves differently at another: stacks that stand at 1/60 s wobble at 1/20 s, and a variable step means a replay or a networked peer can't reproduce the same result. The [game loops lesson](/engine/game-loops/) covers the loop itself: accumulate real time, run as many fixed steps as fit, carry the remainder.
+
+Set the physics rate to **15 Hz** and untick **Interpolate rendering**: the shapes jump. Each frame shows the latest step, and at 15 Hz most frames have no new step to show. With interpolation on, the renderer draws each body between its last two states, `alpha` of the way across, where `alpha` is the leftover time divided by the step. It costs one stored transform per body and up to one physics step of latency, and engine-side options such as Unity's Rigidbody interpolation do the same thing.
+
+**Hitch** freezes one frame for 0.2 s. The loop then owes 12 steps at 60 Hz; this view runs at most 8 in one frame and drops the rest, rather than falling further behind each frame trying to catch up (the "spiral of death").
+
+```cpp
+// Game loop side: fixed steps, interpolated drawing.
+accumulator += std::min(frame_seconds, 0.25f);
+int steps = 0;
+while (accumulator >= kStep && steps < kMaxStepsPerFrame) {
+    save_previous_transforms();          // for interpolation
+    physics.step(kStep);
+    accumulator -= kStep;
+    ++steps;
+}
+if (steps == kMaxStepsPerFrame) accumulator = 0;   // drop time rather than spiral
+float alpha = float(accumulator / kStep);
+for (auto& r : renderables) r.draw_transform = lerp(r.previous, r.current, alpha);
+```
+
+## Steps and substeps
+
+A step can be split into **substeps**: smaller time slices that each integrate and solve again, reusing the step's contacts. It's the most effective way to make a stack stiffer, and modern solvers lean on it: most engines take a substep or iteration count alongside the time step. The engine on this page uses 4 substeps by default; the [solver lesson](/physics/solving-contacts/) shows what happens with one.
+
+<Tip title="Units are part of the tuning">
+Engines assume metres, kilograms and seconds, and their tolerances assume everyday sizes: Box2D's docs suggest moving objects between about 0.1 and 10 metres, and Jolt's contact tolerances are 2 cm by default. Model a 2 cm coin or a 500 m spaceship at true scale and those constants are suddenly wrong. Pick units so that the things you simulate are roughly human-sized, or retune the constants.
+</Tip>
+
+## Takeaways
+
+- An engine maps **bodies at t to bodies at t + dt**; shapes, contacts and joints serve that.
+- **Static, kinematic, dynamic**: only dynamic bodies are simulated; inverse mass zero makes the others immovable.
+- Every step is **broadphase, narrowphase, then integrate velocities, solve and integrate positions** (per substep), **then islands and sleep**.
+- Step at a **fixed rate**, cap the catch-up, and **interpolate** for drawing.
+- **Substeps** make stacks stiffer.

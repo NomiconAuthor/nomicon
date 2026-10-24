@@ -1,0 +1,104 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Chaos and PhysX
+order: 10
+part: Choosing an engine
+summary: 'The engines inside the big two game engines. Unreal''s Chaos: why Epic built it, destruction and fields, the async physics thread and what it costs in input latency, networked physics, a position-based solver. NVIDIA''s PhysX: still Unity''s physics, open source down to its GPU kernels, two solvers, a kinematic character controller. And a word on Havok.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The second deep dive behind [choosing an engine](/physics/choosing-an-engine/). Most game programmers don't pick a physics engine: it comes with the game engine. In Unreal that's **Chaos**; in Unity's built-in physics it's **PhysX**. Both are full-featured, both are far bigger than Jolt or Box3D, and both differ from the concept lessons in ways worth knowing before you fight them.
+
+## Chaos
+
+### Why Epic built it
+
+Unreal Engine 4 used NVIDIA's PhysX. Epic showed its own engine, **Chaos**, at GDC 2019, shipped it as a beta preview in 4.23 (you had to build the engine from source to use it), and made it the default in **UE5**, replacing PhysX. Epic's stated reason was to own its physics and build what it needed on top: networked physics, large world coordinates, vehicles and destruction. In a 2022 tech post Epic was candid that Chaos's multithreading wasn't fully optimised yet and that its scene queries were faster than PhysX in some cases and slower in others.
+
+### What's in it
+
+Chaos is a family of systems rather than one solver: rigid bodies, **Destruction** (geometry collections fractured offline, held together by connection graphs, breaking under strain at runtime, with optional caching), **Fields** (volumes that apply forces, strain or state changes to whatever's inside them), vehicles, cloth, ragdolls and physical animation, hair, fluids, and **Chaos Flesh** for deformable bodies. The **Chaos Visual Debugger** records simulation frames for playback and inspection. That's similar in purpose to Box3D's recording, but it records state, whereas Box3D records the inputs and replays them deterministically.
+
+Destruction is the headline feature, and it's the clearest reason for Epic to own its engine: fracture, clustering and connection graphs have to be built into the solver's notion of a body, not bolted on.
+
+### The physics thread and its latency
+
+By default Unreal steps physics with the frame's variable delta time, optionally split into substeps. With **async physics** (`Tick Physics Async`), Chaos instead runs on its own thread at a **fixed** step (`AsyncFixedTimeStepSize`), and the game thread reads the physics results (interpolating between them for smooth motion). Epic's UE5 migration guide notes the catch: physics on its own thread adds latency between input and physics, unless gameplay code that drives physics runs in physics-thread callbacks.
+
+The timeline shows why. Click anywhere on it to press a key at that moment:
+
+<PhysicsWidget kind="async" />
+
+On the game thread, an input read at the start of a frame is simulated in that frame (if the frame has a physics step in it) and shown when the frame is presented. With an async fixed tick, the input waits for the game thread to read it, then for the next physics tick to start, then for that tick to finish, then for the next frame to draw the result. Interpolating between the last two physics results, which smooths motion when the tick is slower than the frame rate, puts the picture another tick behind. Averaged over 400 key presses at 90 fps:
+
+| Physics tick | On the game thread | Own thread | Own thread, interpolated |
+|---|---|---|---|
+| 30 Hz | 30 ms | 61 ms | 95 ms |
+| 60 Hz | 22 ms | 44 ms | 60 ms |
+
+This is a model rather than a measurement of Unreal (it ignores render latency, and real ticks overlap with frames differently), but the shape holds: a decoupled fixed tick buys determinism, stable networking and a game thread free of physics work, and pays for it in input latency. Unreal's character movement, below, runs on the game thread rather than in the physics tick.
+
+### Networked physics
+
+Chaos has three ways to replicate physics objects: the legacy default, **predictive interpolation**, and **resimulation**, which keeps a history of physics states for at least a round trip, rewinds when a server correction disagrees, and resimulates forward to the present. Physics prediction requires the async physics tick: rewinding and resimulating needs ticks with numbers that client and server agree on, which a variable frame-rate step can't give.
+
+### The solver
+
+The rigid-body solver is **position based**: its classes are named for PBD (position-based dynamics), joints are solved on positions with Gauss–Seidel iterations followed by a velocity pass and an optional projection pass, and soft constraints and drives use XPBD's compliance formulation. That's a different family from the impulse solvers in the concept lessons, though it attacks the same problems with iteration counts you can tune (position, velocity and projection iterations). Epic's documentation makes no general determinism claim for Chaos; it says only that async mode improves determinism for vehicles.
+
+### Characters
+
+Unreal's `CharacterMovementComponent` doesn't use rigid-body simulation: it's the kinematic mover from the [characters lesson](/physics/queries-and-characters/), with a maximum step height, a walkable floor angle, optional pushing of physics objects, and client-side prediction with server correction built in. Its successor, the **Mover** plugin, can roll back through either Unreal's network prediction system or Chaos networked physics, and is still marked experimental.
+
+## PhysX
+
+### Where it stands
+
+PhysX is the engine half the industry grew up on, and it's still very much alive:
+
+- **Unity**'s built-in 3D physics uses PhysX (version 4.1 since Unity 2019.3); Unity has described PhysX 5 as a possible future backend. Unity also dropped its first-party Havok integration from Unity 6.3.
+- In April 2025 NVIDIA open-sourced the last closed part, the **GPU simulation kernels** (over 500 CUDA kernels), with PhysX 5.6, under the BSD-3 licence. The public SDK has moved on to 5.9 and 5.10 since.
+- The same year, RTX 50-series GPUs dropped **32-bit CUDA**. That broke *GPU* PhysX in old 32-bit games, which fell back to the CPU and ran badly; 64-bit PhysX and CPU PhysX were unaffected. NVIDIA later restored it for a list of classic games in a December 2025 driver. That episode revived an older "PhysX is dead" impression, which had grown as GPU PhysX effects faded from games in the 2010s and Unreal moved to Chaos.
+
+### Two solvers
+
+PhysX offers **PGS** (projected Gauss–Seidel: the sequential impulse solver of the concept lessons) and **TGS** (temporal Gauss–Seidel), which substeps: the number of position iterations is the number of substeps, 4 by default, with 1 velocity iteration. NVIDIA's documentation calls TGS the generally recommended solver and says it will become the default; in the current source the default is still PGS. TGS is the family Box2D v3's soft step came from: Catto's survey of solvers called its winner "TGS Soft" before renaming it.
+
+### Queries, characters, GPU
+
+- **Scene queries** (raycast, sweep, overlap) run against separate pruners for static and dynamic shapes, with filter callbacks that classify each hit as *none*, *touch* (record and continue) or *block* (record and stop). That's how one ray reports every window it went through and the wall that stopped it.
+- **`PxController`** is a kinematic character controller: a capsule or box with collide and slide, a step offset, a slope limit (stored as a cosine), an arbitrary up direction, and no automatic pushing of dynamic bodies; game code applies forces from a hit callback.
+- **GPU rigid bodies** move the broadphase, contact generation and solver to CUDA for very large scenes, while continuous collision, triggers and scene queries stay on the CPU. It's mostly used for large simulations, such as NVIDIA's Omniverse and Isaac robotics tools, rather than in games.
+
+## Side by side
+
+How the six engines in these lessons line up on the questions that come up most:
+
+| | Jolt | Box3D | Bullet | PhysX | Chaos | Havok |
+|---|---|---|---|---|---|---|
+| **Licence** | MIT | MIT | zlib | BSD-3 | part of Unreal | commercial |
+| **Where you meet it** | Godot 4.6+, own engines | new projects | Godot 3, DCC tools, PyBullet | Unity, own engines | Unreal 5 | large studios, Unreal plugin |
+| **Rigid solver** | sequential impulses + position pass | soft step (substeps, relax) | sequential impulses + split impulse | PGS or TGS (substepping) | position based (PBD/XPBD) | not public |
+| **Fast bodies** | `LinearCast` per body | sweep fast bodies vs static; bullets | swept sphere per body | opt-in CCD, speculative CCD | CCD per body | yes |
+| **Fixed step** | you call it at a fixed rate | you call it at a fixed rate | built into `stepSimulation` | you call it at a fixed rate | optional async fixed tick | you call it at a fixed rate |
+| **Determinism** | same platform; cross-platform option | cross-platform; replay | same machine | same platform, with an "enhanced determinism" flag | not promised | cross-platform (advertised) |
+| **Character** | `CharacterVirtual`, `Character` | mover toolkit | `btKinematicCharacterController` | `PxController` | `CharacterMovementComponent`, Mover | character controller |
+| **Destruction, cloth** | soft bodies | no | soft bodies | PhysX 5 deformables; Blast and NvCloth as separate libraries | Destruction, Cloth, Flesh | Havok Cloth |
+
+"Not promised" means Epic's documentation makes no general claim, not that results are random.
+
+## A word on Havok
+
+**Havok** has been owned by Microsoft since 2015 and is licensed commercially; its terms aren't public. It remains the engine behind a long list of large games (its own site lists *Elden Ring*, *Helldivers 2*, *Starfield*, *DOOM: The Dark Ages* and *Zelda: Tears of the Kingdom*, among others), it advertises cross-platform determinism, and it's available as a drop-in replacement for Unreal's physics. A WebAssembly build, Havok for the Web, is free under the MIT licence for use in browsers.
+
+<Tip title="Whichever engine you inherit">
+The concepts carry over: fixed steps and interpolation, layers and filters, sleep, continuous collision for fast bodies, iteration and substep counts for stacks and joints, and a kinematic mover for the player. What changes is where the knobs are and what the defaults assume. Read the defaults first.
+</Tip>
+
+## Takeaways
+
+- **Chaos** replaced PhysX in UE5 so Epic could own destruction, networking and large worlds; its solver is **position based**.
+- **Async physics** runs at a fixed tick on its own thread: steadier and networkable, at a cost in **input latency**.
+- **PhysX** is still Unity's physics and fully open source, GPU kernels included; it offers **PGS and TGS** solvers.
+- **Havok** is commercial, widely shipped, and Microsoft's.

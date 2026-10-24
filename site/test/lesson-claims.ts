@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { World, TICK_HZ } from '../src/ai/world';
 import { UtilityBrain, TreeBrain, PlannerBrain, defaultBehaviours, plan, GOALS, GOAP_ACTIONS, type Brain, type FactState } from '../src/ai/brains';
 import { curve } from '../src/ai/curves';
+import { HtnBrain, htnPlan } from '../src/ai/htn';
 import { CourseSim, DEFAULT_SETTINGS, TIME_LIMIT, type CourseSettings } from '../src/ai/course';
 import { AvoidSim, type AvoidMethod, type AvoidScene } from '../src/ai/avoid';
 import { FormationSim } from '../src/ai/steer';
@@ -27,6 +28,17 @@ import { runGuild, readAt, staleSeconds, versionsOf, mmssOf, type VRun } from '.
 import { makeScene, threatMap, route, influence as spreadInfluence, INFLUENCE_RADIUS, WEAPON_RANGE, MOVE_SPEED, MEMORY } from '../src/influence/sim';
 import { BossFight, BOSS, BOSS_DEFAULTS, SETUPS, SPELLS, summarise, TANK_THREAT, HEAL_THREAT, TAUNT_COOLDOWN, HOLD_AT, RANGED_MARGIN, MELEE_MARGIN, RATE_FLOOR, ROLE_WEIGHT, LOW_MANA, CLERIC_DISTANCE, RANGED_DISTANCE, RANGED_SPREAD, STEER_DIRECTIONS, type Summary as BossSummary } from '../src/party/sim';
 import { runStages, DEFAULT_OPTIONS as RECAST_DEFAULTS } from '../src/recast/stages';
+import { ReloadSim, type Scenario, type Strategy } from '../src/engine/hotreload';
+import { pyramid as phPyramid, tower as phTower, crowd as phCrowd, bin as phBin, bridge as phBridge, tunnel as phTunnel } from '../src/physics/scenes';
+import { level as phLevel } from '../src/physics/charViz';
+import { KinematicMover, DynamicCharacter } from '../src/physics/character';
+import type { Settings as PhSettings } from '../src/physics/world';
+import { Box3DEngine, BulletEngine, JoltEngine, SCENES as ENGINE_SCENES, type Engine3D } from '../src/physics/engines';
+import { averageLatency } from '../src/physics/asyncTick';
+import { PhysicsBridge } from '../src/physics/ecsBridge';
+import { runTrouble } from '../src/physics/trouble';
+import { FlecsWorld } from '../src/flecs/runtime';
+import initJolt from 'jolt-physics/wasm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pages = join(here, '..', 'src', 'pages');
@@ -91,11 +103,13 @@ function ai(): void {
     bt: () => new TreeBrain(),
     btMemory: () => new TreeBrain(undefined, true),
     goap: () => new PlannerBrain(),
+    htn: () => new HtnBrain(),
+    htnPlain: () => new HtnBrain({ interrupt: false }),
   };
   const N = 40;
-  const r: Record<string, { alive: number; full: number; kills: number; sw: number; wasted: number; cost: number; max: number; replans: number; expanded: number }> = {};
+  const r: Record<string, { alive: number; full: number; kills: number; sw: number; wasted: number; cost: number; max: number; replans: number; expanded: number; interrupts: number; rootInterrupts: number }> = {};
   for (const [name, make] of Object.entries(brains)) {
-    let alive = 0, kills = 0, sw = 0, wasted = 0, cost = 0, dec = 0, full = 0, max = 0, replans = 0;
+    let alive = 0, kills = 0, sw = 0, wasted = 0, cost = 0, dec = 0, full = 0, max = 0, replans = 0, interrupts = 0, rootInterrupts = 0;
     for (let s = 1; s <= N; s++) {
       const w = new World(1000 + s);
       const b = make();
@@ -110,9 +124,13 @@ function ai(): void {
       sw += w.stats.switches / (w.seconds / 60);
       wasted += w.stats.wasted;
       if (!w.dead) full++;
-      if (b instanceof PlannerBrain) replans += b.replans;
+      if (b instanceof PlannerBrain || b instanceof HtnBrain) replans += b.replans;
+      if (b instanceof HtnBrain) {
+        interrupts += b.interrupts;
+        rootInterrupts += b.rootInterrupts;
+      }
     }
-    r[name] = { alive: alive / N, full, kills: kills / N, sw: sw / N, wasted: wasted / N, cost: cost / dec, max, replans: replans / N, expanded: replans ? cost / replans : 0 };
+    r[name] = { alive: alive / N, full, kills: kills / N, sw: sw / N, wasted: wasted / N, cost: cost / dec, max, replans: replans / N, expanded: replans ? cost / replans : 0, interrupts: interrupts / N, rootInterrupts: rootInterrupts / N };
   }
   const a = (k: string) => int(r[k].alive);
 
@@ -135,11 +153,21 @@ function ai(): void {
   claim(goap, `replans about ${int(g.replans)} times in a three-minute fight and expands ${d1(g.expanded)} states per plan`);
 
   const ca = 'ai/choosing-an-architecture.mdx';
-  claim(ca, `| Average survival | ${a('tuned')} s | ${a('bt')} s | ${a('goap')} s |`);
-  claim(ca, `| Lasted the full 3 minutes | ${r.tuned.full} / 40 | ${r.bt.full} / 40 | ${r.goap.full} / 40 |`);
-  claim(ca, `| Kills per fight | ${d1(r.tuned.kills)} | ${d1(r.bt.kills)} | ${d1(r.goap.kills)} |`);
-  claim(ca, `| Action switches / min | ${int(r.tuned.sw)} | ${int(r.bt.sw)} | ${int(r.goap.sw)} |`);
-  claim(ca, `| Work per tick | ${int(r.tuned.cost)} considerations | ${int(r.bt.cost)} nodes | ${d2(r.goap.cost)} states expanded |`);
+  claim(ca, `| Average survival | ${a('tuned')} s | ${a('bt')} s | ${a('goap')} s | ${a('htn')} s |`);
+  claim(ca, `| Lasted the full 3 minutes | ${r.tuned.full} / 40 | ${r.bt.full} / 40 | ${r.goap.full} / 40 | ${r.htn.full} / 40 |`);
+  claim(ca, `| Kills per fight | ${d1(r.tuned.kills)} | ${d1(r.bt.kills)} | ${d1(r.goap.kills)} | ${d1(r.htn.kills)} |`);
+  claim(ca, `| Action switches / min | ${int(r.tuned.sw)} | ${int(r.bt.sw)} | ${int(r.goap.sw)} | ${int(r.htn.sw)} |`);
+  claim(ca, `| Work per tick | ${int(r.tuned.cost)} considerations | ${int(r.bt.cost)} nodes | ${d2(r.goap.cost)} states expanded | ${d2(r.htn.cost)} decomposition steps |`);
+
+  const hl = 'ai/htn.mdx';
+  const row = (label: string, f: (k: string) => string) => claim(hl, `| ${label} | ${f('goap')} | ${f('htn')} | ${f('htnPlain')} |`);
+  row('Average survival', (k) => `${a(k)} s`);
+  row('Lasted the full 3 minutes', (k) => `${r[k].full} / 40`);
+  row('Kills per fight', (k) => d1(r[k].kills));
+  row('Plans made per fight', (k) => int(r[k].replans));
+  row('Work per tick', (k) => d2(r[k].cost));
+  claim(hl, `about ${int(r.htn.interrupts)} interruptions a fight, but only ${int(r.htn.rootInterrupts)} of them change what it's doing`);
+  fact(hl, r.htn.alive > r.htnPlain.alive, 'interruptions help survival');
 }
 
 function goap(): void {
@@ -169,6 +197,251 @@ function goap(): void {
   const hurt = { ...start, healthy: false };
   fact(L, names(plan(hurt, heal)).join(' → ') === 'FetchPotion → TakeCover → DrinkPotion', 'when hurt, Get healthy plans FetchPotion → TakeCover → DrinkPotion');
   fact(L, plan({ ...hurt, potionAvailable: false }, heal).plan === null, 'with no potion at the shrine there is no plan');
+}
+
+function htn(): void {
+  const L = 'ai/htn.mdx';
+  const start: FactState = { enemyDead: false, inRange: false, inCover: false, staffCharged: false, hasCrystals: true, hasPotion: false, potionAvailable: true, healthy: true };
+  const names = (p: { plan: { name: string }[] | null }) => (p.plan ?? []).map((a) => a.name).join(' → ');
+  const backs = (r: ReturnType<typeof htnPlan>) => r.events.filter((e) => e.k === 'backtrack').length;
+  const d = htnPlan(start, undefined, undefined, true);
+  const kill = GOALS.find((g) => g.name === 'Kill the enemy')!.want;
+  claim(L, `the plan is ${names(d)}, found in ${d.steps} decomposition steps with no backtracking`);
+  fact(L, names(d) === names(plan(start, kill)), 'the default HTN plan matches GOAP\'s plan for Kill the enemy');
+  const nc = htnPlan({ ...start, hasCrystals: false }, undefined, undefined, true);
+  claim(L, `The plan becomes ${names(nc)}, after ${backs(nc)} backtracks and ${nc.steps} steps`);
+  const hurt = htnPlan({ ...start, healthy: false });
+  claim(L, `*Patch up* applies: ${names(hurt)}.`);
+  const none = htnPlan({ ...start, healthy: false, potionAvailable: false }, undefined, undefined, true);
+  fact(L, none.mtr[0] === 1 && backs(none) > 0 && plan({ ...start, healthy: false, potionAvailable: false }, GOALS.find((g) => g.name === 'Get healthy')!.want).plan === null, 'hurt with no potion anywhere: HTN backtracks out of Patch up and fights, while GOAP has no plan for Get healthy');
+  const charged = htnPlan({ ...start, staffCharged: true });
+  claim(L, `and the first method of *Fight*, *Bolt now*, applies: ${names(charged)}.`);
+}
+
+function hotReload(): void {
+  const L = 'engine/hot-reloading.mdx';
+  const run = (sc: Scenario, st: Strategy, fix = false) => {
+    const s = new ReloadSim(sc, st, fix);
+    for (let i = 0; i < 360; i++) s.step(1 / 120);
+    const before = s.read(0, 'x');
+    s.reload();
+    const after = s.read(0, 'x');
+    for (let i = 0; i < 600; i++) s.step(1 / 120);
+    return { s, kept: Math.abs(before - after) < 1e-3 };
+  };
+  const all: Strategy[] = ['restart', 'module-state', 'swap', 'patch', 'reinstance'];
+  fact(L, all.every((st) => { const { s } = run('code', st); return !s.crashed && s.code.gravity > 0; }), 'every strategy gets the code-only change in');
+  fact(L, !run('code', 'restart').kept && !run('code', 'module-state').kept && ['swap', 'patch', 'reinstance'].every((st) => run('code', st as Strategy).kept), 'restart and state-in-DLL reset the orbs; the others keep them');
+  const radii = (s: ReloadSim) => [0, 1, 2, 3, 4, 5].map((i) => s.read(i, 'radius'));
+  for (const st of ['swap', 'patch'] as Strategy[]) {
+    const { s } = run('field', st);
+    fact(L, !s.crashed && radii(s).some((r) => r < 0 || r > 20), `adding a field with ${st}: no crash, garbage radii`);
+  }
+  const ri = run('field', 'reinstance');
+  fact(L, ri.kept && radii(ri.s).every((r) => r >= 5 && r <= 9), 'serialise and rebuild keeps the orbs and gives radius its default');
+  fact(L, run('pointers', 'swap').s.crashed.startsWith('Access violation'), 'state with pointers crashes after a swap');
+  fact(L, !run('pointers', 'swap', true).s.crashed, 're-pointing in reload() fixes the crash');
+  const p = run('pointers', 'patch').s;
+  fact(L, !p.crashed && p.orbName(0) === '"orbs"', 'patching keeps the old name string and does not crash');
+}
+
+function physics(): void {
+  // Solving contacts: each solver configuration on the pyramid and the tower, 10 s at 60 Hz.
+  const stack = (mk: () => { world: ReturnType<typeof phPyramid>['world'] }) => {
+    const w = mk().world;
+    const start = w.live().filter((b) => b.type === 'dynamic').map((b) => ({ ...b.xf.p }));
+    let asleep = -1;
+    for (let i = 0; i < 600; i++) {
+      w.step(1 / 60);
+      if (asleep < 0 && w.stats.sleeping === start.length) asleep = w.time;
+    }
+    const dyn = w.live().filter((b) => b.type === 'dynamic');
+    const drift = Math.max(...dyn.map((b, i) => Math.sqrt((b.xf.p.x - start[i].x) ** 2 + (b.xf.p.y - start[i].y) ** 2)));
+    return drift > 1 ? 'fell over' : `${d1(drift * 100)} cm, ${asleep < 0 ? 'never sleeps' : `asleep at ${d2(asleep)} s`}`;
+  };
+  const L = 'physics/solving-contacts.mdx';
+  const rows: Array<[string, Partial<PhSettings>]> = [
+    ['Soft step, 4 substeps', {}],
+    ['Soft step, 8 substeps', { substeps: 8 }],
+    ['Soft step, 1 substep', { substeps: 1 }],
+    ['Soft step, 4 substeps, no warm starting', { warmStarting: false }],
+    ['Baumgarte, 4 iterations', { solver: 'baumgarte', iterations: 4 }],
+    ['Baumgarte, 10 iterations', { solver: 'baumgarte', iterations: 10 }],
+    ['Baumgarte, 20 iterations', { solver: 'baumgarte', iterations: 20 }],
+    ['Baumgarte, 10 iterations, no warm starting', { solver: 'baumgarte', iterations: 10, warmStarting: false }],
+  ];
+  for (const [name, set] of rows) claim(L, `| ${name} | ${stack(() => phPyramid(set))} | ${stack(() => phTower(set))} |`);
+
+  // Broadphase: every pair against sort and sweep, 150 bodies, averaged over 2 s.
+  const bp = (m: 'brute' | 'sap') => {
+    const w = phCrowd({ broadphase: m, sleeping: false }, 150).world;
+    let t = 0;
+    let p = 0;
+    for (let i = 0; i < 120; i++) {
+      w.step(1 / 60);
+      t += w.stats.aabbTests;
+      p += w.stats.pairs;
+    }
+    return { tests: t / 120, pairs: p / 120 };
+  };
+  const brute = bp('brute');
+  const sap = bp('sap');
+  const B = 'physics/broadphase.mdx';
+  claim(B, `testing every pair makes about ${int(brute.tests)} box tests a step; sort and sweep makes about ${int(sap.tests)}`);
+  claim(B, `Both find the same ${d1(sap.pairs)} overlapping pairs a step on average`);
+  fact(B, Math.abs(brute.pairs - sap.pairs) < 1e-9, 'both broadphases find the same pairs');
+
+  // The step: the bin falls asleep.
+  const binW = phBin({}, 60).world;
+  let binAsleep = -1;
+  for (let i = 0; i < 1200 && binAsleep < 0; i++) {
+    binW.step(1 / 60);
+    if (binW.stats.awake === 0) binAsleep = binW.time;
+  }
+  claim('physics/sleeping-and-fast-bodies.mdx', `all 60 shapes in the bin are asleep ${d1(binAsleep)} seconds after they start falling`);
+
+  // Tunnelling outcomes.
+  const T = 'physics/sleeping-and-fast-bodies.mdx';
+  const shot = (c: 'none' | 'speculative' | 'sweep', speed: number) => {
+    const w = phTunnel({ continuous: c }, speed).world;
+    for (let i = 0; i < 60; i++) w.step(1 / 60);
+    return w.live().find((b) => b.bullet)!.xf.p.x;
+  };
+  fact(T, shot('none', 20) < 4 && shot('none', 30) > 4.2, 'with nothing special, 20 m/s is caught and 30 m/s tunnels');
+  fact(T, shot('speculative', 400) < 4 && shot('sweep', 400) < 4, 'speculative contacts and sweeps both stop 400 m/s');
+
+  // Joints: the bridge settles with soft step and keeps fidgeting with Baumgarte.
+  const J = 'physics/joints.mdx';
+  const bridgeE = (set: Partial<PhSettings>) => {
+    const w = phBridge(set).world;
+    for (let i = 0; i < 1800; i++) w.step(1 / 60);
+    return { e: w.energy(), asleep: w.stats.sleeping };
+  };
+  const bs = bridgeE({});
+  const bb = bridgeE({ solver: 'baumgarte', iterations: 10 });
+  claim(J, `after 30 seconds the soft-step bridge is asleep, while the Baumgarte bridge still has ${d1(bb.e)} J of kinetic energy`);
+  fact(J, bs.asleep > 0 && bb.asleep === 0, 'soft bridge sleeps, Baumgarte bridge does not');
+
+  // Characters: walking right, the mover climbs the stairs and stops at the steep wedge; the dynamic body stops at the first step.
+  const C = 'physics/queries-and-characters.mdx';
+  const lv = phLevel();
+  const m = new KinematicMover(lv.world, lv.start);
+  const dc = new DynamicCharacter(lv.world, { x: lv.start.x - 1, y: lv.start.y });
+  for (let i = 0; i < 300; i++) {
+    m.step({ x: 1, jump: false }, 1 / 60, lv.world.settings.gravity);
+    dc.step({ x: 1, jump: false });
+    lv.world.step(1 / 60);
+  }
+  fact(C, m.pos.x > 5.5 && m.pos.x < 6.2 && Math.abs(m.pos.y - 0.35) < 0.02, `mover climbs the stairs and stops at the steep wedge (now at ${d2(m.pos.x)}, ${d2(m.pos.y)})`);
+  fact(C, dc.pos.x < -1.9, `dynamic body stops at the first step (now at ${d2(dc.pos.x)})`);
+  // On the 25° ramp: the mover stands still when idle, the dynamic body slides down.
+  const lv2 = phLevel();
+  const m2 = new KinematicMover(lv2.world, { x: -6, y: 1.2 });
+  const d2c = new DynamicCharacter(lv2.world, { x: -5.5, y: 0.9 });
+  for (let i = 0; i < 30; i++) {
+    m2.step({ x: 0, jump: false }, 1 / 60, lv2.world.settings.gravity);
+    lv2.world.step(1 / 60);
+  }
+  const mx = m2.pos.x;
+  const dx = d2c.pos.x;
+  for (let i = 0; i < 120; i++) {
+    m2.step({ x: 0, jump: false }, 1 / 60, lv2.world.settings.gravity);
+    d2c.step({ x: 0, jump: false });
+    lv2.world.step(1 / 60);
+  }
+  fact(C, Math.abs(m2.pos.x - mx) < 1e-6 && m2.grounded, 'the mover stands still on the ramp');
+  fact(C, d2c.pos.x - dx > 0.5, 'the dynamic body slides down the ramp when idle');
+}
+
+async function ecs(): Promise<void> {
+  const L = 'physics/physics-in-flecs.mdx';
+  const wasm = readFileSync(join(here, '..', 'public', 'flecs.wasm'));
+  const prevFetch = globalThis.fetch;
+  (globalThis as { fetch: unknown }).fetch = async () => new Response(wasm, { headers: { 'content-type': 'application/wasm' } });
+  const w = await FlecsWorld.create();
+  (globalThis as { fetch: unknown }).fetch = prevFetch;
+  const b = new PhysicsBridge(w);
+  b.init();
+  const crate = b.spawn('box', 0, 2);
+  const ball = b.spawn('ball', 1.5, 3);
+  const handleOf = (n: string) => b.entities().find((e) => e.name === n)?.handle ?? 0;
+  const h0 = handleOf(ball);
+  fact(L, handleOf(crate) > 0 && h0 > 0 && b.engine.live().length === 3, 'spawning sets RigidBody, and CreateBody gives each entity a body and a BodyHandle');
+  b.setRigidBody(ball, { hw: 0.4, hh: 0.4, radius: 0, dynamic: 1 });
+  const h1 = handleOf(ball);
+  fact(L, h1 % 65536 === h0 % 65536 && Math.floor(h1 / 65536) > Math.floor(h0 / 65536) && b.engine.get(h0) === null, 'changing RigidBody re-creates the body in the same slot with a higher generation, and the old handle is stale');
+  for (let i = 0; i < 300; i++) b.progress(1 / 60);
+  fact(L, b.written === 0 && b.engine.stats.sleeping === 2, 'once everything sleeps, no transforms are copied');
+  b.impulse(crate, 0, 5);
+  b.progress(1 / 60);
+  const comps = w.entityJson(BigInt(w.lookup(crate)))?.components ?? {};
+  fact(L, !('Impulse' in comps) && b.written > 0, 'an Impulse is consumed by ApplyImpulses and wakes the body');
+  b.removeRigidBody(ball);
+  b.progress(1 / 60);
+  const bc = w.entityJson(BigInt(w.lookup(ball)))?.components ?? {};
+  fact(L, !('BodyHandle' in bc) && 'Position' in bc && b.engine.live().length === 2, 'removing RigidBody removes BodyHandle and destroys the body; the entity survives');
+  b.destroy(crate);
+  b.progress(1 / 60);
+  fact(L, b.engine.live().length === 1, 'deleting the entity destroys its body');
+}
+
+function chaos(): void {
+  const L = 'physics/chaos-and-physx.mdx';
+  const ms = (fps: number, hz: number, m: 'game' | 'async', i: boolean) => `${int(averageLatency(fps, hz, m, i) * 1000)} ms`;
+  claim(L, `| 30 Hz | ${ms(90, 30, 'game', true)} | ${ms(90, 30, 'async', false)} | ${ms(90, 30, 'async', true)} |`);
+  claim(L, `| 60 Hz | ${ms(90, 60, 'game', true)} | ${ms(90, 60, 'async', false)} | ${ms(90, 60, 'async', true)} |`);
+}
+
+async function engines(): Promise<void> {
+  const L = 'physics/jolt-box3d-and-bullet.mdx';
+  const b3 = new Box3DEngine(async () => readFileSync(join(here, '..', 'public', 'box3d.wasm')));
+  const bt = new BulletEngine(async () => readFileSync(join(here, '..', 'public', 'bullet.wasm')));
+  const jo = new JoltEngine(() => initJolt({ locateFile: () => join(here, '..', 'node_modules', 'jolt-physics', 'dist', 'jolt-physics.wasm.wasm') }));
+  await b3.load();
+  await bt.load();
+  await jo.load();
+  const out = new Float32Array(4096 * 8);
+  const run = (e: Engine3D, scene: string, opts: Partial<Engine3D['options']> = {}, steps = 600, speed?: number) => {
+    const saved = { ...e.options };
+    Object.assign(e.options, opts);
+    const sc = ENGINE_SCENES[scene]();
+    if (speed) sc.bodies[2].vel = [0, 0, -speed];
+    e.reset(sc);
+    const s0 = new Float32Array(out.length);
+    e.read(s0);
+    let asleep = -1;
+    for (let i = 0; i < steps; i++) {
+      e.step(1 / 60);
+      if (asleep < 0 && e.stats().awake === 0) asleep = (i + 1) / 60;
+    }
+    const n = e.read(out);
+    let drift = 0;
+    for (let k = 0; k < n; k++) if (sc.bodies[k].dynamic) drift = Math.max(drift, Math.hypot(out[k * 8] - s0[k * 8], out[k * 8 + 1] - s0[k * 8 + 1], out[k * 8 + 2] - s0[k * 8 + 2]));
+    Object.assign(e.options, saved);
+    return { drift, asleep, lastZ: out[(n - 1) * 8 + 2] };
+  };
+  const pj = run(jo, 'pyramid');
+  const pb = run(b3, 'pyramid');
+  const pt = run(bt, 'pyramid');
+  claim(L, `Jolt's is asleep after ${d2(pj.asleep)} s, Box3D's after ${d2(pb.asleep)} s and Bullet's after ${d2(pt.asleep)} s`);
+  fact(L, pj.drift < 0.05 && pb.drift < 0.05 && pt.drift < 0.05, 'all three hold the pyramid');
+  const tb = run(b3, 'tower');
+  const tt = run(bt, 'tower');
+  const tj = run(jo, 'tower');
+  const tj30 = run(jo, 'tower', { velocitySteps: 30 });
+  const tb1 = run(b3, 'tower', { substeps: 1 });
+  fact(L, tb.drift < 0.1 && tb.asleep > 0, `Box3D holds the tower of 20 with its defaults (drift ${d2(tb.drift)} m)`);
+  fact(L, tt.drift < 0.3 && tt.asleep > 0, `Bullet holds the tower of 20 with its defaults (drift ${d2(tt.drift)} m)`);
+  fact(L, tj.drift > 1, 'Jolt with its default 10 velocity steps lets the tower of 20 topple');
+  fact(L, tj30.drift < 0.1 && tj30.asleep > 0, 'Jolt with 30 velocity steps holds the tower');
+  fact(L, tb1.drift > 1, 'Box3D with 1 substep lets the tower topple');
+  claim(L, `with 30 velocity steps it stands and is asleep after ${d2(tj30.asleep)} s`);
+  const z = (e: Engine3D, opts: Partial<Engine3D['options']>, speed = 600) => run(e, 'fastball', opts, 60, speed).lastZ;
+  const caught = (v: number) => v > -0.1;
+  fact(L, caught(z(b3, {})) && !caught(z(b3, { continuous: false })), 'Box3D stops the fast ball by default and loses it with continuous collision off');
+  fact(L, !caught(z(jo, {})) && caught(z(jo, { linearCast: true })), 'Jolt loses the fast ball in Discrete mode and stops it with LinearCast');
+  fact(L, !caught(z(bt, {})) && caught(z(bt, { linearCast: true })), 'Bullet loses the fast ball by default and stops it with CCD');
+  fact(L, !caught(z(jo, {}, 30)) && !caught(z(b3, { continuous: false }, 30)) && !caught(z(bt, {}, 30)), 'every discrete mode loses the ball even at 30 m/s');
 }
 
 function steering(): void {
@@ -538,8 +811,28 @@ async function recast(): Promise<void> {
   claim(L, `(${s.counts.polys} here)`);
 }
 
-const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, steering, formations, cover: coverSampling, avoidance, jobs, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
-const FAST = ['ai', 'goap', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
+// When physics goes wrong: each mistake and its fix, over six seconds.
+function trouble(): void {
+  const L = 'physics/when-physics-goes-wrong.mdx';
+  const cm = (x: number) => (x * 100).toFixed(1);
+  const crushBad = runTrouble('crush', false);
+  const crushFix = runTrouble('crush', true);
+  claim(L, `the box is pushed ${cm(crushBad)} cm into the ground or the block`);
+  claim(L, `it sinks ${cm(crushFix)} cm`);
+  const crush8 = runTrouble('crush', false, 6, { substeps: 8 });
+  fact(L, crush8 > crushBad * 0.8, `more substeps barely help the crush (8 substeps: ${cm(crush8)} cm)`);
+  claim(L, `The chain stretches by up to ${d2(runTrouble('chain', false))} m`);
+  fact(L, runTrouble('chain', false) > 4.4 / 4, 'the chain stretches over a quarter of its length');
+  fact(L, runTrouble('chain', true) < 0.002, 'with the rope the chain stays within 2 mm');
+  claim(L, `fast enough to throw them up to ${d1(runTrouble('spawn', false))} m/s`);
+  claim(L, `the fastest box only reaches ${d1(runTrouble('spawn', true))} m/s`);
+  claim(L, `The crate on top slides up to ${d2(runTrouble('platform', false))} m from the centre`);
+  fact(L, runTrouble('platform', false) > 1.8, 'the crate falls off the 3 m platform');
+  claim(L, `it drifts only about ${d1(runTrouble('platform', true))} m`);
+}
+
+const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, steering, formations, cover: coverSampling, avoidance, jobs, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
+const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
 const args = process.argv.slice(2);
 const chosen = args.includes('--all') ? Object.keys(GROUPS) : args.filter((a) => !a.startsWith('-')).length ? args.filter((a) => !a.startsWith('-')) : FAST;
 for (const name of chosen) {

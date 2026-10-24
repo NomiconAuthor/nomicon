@@ -1,0 +1,152 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Hot reloading code
+order: 11
+part: Iteration
+summary: 'Changing code while the game keeps running: swapping a DLL behind a small C API, patching functions in place the way Live++ and Unreal''s Live Coding do, rebuilding objects through serialisation like Unity''s domain reload, and what each one does to your state, your pointers and your struct layouts.'
+---
+import EngineWidget from '../../components/EngineWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The slowest part of changing gameplay code is often not the compile. It's getting back to where you were: relaunching, loading the level, walking to the spot, setting up the situation that showed the bug. Hot reloading skips that. You rebuild, the running game picks up the new code, and the state you spent five minutes reaching is still there.
+
+Whether it works depends on what the reload does with three things: the **code**, the **state** the old code left behind, and any **pointers** from that state into the old code. There are three families of answer:
+
+- **Swap the module.** Game code lives in a DLL behind a small C API; the host unloads it and loads the new build. Simple, and the basis of most hand-rolled systems.
+- **Patch in place.** Load the new code beside the old and redirect the old functions to it. This is what Live++ does, and Unreal's Live Coding is built on it.
+- **Serialise and rebuild.** Save the objects, throw everything away, load the new code and restore them. Unity's domain reload works this way, and so does Unreal's object reinstancing.
+
+## What survives a reload
+
+Below, a host runs a game module that bounces six orbs. The orbs' state is real bytes, laid out by whichever build wrote them, and the module's functions and strings live at real addresses in its loaded image. Pick an edit and a strategy, then **Build and reload**:
+
+<EngineWidget kind="hotreload" />
+
+Things to try:
+
+- **Change code only, any strategy.** Every strategy gets gravity in. The difference is what happens to the orbs: *Restart* and *Swap, state in DLL* put them back at the start, the others keep them where they were.
+- **Add a field, *Swap, state in host*.** No crash, which is the worrying part. The new code reads 20-byte orbs from memory written as 16-byte ones: *radius* comes from the old *vx*, *vx* from the old *vy*, and *vy* from the next orb's *x*. Watch the byte view right after the reload: colour is what wrote the bytes, the label is how the new code reads them. A frame later the new code has written *x*, *y*, *vx* and *vy* back in its own layout, and only *radius* still disagrees with what's underneath. *Patch in place* does exactly the same, because patching swaps code, not data.
+- **Add a field, *Serialise, rebuild*.** The orbs are saved by name, so *x*, *y*, *vx* and *vy* come back right, and *radius* gets the new code's default. It's the only strategy here that both keeps your place and survives a layout change, and it pays with a hitch.
+- **State holds pointers, *Swap, state in host*.** The first bounce calls *on_bounce* through a pointer into the unloaded DLL, and the game crashes. Tick **reload() re-points pointers** to fix it the way real code does.
+- **State holds pointers, *Patch in place*.** No crash, because nothing was unloaded, and bounces run the new ring code through the jump. But the orbs are still called "orbs": the name points at build 1's string literal, and only code was patched.
+
+In a real process the swapped DLL often loads at the *same* address as before, so a stale pointer lands at the old offset in the new code. That's worse than a crash: it can call the wrong function and carry on.
+
+## Swapping a DLL behind a C API
+
+The classic setup (popularised by Casey Muratori's *Handmade Hero*) splits the game into an executable that owns memory, the window and the platform, and a DLL that holds the game code and no state at all. The two meet at one C struct of function pointers:
+
+```c
+// game_api.h: the only thing the host and the game module share.
+#include <stddef.h>
+#include <stdint.h>
+#define GAME_API_VERSION 7
+
+typedef struct Input Input;                     // defined by the host
+
+typedef struct GameMemory {
+    void*  permanent;  size_t permanent_size;   // all game state lives here
+    void*  scratch;    size_t scratch_size;     // cleared every frame
+} GameMemory;
+
+typedef struct GameApi {
+    uint32_t version;
+    void (*init)(GameMemory*);                  // first load only
+    void (*reload)(GameMemory*);                // after a reload: re-point anything into the module
+    void (*unload)(GameMemory*);                // before an unload: let go of the module
+    void (*update)(GameMemory*, const Input*, float dt);
+} GameApi;
+
+// The one exported symbol. Built as C++, GAME_EXPORT must be extern "C" __declspec(dllexport),
+// or the name gets mangled and GetProcAddress won't find it.
+GAME_EXPORT const GameApi* get_game_api(void);
+```
+
+Why C and not a C++ interface: one exported, unmangled symbol to look up; struct layout defined by C rules both sides agree on; no exceptions, RTTI or STL types crossing the boundary, so host and module can even be built with different settings. A C++ object with virtual functions, kept in host memory, is a pointer into the DLL waiting to dangle: its vtable lives in the module image.
+
+```cpp
+// Host: check once a frame, between updates, never mid-frame.
+void hot_reload(Module& m, GameMemory& mem) {
+    FILETIME t = last_write_time("game.dll");
+    if (CompareFileTime(&t, &m.seen_time) == 0 || file_exists("build.lock")) return;
+    m.seen_time = t;                                       // don't retry a bad build every frame
+
+    // Load and check the new build first, under a fresh name: the linker can then overwrite
+    // game.dll next time, and Windows never sees the same file loaded twice.
+    char live[64];
+    snprintf(live, sizeof live, "game_live_%u.dll", ++m.generation);
+    if (!CopyFileA("game.dll", live, FALSE)) return;
+    HMODULE dll = LoadLibraryA(live);
+    auto get = dll ? (const GameApi* (*)())GetProcAddress(dll, "get_game_api") : nullptr;
+    const GameApi* api = get ? get() : nullptr;
+    if (!api || api->version != GAME_API_VERSION) {        // reject it, keep the old module
+        if (dll) FreeLibrary(dll);
+        report("game.dll rejected: missing get_game_api or wrong API version");
+        return;
+    }
+
+    // Only now let go of the old one.
+    if (m.api) m.api->unload(&mem);
+    if (m.dll) FreeLibrary(m.dll);
+    m.dll = dll;
+    m.api = api;
+    m.api->reload(&mem);
+}
+```
+
+The details that bite:
+
+- **Windows locks a loaded DLL**, so the linker can't overwrite it: load a copy. Check the new build before unloading the old one, so a bad build leaves the game running. The debugger locks the PDB too, so give each build a unique PDB name (MSVC's `/PDB:` with a timestamp), or the second reload fails to link.
+- **Don't load a half-written file.** The linker writes the DLL in pieces. Have the build drop a lock file and remove it when done, and don't reload while it's there.
+- **Globals and statics reset.** Everything in the DLL's data section, including static locals, singletons and allocator state, comes back zeroed or re-initialised. All game state has to live in memory the host owns: hand the module one big block and carve it up with an [arena](/engine/handles-and-allocators/).
+- **Two C runtimes don't mix.** A DLL that links the C runtime statically carries its own copy of the runtime's state (stdio, locale, `atexit` handlers and static destructors, which run at `FreeLibrary`). Freeing its allocations from the host, or using its runtime objects after an unload, is undefined. Give the module the host's allocator through the API, or link the runtime dynamically.
+- **Pointers into the module.** Function pointers, vtables, string literals, `typeid`, `std::function` and lambdas stored in state all point into the image. Store ids or [handles](/engine/handles-and-allocators/) instead, or walk the state in `reload()` and re-point them.
+- **Threads.** A worker still running module code when it's unloaded crashes in code that no longer exists. Drain the [job system](/engine/jobs-and-task-graphs/) before unloading.
+- **Layout changes.** The host's bytes don't know the struct changed. Put a version number at the start of the state and have `reload()` migrate or refuse. Without that you get the scrambled orbs.
+- **On Linux**, `dlclose` doesn't always unload: glibc never unloads a library with `STB_GNU_UNIQUE` symbols (which GCC emits for template and inline statics), so `dlopen` hands back the old code. Build the module with `-fno-gnu-unique`, and load each build under a new file name.
+
+## Patching in place: Live++ and Live Coding
+
+Patching takes the opposite approach: never unload anything. The tool recompiles the changed translation units, links them into a patch, loads it into the running process, and fixes the patch up so that it refers to the *existing* globals rather than its own copies. Then it overwrites the first instructions of every changed function with a jump to the new version. A call already inside the old function finishes there; the next call lands in the new code.
+
+That keeps state for free. Globals keep their values, objects stay where they are, and every pointer stays valid because the old image is still mapped. It also works on code that was never designed for reloading, which is why it's so popular for large C++ codebases.
+
+What patching can't do is change data. Add a member and the objects in memory are still the old size, read by new code with new offsets: the same scrambled orbs. Inlining is the other trap: a changed function that was inlined elsewhere lives on inside its callers, so the tool has to recompile every translation unit that could have inlined it. That's why a header edit rebuilds a lot, and why builds with link-time code generation can't be patched.
+
+**Unreal** has had both approaches:
+
+- **Hot Reload**, the older one, compiled new module DLLs and loaded them while the editor ran. It had a reputation for corrupting Blueprints and leaving behind classes renamed `HOTRELOADED_...`. It's still there as a fallback, but Epic steers people to Live Coding.
+- **Live Coding** (from 4.22) is an integration of Live++: it patches the running binaries. On its own, it handles small changes to function bodies. Newer versions add **object reinstancing**, on by default, for bigger changes: instances of changed reflected types (`UCLASS`, `USTRUCT` and friends) are replaced with new objects of the new layout. Code that holds raw pointers to those objects has to refresh them, using `ReloadReinstancingCompleteDelegate` and `ReloadCompleteDelegate`. Defaults changed in a header show up; values set in a constructor in the `.cpp` file don't update in existing objects.
+
+## Serialise and rebuild
+
+The most robust approach doesn't try to keep memory at all. Save every object in a form that doesn't depend on layout (field names and values), unload everything, load the new code, recreate the objects, and restore whatever fields still exist.
+
+**Unity** does this every time scripts recompile in the editor: a **domain reload** tears down the managed scripting domain, loads the new assemblies and restores objects through Unity's serialiser. It survives added, removed and reordered fields, because fields are matched by name (a renamed field needs `[FormerlySerializedAs]`, or its value is lost). The costs are the ones in the widget: a pause that grows with the amount of state, and only state the serialiser understands survives. Static fields are simply reset, and so is any field Unity can't serialise. Entering Play Mode also does a domain reload by default; Unity can skip it (*Enter Play Mode options*), which makes entering Play Mode much faster but leaves static state from the last run behind, so you reset it yourself.
+
+**.NET Hot Reload** (and Visual Studio's Edit and Continue) sits closer to patching: it applies changes to method bodies, and many added members, in the running process. Edits it can't apply are called **rude edits** and need a restart.
+
+## Scripts and data
+
+Most engines move as much gameplay iteration as possible into scripts and data, because those reload easily:
+
+- **Script modules.** Re-running a Lua module's file defines fresh functions, but anything that captured the old ones (a callback stored in a table, a local copy of a function) keeps calling the old code. The usual fix is the same as for DLLs: one level of indirection. Store the module table and call `M.update`, never a captured function.
+- **Data.** Tuning values, curves, behaviour trees, materials, levels. Reloading data is safe when everything refers to it by [handle](/engine/handles-and-allocators/) or id: swap the contents, and every handle sees the new version on its next lookup.
+
+## Making code reload-friendly
+
+Whichever approach you use, the same habits make it work:
+
+- **Keep state in memory the host owns**, not in module globals.
+- **Refer to things by id or handle**, not by pointer, especially functions and strings.
+- **Version your state** and migrate or refuse on mismatch, rather than guessing.
+- **Reload at a safe point**: between frames, with worker threads idle.
+- **Keep the boundary small and in C.** Every type that crosses it is a type both sides must agree on, forever.
+
+## Takeaways
+
+- A reload has to deal with **code, state and pointers into the code**; each strategy handles a different subset.
+- **Swapping a DLL** keeps host-owned state, loses module globals, and leaves dangling pointers unless you re-point them.
+- **Patching in place** (Live++, Unreal's Live Coding) keeps everything, but can't change data layouts by itself.
+- **Serialising and rebuilding** (Unity's domain reload, Unreal's reinstancing) survives layout changes, at the cost of a pause and only for state it can serialise.
+- Design for it: **host-owned memory, handles, a versioned state and a small C API.**

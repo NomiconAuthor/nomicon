@@ -1,7 +1,7 @@
 ---
 /** Mounts one of the AI lesson widgets (src/ai/). */
 interface Props {
-  kind: 'curve' | 'inspector' | 'utility-sim' | 'bt' | 'goap' | 'compare' | 'steer' | 'crowd' | 'formation' | 'course' | 'recast' | 'party' | 'influence' | 'knowledge';
+  kind: 'curve' | 'inspector' | 'utility-sim' | 'bt' | 'goap' | 'htn' | 'compare' | 'steer' | 'crowd' | 'formation' | 'course' | 'recast' | 'party' | 'influence' | 'knowledge';
   /** Starting settings for the steering course (kind="course"). */
   map?: 'bends' | 'pillars' | 'deadend';
   sense?: 'none' | 'feeler' | 'whiskers' | 'query' | 'context';
@@ -10,9 +10,11 @@ interface Props {
   crates?: boolean;
   /** Which scenario the shared-knowledge widget starts with (kind="knowledge"). */
   scenario?: 'simple' | 'full';
+  /** Which brains the side-by-side arena races (kind="compare"), comma-separated: utility, bt, goap, htn, htn-plain. */
+  lanes?: string;
 }
-const { kind, map, sense, follow, motion, crates, scenario } = Astro.props;
-const preset = JSON.stringify({ ...(map && { course: map }), ...(sense && { sense }), ...(follow && { follow }), ...(motion && { motion }), ...(crates && { crates }), ...(scenario && { scenario }) });
+const { kind, map, sense, follow, motion, crates, scenario, lanes } = Astro.props;
+const preset = JSON.stringify({ ...(map && { course: map }), ...(sense && { sense }), ...(follow && { follow }), ...(motion && { motion }), ...(crates && { crates }), ...(scenario && { scenario }), ...(lanes && { lanes }) });
 ---
 
 <ai-widget data-kind={kind} data-preset={preset}><p class="ll-loading">Loading…</p></ai-widget>
@@ -58,13 +60,21 @@ const preset = JSON.stringify({ ...(map && { course: map }), ...(sense && { sens
         else new s.FormationLab(this);
         return;
       }
+      if (k === 'htn') {
+        const { HtnViz } = await import('../ai/htnViz');
+        new HtnViz(this);
+        return;
+      }
       const w = await import('../ai/widgets');
       if (k === 'curve') new w.CurveWidget(this);
       else if (k === 'inspector') new w.Inspector(this);
       else if (k === 'utility-sim') new w.UtilitySim(this);
       else if (k === 'bt') new w.TreeSim(this);
       else if (k === 'goap') new w.GoapViz(this);
-      else if (k === 'compare') new w.Compare(this);
+      else if (k === 'compare') {
+        const lanes = JSON.parse(this.dataset.preset || '{}').lanes as string | undefined;
+        new w.Compare(this, lanes ? lanes.split(',') : undefined);
+      }
     }
   }
   if (!customElements.get('ai-widget')) customElements.define('ai-widget', AiWidget);

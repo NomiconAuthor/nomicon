@@ -24,6 +24,7 @@ import {
 import { type ActionId, type Factors, ACTION_COL, ACTION_NAMES, CHARGES, RESERVE_MAX, TICK_HZ, World } from './world';
 import { History, Runner, type Speed, whenSprites, actionChip, arenaCanvas, chartCanvas, drawArena, drawScores, drawStrip, h, legend, onTheme, stat, statsRow, stripCanvas } from './ui';
 import { touchScroll } from '../engine/touch';
+import { HtnBrain } from './htn';
 
 const fx = (n: number, d = 2) => (Math.round(n * 10 ** d) / 10 ** d).toFixed(d);
 
@@ -771,6 +772,15 @@ interface Lane {
   extra: HTMLElement;
 }
 
+/** The brains the side-by-side widget can race, by id (data-preset lanes="goap,htn"). */
+const LANES: Record<string, [string, () => Brain]> = {
+  utility: ['Utility', () => new UtilityBrain(defaultBehaviours(), { selection: 'best', inertia: 0.05, commit: 0.2, compensate: true })],
+  bt: ['Behaviour tree', () => new TreeBrain()],
+  goap: ['GOAP', () => new PlannerBrain()],
+  htn: ['HTN', () => new HtnBrain()],
+  'htn-plain': ['HTN, no interruptions', () => new HtnBrain({ interrupt: false })],
+};
+
 export class Compare {
   private root: HTMLElement;
   private lanes: Lane[];
@@ -779,7 +789,7 @@ export class Compare {
   private playBtn: HTMLButtonElement;
   private batch = h('div', { class: 'ai-batch' });
 
-  constructor(host: HTMLElement) {
+  constructor(host: HTMLElement, lanes: string[] = ['utility', 'bt', 'goap', 'htn']) {
     this.root = h('div', { class: 'll ai ai-cmp' });
     host.replaceChildren(this.root);
     const mk = (name: string, make: () => Brain): Lane => ({
@@ -793,11 +803,7 @@ export class Compare {
       stats: h('div', { class: 'll-stats' }),
       extra: h('div', { class: 'll-muted ai-extra' }),
     });
-    this.lanes = [
-      mk('Utility', () => new UtilityBrain(defaultBehaviours(), { selection: 'best', inertia: 0.05, commit: 0.2, compensate: true })),
-      mk('Behaviour tree', () => new TreeBrain()),
-      mk('GOAP', () => new PlannerBrain()),
-    ];
+    this.lanes = lanes.filter((id) => LANES[id]).map((id) => mk(...LANES[id]));
     this.runner = new Runner(
       this.root,
       () => {
@@ -836,7 +842,7 @@ export class Compare {
       ),
       h(
         'div',
-        { class: 'ai-lanes' },
+        { class: `ai-lanes ${this.lanes.length % 2 === 0 ? 'two' : ''}` },
         ...this.lanes.map((l) => h('div', { class: 'ai-lane' }, h('div', { class: 'ai-lane-h' }, l.name), l.cnv, l.strip, l.stats, l.extra)),
       ),
       legend(),
@@ -865,7 +871,9 @@ export class Compare {
       const min = Math.max(1 / 60, l.world.seconds / 60);
       l.stats.replaceChildren(stat(`${l.world.seconds.toFixed(0)} s`, l.world.dead ? 'survived' : 'alive'), stat(String(l.world.stats.kills), 'kills'), stat((l.world.stats.switches / min).toFixed(0), 'switches / min'));
       const b = l.brain;
-      if (b instanceof PlannerBrain)
+      if (b instanceof HtnBrain)
+        l.extra.textContent = `Doing: ${b.purpose} · plan: ${b.current.map((a, i) => (i === b.stepIndex ? `[${a.name}]` : a.name)).join(' → ') || '— (patrol)'} · replans ${b.replans}${b.interrupts ? `, ${b.interrupts} interruptions` : ''}${b.lastReason ? ` (last: ${b.lastReason})` : ''}`;
+      else if (b instanceof PlannerBrain)
         l.extra.textContent = `Goal: ${b.goal?.name ?? 'none (patrol)'} · plan: ${b.current.map((a, i) => (i === b.stepIndex ? `[${a.name}]` : a.name)).join(' → ') || '—'} · replans ${b.replans}${b.lastReason ? ` (last: ${b.lastReason})` : ''}`;
       else if (b instanceof TreeBrain) l.extra.textContent = `${treeSummary(b) || '—'} · ${b.cost} nodes visited`;
       else if (b instanceof UtilityBrain) l.extra.replaceChildren(utilityWhy(b, l.world.agent.action, 2));

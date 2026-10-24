@@ -1,0 +1,70 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Joints
+order: 6
+part: Concepts
+summary: 'Constraints that hold bodies together: what a joint removes, the point constraint behind hinges and ragdolls, rods, ropes and springs, motors, the soft spring behind every "drag this with the mouse", and why chains and heavy loads are hard.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A **joint** is a constraint between two bodies (or a body and the world) that the solver enforces alongside contacts. Contacts say "don't overlap"; joints say "keep these two points together", "keep this distance", "only turn about this axis". The solver treats them the same way: a velocity constraint, an impulse, iterations, warm starting from last step's impulse.
+
+## What a joint removes
+
+A rigid body in 2D has three degrees of freedom: x, y and rotation. In 3D it has six. A joint removes some of them from the relative motion of two bodies:
+
+- A **revolute** joint pins a point on each body together: in 2D the bodies can rotate relative to each other but not move apart, which removes 2 degrees of freedom. The 3D version of that point constraint is a **ball-and-socket**, which removes 3; a 3D **hinge** adds two angular constraints so it only turns about one axis, and removes 5.
+- A **distance** joint keeps two anchor points a fixed distance apart: a rod. Allow it to shorten and it's a **rope**; give it a stiffness and damping and it's a **spring**.
+- A **prismatic** (slider) joint allows motion along one axis only; a **weld** (fixed) joint removes everything.
+
+Real engines offer a dozen or so of these (welds, sliders, cones, wheels, gears), most with motors and limits, and they're all built from the same few pieces: point, distance and angle constraints.
+
+<PhysicsWidget kind="joints" />
+
+From left to right: a chain of revolute joints, a rope (a distance joint with only a maximum), a spring (a distance joint with a frequency and damping), and a bar on a revolute joint with a **motor** turning it. Drag any of them.
+
+## The point constraint
+
+The revolute joint's constraint is "the two anchor points have the same velocity". Unlike a contact, it acts in every direction at once, so it's solved as a 2×2 system (3×3 in 3D) instead of a single impulse:
+
+```cpp
+// Revolute joint, one solver pass (2D). rA, rB: anchors relative to each body's centre.
+Vec2 dv = (b.v + cross(b.w, rB)) - (a.v + cross(a.w, rA));
+Mat22 K = {                                     // effective mass, as a 2x2 matrix
+    a.inv_mass + b.inv_mass + a.inv_i * rA.y * rA.y + b.inv_i * rB.y * rB.y,
+   -a.inv_i * rA.x * rA.y - b.inv_i * rB.x * rB.y,
+   -a.inv_i * rA.x * rA.y - b.inv_i * rB.x * rB.y,
+    a.inv_mass + b.inv_mass + a.inv_i * rA.x * rA.x + b.inv_i * rB.x * rB.x };
+Vec2 error = (b.p + rB) - (a.p + rA);           // how far apart the anchors have drifted
+Vec2 impulse = -K.solve(dv + bias(error));      // Baumgarte or soft, as for contacts
+j.impulse += impulse;                           // accumulated, for warm starting
+apply(a, b, rA, rB, impulse);
+```
+
+There's no clamp: joints pull as readily as they push. Limits (a hinge that only opens 90°) are one-sided constraints like contacts, clamped the same way, and **motors** are a velocity target with a maximum impulse per step, which is how a motor stalls under too much load.
+
+## The mouse joint
+
+Every widget on these pages lets you drag bodies with a **mouse joint**: a soft spring from a point on the body to the cursor, at 5 Hz with a damping ratio of 0.7, with a maximum force so you can't fling a body through a wall. It's the same soft-constraint maths as the contacts in the [solver lesson](/physics/solving-contacts/), set very soft. Grabbing an object in a first-person game works the same way.
+
+## Chains, bridges and heavy loads
+
+Switch to **Rope bridge**: twenty planks, each joined to the next. Drop a few heavy boxes on it.
+
+Long chains are hard for an iterative solver for the same reason stacks are: a correction at one end has to travel along the chain one link per iteration, and the planks are light compared with what they carry. With soft step the bridge sags and settles; with Baumgarte it keeps trembling. With only the four boxes it starts with, after 30 seconds the soft-step bridge is asleep, while the Baumgarte bridge still has 0.9 J of kinetic energy, jiggling because the position bias keeps adding energy.
+
+<Tip title="Making jointed things hold">
+- Keep **mass ratios** small: a 30:1 load on a light chain is asking for trouble.
+- Prefer **fewer, longer** links: a correction needs roughly one iteration per link to cross a chain, so a 50-segment rope is far harder than a single distance joint.
+- Add **substeps** before iterations: they help joints exactly as they help stacks.
+- For ragdolls, engines offer dedicated support (group filters that stop adjacent parts colliding, and motors that drive a ragdoll towards an animated pose). For a rope that only needs to look right, a cheaper verlet or position-based rope outside the rigid-body solver is often the better tool.
+</Tip>
+
+## Takeaways
+
+- A joint is a constraint that **removes degrees of freedom** from two bodies' relative motion.
+- A **revolute** joint is a 2×2 point constraint in 2D (a ball-and-socket's 3×3 in 3D, plus two angular rows for a hinge); **distance** joints give rods, ropes and springs.
+- **Limits** are clamped like contacts; **motors** are velocity targets with a maximum impulse.
+- The **mouse joint** is a very soft spring.
+- **Chains and heavy loads** need small mass ratios and substeps.

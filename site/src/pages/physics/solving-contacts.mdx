@@ -1,0 +1,113 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Solving contacts
+order: 4
+part: Concepts
+summary: 'Why a stack of boxes is the hardest thing a physics engine does: contacts as velocity constraints, sequential impulses and accumulated clamping, friction, warm starting, Baumgarte against soft constraints, and the substepped "soft step" solver Box2D v3 and Box3D use. With every combination measured on the same two stacks.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The narrowphase says where two bodies touch. The **solver** decides what to do about it: change velocities so that nothing sinks into anything, friction holds, and joints stay together. Each contact on its own is easy. The difficulty is that they all affect each other: the bottom box of a stack is pushed by the ground and pressed by every box above it, and fixing one contact disturbs its neighbours.
+
+## A contact is a velocity constraint
+
+For a contact point with normal *n*, the **relative normal velocity** is how fast the bodies approach each other along *n*:
+
+> *v*<sub>n</sub> = *n* · ((*v*<sub>B</sub> + *ω*<sub>B</sub> × *r*<sub>B</sub>) − (*v*<sub>A</sub> + *ω*<sub>A</sub> × *r*<sub>A</sub>))
+
+where *r* is the contact point relative to each body's centre. The constraint is *v*<sub>n</sub> ≥ 0: they may separate, but not approach. To enforce it the solver applies an **impulse** *P* along the normal, equal and opposite on the two bodies. The impulse that exactly cancels the approach is *P* = −*m*<sub>eff</sub> *v*<sub>n</sub>, where the **effective mass** *m*<sub>eff</sub> combines both bodies' inverse masses and inverse inertias as seen from that point and direction.
+
+Contacts can only push, never pull. So the impulse is **clamped** to be non-negative, and the clamp is applied to the **total** impulse accumulated over the step, not to each correction. That lets a later iteration take back some of an earlier push, which turns out to be essential for convergence.
+
+## Sequential impulses
+
+Solving every contact at once is a linear complementarity problem: correct, but expensive to solve exactly. Game engines instead go round the contacts one at a time, fixing each against the current velocities, and repeat. Each pass gets closer. This is **projected Gauss–Seidel**, known in games as **sequential impulses** from Erin Catto's GDC talks, and it's the solver in Box2D, Box3D and Jolt, and one of PhysX's two.
+
+```cpp
+// One pass over one contact point (2D). Repeated over every point, several times per step.
+Vec2 dv = (b.v + cross(b.w, p.rB)) - (a.v + cross(a.w, p.rA));
+float vn = dot(dv, c.normal);
+float impulse = -p.normal_mass * (vn + bias);               // bias: see below
+float total = std::max(p.normal_impulse + impulse, 0.0f);   // clamp the accumulated impulse
+impulse = total - p.normal_impulse;
+p.normal_impulse = total;
+apply(a, b, p.rA, p.rB, impulse * c.normal);
+
+// Friction: the same along the tangent, clamped to the friction cone of the current normal impulse.
+float vt = dot(dv_after_normal, tangent);
+float f = -p.tangent_mass * vt;
+float max_f = c.friction * p.normal_impulse;
+float new_t = std::clamp(p.tangent_impulse + f, -max_f, max_f);
+apply(a, b, p.rA, p.rB, (new_t - p.tangent_impulse) * tangent);
+p.tangent_impulse = new_t;
+```
+
+**Friction** uses the same machinery along the contact's tangent, but its limit depends on the normal impulse: Coulomb friction can resist up to *μ* times the push. That couples them. This engine, like Box2D v3, solves the normal first and then friction against the current normal impulse, every pass; some engines (Jolt, Box2D v2) solve friction first, so that non-penetration, solved last, wins.
+
+## Warm starting
+
+A box resting on the floor needs the same impulse every step, about its weight times the step. Starting each step from zero means the solver spends its iterations rediscovering it, and with too few iterations it never quite gets there, so the box sinks a little and bounces back, forever. **Warm starting** begins each contact point with last step's accumulated impulse, matched by [feature id](/physics/narrowphase/). A resting stack then starts each step almost solved. Every engine here does it.
+
+## Fixing overlap: Baumgarte, or soft constraints
+
+Velocities alone can't undo an overlap that already exists (a box that sank 1 cm stays 1 cm in). The classic fix, **Baumgarte stabilisation**, adds a bias to the target velocity proportional to the overlap: aim for *v*<sub>n</sub> = *β* · depth / *dt* instead of zero, with *β* around 0.2 and a small allowed overlap (the "slop") so resting contacts don't jitter. It works, but the bias is real velocity: it adds energy, which shows up as jitter in stacks and joints, and as bodies popping apart when they overlap a lot.
+
+Engines have found three ways round that:
+
+- **A separate position pass** (Box2D v2's "non-linear Gauss–Seidel"): after integrating, correct positions directly, without touching velocities, so no energy is added. **Jolt** does this: 10 velocity iterations then 2 position iterations by default, the position pass scaled by its Baumgarte factor of 0.2.
+- **Soft constraints**: model each contact as a stiff spring with damping, set by a frequency in hertz and a damping ratio, and integrate the spring implicitly over the step. For a single constraint that's stable at any stiffness; coupled with its neighbours through Gauss–Seidel it behaves best with the frequency well below the step rate (Box2D caps contact stiffness at a quarter of the substep rate).
+- **Substepping with relaxation**, below.
+
+## Soft step
+
+**Soft step** is the solver in Box2D v3 and Box3D. Catto arrived at it by building a test bed of solvers (his "Solver2D" post compares them) and picking the one that held stacks best for its cost. Per step:
+
+1. Prepare contacts once: anchors, effective masses, warm-start impulses. Collision detection doesn't run again this step.
+2. For each **substep** (4 by default):
+   1. Integrate velocities with gravity.
+   2. **Warm start**: apply the accumulated impulses.
+   3. **Solve** contacts and joints once, with **soft** constraints: overlap is pushed out by the damped spring, capped at a maximum push-out speed.
+   4. Integrate positions. Each contact's separation is updated from how far its two anchors have moved, without re-running collision.
+   5. **Relax**: solve once more *without* the bias, which removes the velocity the spring added.
+3. Apply **restitution** once at the end, from the approach speed measured before solving, so bounces don't depend on the substep count.
+
+Substeps beat iterations because each one also moves the bodies, so the solver sees the stack respond to its pushes. The relax pass is what keeps the soft spring from adding energy. The engine on this page follows those steps.
+
+<PhysicsWidget kind="solver" />
+
+Things to try:
+
+- **Tower, Baumgarte.** The tower leans and falls; with **20** iterations it stays up but never stops fidgeting, so it never sleeps. Switch to **Soft step** and it stands and sleeps within a second.
+- **Soft step, 1 substep.** One substep is one iteration: the tower falls and the pyramid sags.
+- **Untick Warm starting.** With soft step the pyramid collapses; with Baumgarte it slumps badly and never settles. Every step starts from zero and the iterations never catch up with the weight above.
+- **Untick Sleeping** to watch a "solved" stack keep solving: its energy stays tiny but not zero.
+
+## Measured
+
+Each configuration run for 10 seconds at 60 Hz on the pyramid (55 boxes) and the tower (12 boxes). The first number is the furthest any box moved from where it started; "fell over" means a box moved more than a metre.
+
+| Solver | Pyramid | Tower |
+|---|---|---|
+| Soft step, 4 substeps | 0.9 cm, asleep at 0.55 s | 5.4 cm, asleep at 0.77 s |
+| Soft step, 8 substeps | 0.9 cm, asleep at 0.53 s | 5.0 cm, asleep at 0.83 s |
+| Soft step, 1 substep | 30.5 cm, never sleeps | fell over |
+| Soft step, 4 substeps, no warm starting | fell over | fell over |
+| Baumgarte, 4 iterations | 1.7 cm, asleep at 2.27 s | fell over |
+| Baumgarte, 10 iterations | 0.4 cm, asleep at 0.57 s | fell over |
+| Baumgarte, 20 iterations | 0.1 cm, asleep at 0.53 s | 9.2 cm, never sleeps |
+| Baumgarte, 10 iterations, no warm starting | 69.4 cm, never sleeps | fell over |
+
+The pyramid is forgiving: it's wide, and every configuration with warm starting holds it. The tower is the real test, because any sideways error at the bottom is amplified by everything above. Two caveats keep this fair. Our Baumgarte solver has no separate position pass, so it's the weakest form of the idea; Jolt's solver, with position iterations, holds stacks well. And all of these cost different amounts: 20 Baumgarte iterations solve every contact 20 times a step, soft step with 4 substeps solves them 8 times (4 solves and 4 relaxes).
+
+<Tip title="Mass ratios">
+Every one of these solvers struggles when a heavy body rests on a light one, or hangs from a chain of light links: each pass moves the light body a lot and the heavy one hardly at all, and convergence crawls. Keep mass ratios at a few to one where you can (a 10:1 ratio is already asking for trouble), and add substeps when you can't.
+</Tip>
+
+## Takeaways
+
+- A contact is a **velocity constraint** solved by **impulses**, clamped on the **accumulated** total.
+- **Sequential impulses** go round the contacts repeatedly; **friction** is clamped by the current normal impulse.
+- **Warm starting** from last step's impulses is essential for stacks.
+- **Baumgarte** fixes overlap by adding energy; **position passes**, **soft constraints** and **relaxation** avoid it.
+- **Soft step** (Box2D v3, Box3D): **substeps**, soft constraints, a relax pass and restitution at the end.

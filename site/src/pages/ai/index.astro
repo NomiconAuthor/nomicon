@@ -16,14 +16,15 @@ for (const l of lessons) {
 }
 ---
 
-<Base title="Game AI" section="ai" description="Interactive lessons on how game agents decide, move and read the map: utility scoring, behaviour trees, goal-oriented action planning, steering and context steering, local avoidance from separation to ORCA, formations, Recast and Detour, terrain analysis, influence and threat maps, shared knowledge, and party roles.">
+<Base title="Game AI" section="ai" description="Interactive lessons on how game agents decide, move and read the map: utility scoring, behaviour trees, goal-oriented action planning, hierarchical task networks, steering and context steering, local avoidance from separation to ORCA, formations, Recast and Detour, terrain analysis, influence and threat maps, shared knowledge, and party roles.">
   <main class="flecs-index">
     <p class="kicker">Lessons</p>
     <h1>How game agents decide, move and read the map</h1>
     <p class="lede">
-      Three families of decision-making, built from scratch and running live: utility scoring, where every option gets a number
-      from response curves; behaviour trees, where a hand-built priority structure is walked every tick; and goal-oriented action
-      planning, where the agent searches for a sequence of actions that reaches a goal. They all drive the same agent in the same
+      Four ways of making decisions, built from scratch and running live: utility scoring, where every option gets a number
+      from response curves; behaviour trees, where a hand-built priority structure is walked every tick; goal-oriented action
+      planning, where the agent searches for a sequence of actions that reaches a goal; and hierarchical task networks, where
+      the agent picks among designer-written recipes and checks ahead that they'll work. They all drive the same agent in the same
       small arena, so you can see what each one gets right, what it gets wrong, and what it costs. Then navmeshes: Recast's
       build stepped through stage by stage, and Detour against writing your own planner. Movement: steering as a
       stack of choices (how an agent moves, follows a path and notices walls, and how those combine), avoiding

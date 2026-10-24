@@ -1,0 +1,45 @@
+---
+/** Mounts one of the physics lesson widgets (src/physics/). */
+interface Props {
+  kind: 'step' | 'broadphase' | 'narrowphase' | 'solver' | 'sleep' | 'tunnel' | 'joints' | 'queries' | 'character' | 'engines' | 'async' | 'ecs' | 'trouble';
+}
+const { kind } = Astro.props;
+---
+
+<physics-widget data-kind={kind}><p class="ll-loading">Loading…</p></physics-widget>
+
+<script>
+  import '../engine/engine.css';
+  import '../physics/physics.css';
+
+  class PhysicsWidget extends HTMLElement {
+    async connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const k = this.dataset.kind;
+      if (k === 'narrowphase') new (await import('../physics/narrowViz')).NarrowViz(this);
+      else if (k === 'queries') new (await import('../physics/charViz')).QueryViz(this);
+      else if (k === 'character') new (await import('../physics/charViz')).CharacterViz(this);
+      else if (k === 'engines') new (await import('../physics/enginesViz')).EnginesViz(this);
+      else if (k === 'async') new (await import('../physics/asyncTick')).AsyncViz(this);
+      else if (k === 'ecs') new (await import('../physics/ecsViz')).EcsViz(this);
+      else if (k === 'trouble') new (await import('../physics/troubleViz')).TroubleViz(this);
+      else {
+        const w = await import('../physics/widgets');
+        if (k === 'step') new w.StepViz(this);
+        else if (k === 'broadphase') new w.BroadphaseViz(this);
+        else if (k === 'solver') new w.SolverViz(this);
+        else if (k === 'sleep') new w.SleepViz(this);
+        else if (k === 'tunnel') new w.TunnelViz(this);
+        else if (k === 'joints') new w.JointViz(this);
+      }
+    }
+  }
+  if (!customElements.get('physics-widget')) customElements.define('physics-widget', PhysicsWidget);
+</script>
+
+<style>
+  physics-widget {
+    display: block;
+  }
+</style>

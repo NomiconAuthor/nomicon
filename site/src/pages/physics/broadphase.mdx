@@ -1,0 +1,59 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Broadphase and filtering
+order: 2
+part: Concepts
+summary: 'Turning n² possible pairs into the few dozen worth testing: bounding boxes, sort and sweep, the trees real engines use, fattened bounds, and collision filtering with categories and masks.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+With *n* bodies there are *n*(*n* − 1)/2 pairs. A hundred and fifty bodies make over eleven thousand pairs, and at any moment a few dozen of them are close enough to touch. The **broadphase** finds those few dozen without testing the rest. It's the [spatial partitioning lesson](/engine/spatial-partitioning/) applied to one specific question, asked every step: which bounding boxes overlap?
+
+## Bounding boxes
+
+Every body gets an **axis-aligned bounding box** (AABB): the smallest box, aligned with the world axes, that contains its shape at its current position. Two AABBs overlap if and only if their intervals overlap on every axis, which is four comparisons in 2D. If the boxes don't overlap, the shapes can't touch, so the expensive exact test only runs on pairs whose boxes do.
+
+<PhysicsWidget kind="broadphase" />
+
+Switch between **Every pair** and **Sort and sweep**. Over two seconds of this box, testing every pair makes about 11,775 box tests a step; sort and sweep makes about 848. Both find the same 26.1 overlapping pairs a step on average: the broadphase changes the cost, never the answer. Try **400** bodies to see the gap widen.
+
+## Sort and sweep
+
+**Sort and sweep** (also called sweep and prune) sorts the boxes by their left edge. Walking the sorted list, each box only needs comparing with the boxes after it whose left edge comes before its right edge; the first box that starts past its right edge ends the scan. The trick that makes it cheap in a physics engine is **coherence**: bodies barely move between steps, so last step's order is almost sorted, and an insertion sort fixes it in close to linear time. This page keeps the order between steps for exactly that reason.
+
+It degrades when many boxes line up along the sort axis (a long row of crates on the x axis all overlap in x), which is why real engines prefer trees.
+
+## Trees and fattened boxes
+
+Real engines keep their bounding boxes in **trees** instead (bounding volume hierarchies updated as bodies move), with static and moving bodies in separate trees so the level geometry, usually the largest set, never changes and is never tested against itself.
+
+Trees store **fattened** boxes: each leaf is the shape's AABB grown by a margin, often extended along the body's velocity. A body only needs re-inserting when it leaves its fat box, so most steps change nothing in the tree. The cost is a few extra candidate pairs that the narrowphase rejects.
+
+The [spatial partitioning lesson](/engine/spatial-partitioning/) compares grids, quadtrees, BVHs and sweep and prune against each other, and every one of them works as a physics broadphase.
+
+## Filtering
+
+Not everything should collide with everything. Debris shouldn't block the player; a sensor volume should detect characters but not push them; a character's own ragdoll shouldn't collide with its capsule. The cheapest place to drop those pairs is the broadphase, before any shape test runs.
+
+Untick **blue with orange** above: the two layers pass through each other, the orange ones still bounce off each other, and the overlap count falls because those pairs are never generated.
+
+The common scheme is **categories and masks**: each shape has a category bit set and a mask of the categories it collides with, and a pair collides only if each one's category is in the other's mask.
+
+```cpp
+bool should_collide(const Filter& a, const Filter& b) {
+    return (a.category & b.mask) != 0 && (b.category & a.mask) != 0;
+}
+```
+
+Engines dress this up differently (Jolt, for one, separates *object layers*, which say what collides with what, from *broadphase layers*, which say which tree a body lives in), but every scheme answers the same question with a few bits. After that come finer, more expensive filters: groups, per-body and per-shape callbacks, and finally a contact listener that can still reject a contact after it's been found.
+
+<Tip title="Filter early, in the cheapest stage that can decide">
+A contact listener that rejects a pair runs after the narrowphase has already done the work. If the rule only depends on what kind of object each body is, put it in the layers or the mask, where it costs one bitwise and.
+</Tip>
+
+## Takeaways
+
+- The broadphase turns **n² pairs into the few that might touch**, using bounding boxes.
+- **Sort and sweep** exploits coherence; **trees** with **fattened boxes** are what engines ship, with static and moving bodies kept apart.
+- **Filter in the broadphase**, with categories and masks or layers.

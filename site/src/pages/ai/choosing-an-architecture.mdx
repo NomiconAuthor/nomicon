@@ -1,41 +1,41 @@
 ---
 layout: ../../layouts/Lesson.astro
 title: Choosing an architecture
-order: 5
+order: 6
 part: Putting it together
-summary: 'Utility, behaviour tree and planner side by side on the same fight, how they compare on authoring, control, debugging and cost, the hybrids most shipped games end up with, and how to lay the whole thing out as ECS systems.'
+summary: 'Utility, behaviour tree and two planners side by side on the same fight, how they compare on authoring, control, debugging and cost, the hybrids most shipped games end up with, and how to lay the whole thing out as ECS systems.'
 ---
 import AiWidget from '../../components/AiWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
-Three brains, one arena, the same seed. They see the same factors and use the same actions; only the way they decide differs.
+Four brains, one arena, the same seed. They see the same factors and use the same actions; only the way they decide differs.
 
 <AiWidget kind="compare" />
 
-Under each arena is that brain's reason for what it's doing now: the top two scores and their considerations for utility, the branches tried for the tree, and the goal and plan for GOAP. Press **Step** to compare them a tick at a time, then run the batch. Over the 40 fights in the batch (fixed seeds, so your numbers will match):
+Under each arena is that brain's reason for what it's doing now: the top two scores and their considerations for utility, the branches tried for the tree, the goal and plan for GOAP, and the root method and plan for HTN. Press **Step** to compare them a tick at a time, then run the batch. Over the 40 fights in the batch (fixed seeds, so your numbers will match):
 
-| | Utility | Behaviour tree | GOAP |
-|---|---|---|---|
-| Average survival | 168 s | 162 s | 171 s |
-| Lasted the full 3 minutes | 27 / 40 | 28 / 40 | 31 / 40 |
-| Kills per fight | 21.8 | 19.9 | 21.4 |
-| Action switches / min | 29 | 27 | 26 |
-| Work per tick | 24 considerations | 12 nodes | 0.13 states expanded |
+| | Utility | Behaviour tree | GOAP | HTN |
+|---|---|---|---|---|
+| Average survival | 168 s | 162 s | 171 s | 177 s |
+| Lasted the full 3 minutes | 27 / 40 | 28 / 40 | 31 / 40 | 34 / 40 |
+| Kills per fight | 21.8 | 19.9 | 21.4 | 21.6 |
+| Action switches / min | 29 | 27 | 26 | 29 |
+| Work per tick | 24 considerations | 12 nodes | 0.13 states expanded | 0.72 decomposition steps |
 
-They end up close, and that's the honest result: **in a small, well-understood problem, every technique works once it's tuned.** Each of these took some tuning to get here, and each failed in its own characteristic way first: the utility agent flip-flopped, the tree with memory composites ignored its health, and the planner needed its goals chosen for it. The differences that matter are in what it's like to build and change them.
+They end up close, and that's the honest result: **in a small, well-understood problem, every technique works once it's tuned.** Each of these took some tuning to get here, and each failed in its own characteristic way first: the utility agent flip-flopped, the tree with memory composites ignored its health, and GOAP needed its goals chosen for it. The differences that matter are in what it's like to build and change them.
 
 ## How they compare
 
-| | Utility | Behaviour tree | GOAP |
-|---|---|---|---|
-| **You write** | considerations and curves per behaviour | the decision structure itself | actions (needs, changes, cost) and goals |
-| **Control** | indirect: shape the curves | direct: it does what the tree says | indirect: it finds its own sequences |
-| **Adding a behaviour** | add it; it competes on score | decide where it goes in the tree | add the action; plans use it where it helps |
-| **Sequences** | awkward (each step is a behaviour, or an action runs its own script) | natural (sequence nodes) | natural (that's what a plan is) |
-| **Nuance** | excellent: everything weighs in continuously | thresholds and fixed priority | coarse, through boolean facts |
-| **Debugging** | score breakdown per decision | lit-up tree | plan and search |
-| **Cost profile** | constant, every decision | every tick (or on events) | rare but spiky (a search) |
-| **Failure mode** | oscillation, opaque tuning | magic numbers, sprawling trees | odd plans, replanning churn |
+| | Utility | Behaviour tree | GOAP | HTN |
+|---|---|---|---|---|
+| **You write** | considerations and curves per behaviour | the decision structure itself | actions (needs, changes, cost) and goals | actions (needs, changes) and methods in priority order |
+| **Control** | indirect: shape the curves | direct: it does what the tree says | indirect: it finds its own sequences | direct: only recipes you wrote |
+| **Adding a behaviour** | add it; it competes on score | decide where it goes in the tree | add the action; plans use it where it helps | add it to the methods where you want it |
+| **Sequences** | awkward (each step is a behaviour, or an action runs its own script) | natural (sequence nodes) | natural (that's what a plan is) | natural, and checked ahead before starting |
+| **Nuance** | excellent: everything weighs in continuously | thresholds and fixed priority | coarse, through boolean facts | coarse, through boolean facts |
+| **Debugging** | score breakdown per decision | lit-up tree | plan and search | plan and method traversal record |
+| **Cost profile** | constant, every decision | every tick (or on events) | rare but spiky (a search) | small decompositions on fact changes |
+| **Failure mode** | oscillation, opaque tuning | magic numbers, sprawling trees | odd plans, replanning churn | sprawling domains, nothing it wasn't told |
 
 ## Hybrids
 
@@ -44,7 +44,7 @@ Most shipped games use more than one, each for what it's good at:
 - **Utility chooses, something else executes.** Scores pick a high-level behaviour ("fight", "flee", "restock"), and each behaviour is a small behaviour tree or script that sequences the details. This keeps scoring for the decision that needs nuance and trees for the steps that need order.
 - **A utility selector inside a tree.** A selector node that scores its children instead of trying them in order. The tree keeps its structure and readability, and the one decision that's genuinely a weighing of options gets curves.
 - **Utility picks the goal, GOAP plans it.** The planner is good at *how*, poor at *what for*. Scoring goals with considerations ("how urgent is healing?") and planning the winner is a natural split, and close to what this arena's GOAP agent does with its simple priority list.
-- **HTN planners** (hierarchical task networks) sit between trees and GOAP: designers write *methods* that decompose a task into subtasks, and the planner picks among them. They give back much of the control GOAP takes away, and several large action games have shipped with them.
+- **An HTN for the routine, utility for the judgement calls.** [HTN planners](/ai/htn/) put priorities in the order of the root's methods, which is clear but rigid. Letting a utility score order the root's methods (or pick between a few of them) keeps the readable recipes and adds nuance where the choice is genuinely a weighing.
 
 <Tip title="For a handful of behaviours scored by feel">
 Start with utility. Keep your behaviours, and replace each hand-written score function with considerations over shared factors and a curve each. Build the inspector first so you can see every score. Add a little inertia and commitment, and look for considerations the action changes itself. When one behaviour turns into a multi-step routine, give that behaviour its own small tree or script rather than splitting it into more scored behaviours. Reach for a planner when agents need to combine actions in ways you don't want to enumerate.
@@ -92,7 +92,7 @@ Things that make this work well:
 ## Takeaways
 
 - **In a small problem every technique works** once tuned; pick for how it is to build, change and debug.
-- **Utility** for nuanced choices, **trees** for readable control and sequences, **planners** for combining actions you don't want to enumerate.
+- **Utility** for nuanced choices, **trees** for readable control and sequences, **GOAP** for combining actions you don't want to enumerate, **HTN** for designer-written sequences that look ahead.
 - **Hybrids are normal**: utility to choose, trees or plans to execute.
 - **Sense, think, act** as separate systems; think less often than you act, in parallel, deterministically.
 - **Whatever you build, build the debugger first.**

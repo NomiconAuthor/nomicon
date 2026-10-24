@@ -1,0 +1,136 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Hierarchical task networks
+order: 5
+part: Trees and plans
+summary: 'A planner that follows recipes instead of searching: compound tasks, methods in priority order, decomposition with backtracking, and the method traversal record that lets an agent drop what it''s doing for something more important. Same facts and actions as GOAP, very different knowledge.'
+---
+import AiWidget from '../../components/AiWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+GOAP gives the planner a pile of actions and a goal, and lets a search find any sequence that works. That's powerful, and it's also why designers find it hard to direct: you can't tell a GOAP agent *how* to do something, only what the actions do. A **hierarchical task network** (HTN) planner turns that around. Designers write the *how* as recipes, and the planner's job is only to pick a recipe that will actually work from here, looking ahead before committing to it.
+
+HTN planning dates from 1970s planning research. Games copied the total-order, forward-decomposition style of Nau's SHOP planners (SHOP in 1999, SHOP2 in 2003), because it plans like GOAP but keeps the authoring control of a behaviour tree. *Killzone 2*'s bots, *Transformers: Fall of Cybertron* and *Horizon Zero Dawn* all shipped with HTN planners.
+
+## Tasks, methods and the domain
+
+An HTN has two kinds of task:
+
+- **Primitive tasks** are things the agent can do directly. Each has preconditions and effects, exactly like a GOAP action. Here they *are* the GOAP actions: *Approach*, *CastBolt*, *TakeCover*, *Recharge*, *GetCrystals*, *FetchPotion*, *DrinkPotion*, with the same needs and the same effects on the same eight facts.
+- **Compound tasks** are things to achieve that break down further. Each has a list of **methods**: a condition and a list of subtasks. The methods are in priority order.
+
+The whole set is the **domain**. The arena's has six compound tasks. The root, *BeABattleMage*, has five methods, and their order *is* the agent's priorities: patch up if hurt, otherwise fight if there's an enemy, otherwise restock the potion, otherwise make sure the staff is charged, otherwise idle. *Fight* has three: cast now if the staff is charged, otherwise recharge in cover and then cast, otherwise fetch crystals first.
+
+Nobody ranks goals and nobody scores actions. The designer writes down the ways of doing things, in the order they'd prefer them.
+
+## Decomposition
+
+Planning starts with a task list holding only the root, and a copy of the current facts. Then, repeatedly, take the first task off the list:
+
+- If it's **primitive**, check its preconditions against the copied facts. If they hold, append it to the plan and apply its effects to the copy, so later tasks see the world as it will be. If they don't, this branch has failed.
+- If it's **compound**, try its methods in order. Take the first whose condition holds, and put its subtasks at the front of the list.
+
+When a branch fails, the planner **backtracks**: it undoes everything since the most recent method choice that still has untried methods, and tries the next one. When the list is empty, the plan is done.
+
+<AiWidget kind="htn" />
+
+From the default state (an enemy out of range, an empty staff, spare crystals), the plan is Approach → TakeCover → Recharge → CastBolt, found in 13 decomposition steps with no backtracking. That's the plan the GOAP agent finds too, but here it's there because a designer wrote *Recharge in cover*, not because a search discovered it.
+
+Things to try:
+
+- **Turn off *spare crystals*.** *Recharge in cover* still applies (its condition is empty), so the planner goes into it: on its copy of the facts it walks up and takes cover, then finds *Recharge* needs crystals. It backs out, undoes those steps, and tries *Restock first*. The plan becomes GetCrystals → Approach → TakeCover → Recharge → CastBolt, after 2 backtracks and 21 steps. Step through it: the planner backs out of the most recent choice first (*CloseIn*, which has no other way to close in), then out of *Recharge in cover*. That's plain chronological backtracking, and it's why method order matters for speed as well as for priority.
+- **Turn off *healthy*.** *Patch up* applies: FetchPotion → TakeCover → DrinkPotion.
+- **Then also turn off *potion at shrine*.** *Patch up*'s condition still holds, but *FetchPotion* can't run, so the planner backs out of it and falls through to *Fight*. GOAP, given the goal *Get healthy*, would report that there's no plan and need a fallback goal; in an HTN the fallback is simply the next method.
+- **Turn on *staff charged*** (with everything else as it started) and the first method of *Fight*, *Bolt now*, applies: Approach → CastBolt.
+- **Turn on *enemy dead*.** The agent goes to restock its potion.
+
+That lookahead is the difference from a behaviour tree. A tree's selector also tries children in order, but it only checks conditions *now*: unless someone hand-adds every later step's condition at the front of the branch, it commits to *Recharge in cover*, walks into cover, and only then discovers it has no crystals. The HTN planner checks the whole branch against the predicted facts before the agent takes a step.
+
+```cpp
+// Facts and Action as in the GOAP lesson.
+struct Task;
+struct Method { const char* name; Facts pre_mask, pre_value; std::vector<const Task*> subtasks; };
+struct Task   { const char* name; const Action* primitive; std::vector<Method> methods; };
+
+struct Plan { std::vector<const Action*> actions; std::vector<int> mtr; };
+
+// Depth first. Subtasks go in front of the remaining tasks, so a failure anywhere later
+// unwinds to the most recent method choice that has alternatives left.
+bool decompose(std::span<const Task* const> todo, Facts s, Plan& out) {
+    if (todo.empty()) return true;
+    const Task& t = *todo.front();
+    auto rest = todo.subspan(1);
+    if (t.primitive) {
+        const Action& a = *t.primitive;
+        if ((s & a.pre_mask) != a.pre_value) return false;            // this branch can't work
+        out.actions.push_back(&a);
+        if (decompose(rest, (s & ~a.eff_mask) | a.eff_value, out)) return true;
+        out.actions.pop_back();
+        return false;
+    }
+    for (int i = 0; i < (int)t.methods.size(); i++) {
+        const Method& m = t.methods[i];
+        if ((s & m.pre_mask) != m.pre_value) continue;
+        std::vector<const Task*> next(m.subtasks.begin(), m.subtasks.end());
+        next.insert(next.end(), rest.begin(), rest.end());
+        size_t n = out.actions.size();
+        out.mtr.push_back(i);
+        if (decompose(next, s, out)) return true;
+        out.mtr.pop_back();                                            // backtrack: try the next method
+        out.actions.resize(n);
+    }
+    return false;
+}
+```
+
+In a shipping planner you'd avoid copying the task list on every method (keep a stack of tasks and a log to unwind), and cap the number of steps per plan. The search itself is small: it only explores the recipes you wrote, in the order you wrote them, and stops at the first that works. GOAP explores every action from every state it reaches and stops at the cheapest.
+
+## Priorities and interruptions
+
+The planner records which method it took at each compound task: the **method traversal record** (MTR). The default plan's is *BeABattleMage: Fight (2) › Fight: Recharge in cover (2) › CloseIn: Walk up (2)*, or just 2, 2, 2.
+
+Because methods are in priority order, MTRs compare like version numbers: a plan with a smaller MTR came from higher-priority methods. That gives an HTN agent a cheap way to change its mind without a separate goal picker:
+
+1. While a plan runs, replan whenever the facts change.
+2. If the new plan's MTR is smaller than the current one's, switch. Otherwise carry on.
+
+Mid-fight, the agent takes a hit and drops below *healthy*. The new plan starts with *Patch up* (1) where the current one started with *Fight* (2), so it wins: the agent breaks off, takes cover and drinks (fetching a potion first if it isn't carrying one). A replan that only finds another fighting plan, from the same or a lower method, is thrown away, so the agent doesn't flicker between equivalent plans.
+
+## In the arena
+
+GOAP, HTN with interruptions, and HTN that only replans when its plan breaks, on the same seeds. They run the same primitive actions in the same way: a step is done when its effects hold, and the plan is redone when the next step's preconditions fail or a step takes too long.
+
+<AiWidget kind="compare" lanes="goap,htn,htn-plain" />
+
+Over the 40 fights of the batch:
+
+| | GOAP | HTN | HTN, no interruptions |
+|---|---|---|---|
+| Average survival | 171 s | 177 s | 172 s |
+| Lasted the full 3 minutes | 31 / 40 | 34 / 40 | 34 / 40 |
+| Kills per fight | 21.4 | 21.6 | 22.0 |
+| Plans made per fight | 33 | 74 | 39 |
+| Work per tick | 0.13 | 0.72 | 0.23 |
+
+Work per tick is states expanded for GOAP and decomposition steps for HTN: not the same unit, but both are about one bitset test each, so the order of magnitude compares.
+
+The interrupting HTN agent makes about 36 interruptions a fight, but only 5 of them change what it's doing (from *Fight* to *Patch up*, say). The rest are the same job from a better recipe: once the staff is recharged, *Bolt now* beats *Recharge in cover*. Those cost a little planning and nothing else, since the new plan carries on with the same action. Most of the extra work per tick is the replanning on every fact change, and that's the price of being interruptible.
+
+Don't read much into the survival gap with GOAP. Part of it is when each one heals: the HTN domain's *Patch up* applies as soon as the agent isn't *healthy* (below 60 health), while the GOAP agent's goal picker waits until health is below 40. In an HTN, that decision is the first line of the domain, where a designer can see and move it; in this GOAP agent, it lives in code outside the planner.
+
+## HTN, GOAP or a tree?
+
+- **Against GOAP**, an HTN gives back control. The agent only does sequences someone wrote, so there are no surprising plans, and "why did it do that?" is answered by the MTR: these methods, in this order. The cost is the same as the benefit: it never finds a sequence you didn't write. GOAP's appeal is that adding *ThrowFirebomb* makes it appear in plans wherever it helps; in an HTN, you add it to the methods where you want it.
+- **Against a behaviour tree**, an HTN looks ahead. Each method is checked against predicted facts all the way down, so the agent doesn't start a routine it can't finish. The domain also reads much like a tree, which designers already know. The cost is that you need a symbolic model with effects for every primitive, which a tree doesn't need.
+- **Domains grow.** As the agent learns more ways of doing things, methods multiply, and their order becomes a design document in its own right. Keep compound tasks small and reuse them (here *CloseIn* and *Shelter* appear in several recipes).
+
+<Tip title="What shipped HTN planners add">
+Primitive tasks are usually **operators** that run in the engine and report running, succeeded or failed, so a step can take as long as it takes. Some primitives have **expected effects** used only during planning ("after *Approach* I'll be in range") that the real world later confirms or breaks. **Partial replanning** redoes only the subtree that failed instead of the whole plan. And planning is usually capped by a step budget per agent per frame. Troy Humphreys' chapter "Exploring HTN Planners through Example" in *Game AI Pro* (2013) covers these with a worked example.
+</Tip>
+
+## Takeaways
+
+- An HTN planner **decomposes** a root task using designer-written **methods**, tried in priority order, down to primitive actions with preconditions and effects.
+- It **simulates effects as it goes** and **backtracks** when a later step can't run, so it never commits to a recipe that won't work from here.
+- The **method traversal record** is both an explanation and a priority: replan when facts change and switch only to a plan from higher-priority methods.
+- Compared with GOAP: **more control, no surprises**, and no sequences you didn't write.

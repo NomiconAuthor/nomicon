@@ -1,0 +1,65 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Sleeping and fast bodies
+order: 5
+part: Concepts
+summary: 'The two ends of the speed range. Islands and sleep make bodies at rest cost nothing; tunnelling, speculative contacts and time-of-impact sweeps keep fast bodies from passing through walls.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Most bodies in a game are at rest most of the time: rubble, props, the crates nobody has touched. A few are very fast: projectiles, debris thrown by an explosion, a car. Engines have a mechanism for each end, and both trade a little correctness for a lot of speed.
+
+## Islands
+
+An **island** is a group of dynamic bodies connected by contacts or joints. Static bodies don't join islands (the floor would otherwise connect everything resting on it into one). Islands matter for two reasons:
+
+- They're **independent**: nothing in one island can affect another this step, so islands can be solved in parallel.
+- They **sleep as a unit**. A box resting on another box can't sleep on its own: if the bottom one moved, the top one would have to wake up too.
+
+This page's engine finds islands each step with a union-find over touching contacts and joints, which is close to linear in the number of contacts. Real engines usually keep islands from step to step instead, merging them when contacts begin and splitting them lazily when contacts end.
+
+<PhysicsWidget kind="sleep" />
+
+## Sleep
+
+Each body keeps a timer of how long it's been moving slower than a threshold (here 5 cm/s and 2° a second). When every body in an island has been still for long enough (half a second here), the whole island goes to sleep: velocities are zeroed, and the body stops being integrated, collided or solved. Here all 60 shapes in the bin are asleep 3.8 seconds after they start falling, and from then on the step does almost nothing.
+
+A sleeping island wakes when something awake touches it, when a joint attached to it changes, or when game code moves it or applies a force. Drag a shape in the bin, or **Drop a box** onto the pile, and watch the whole island light up.
+
+One thing to watch for: engines don't always wake bodies when you'd expect. Jolt, for example, doesn't wake a body's neighbours when that body is removed. If you delete a box from under a sleeping stack, wake the bodies around it yourself (Jolt's docs suggest `ActivateBodiesInAABox` with the removed body's bounds).
+
+<Tip title="Sleep is also stability">
+Sleeping isn't only an optimisation. A stack that's 99.9% solved still drifts by tiny amounts every step, and over minutes that adds up. Putting it to sleep freezes it exactly. That's also why sleep thresholds can't be too low: a body that never quite stops never sleeps. Untick **Sleeping** above and the pile keeps every shape awake, costing a full solve every step, for motion you can't see.
+</Tip>
+
+## Tunnelling
+
+Collision detection happens at discrete moments. A body that moves further in one step than the thickness of what it should hit can be on one side of a wall at one step and the other side at the next, with no step where they overlap. That's **tunnelling**.
+
+<PhysicsWidget kind="tunnel" />
+
+The ball is 0.3 m across and the wall 0.1 m thick. With **Nothing special**, 20 m/s is caught (the ball moves 0.33 m a step, so some step finds it overlapping the wall), but at 30 m/s it already passes straight through. The circles mark where the ball was at the end of each step: the wall falls in a gap between them.
+
+There are two ways to fix it, and engines use both.
+
+## Speculative contacts
+
+A **speculative contact** is a contact point between bodies that aren't touching yet but might touch this step. This page's engine keeps contacts out to a margin that grows with the bodies' relative speed (the idea as Erin Catto first described it), and the solver allows the bodies to approach by exactly the gap and no more: the constraint is "don't close more than the separation this step", which only bites if they'd otherwise pass through each other.
+
+It's cheap, it works for every pair (dynamic against dynamic too), and it fits into the normal solver. Its weakness is that the contact normal is guessed from the bodies' current positions, so a fast body passing close to a corner can be stopped or deflected by a contact that, in the true continuous motion, it would have missed. Real engines mostly use speculative contacts with a small *fixed* margin (a couple of centimetres), so resting contacts don't flicker on and off. A margin that small doesn't stop tunnelling, which is why they also have sweeps.
+
+## Sweeps and time of impact
+
+A **sweep** casts the body's shape along this step's motion and finds the **time of impact** (TOI): the fraction of the step at which it first touches something. The body is moved back to that moment, so the next step finds the contact normally. Choose **Sweep (time of impact)**: the dashed line shows where the sweep moved the ball back from.
+
+Sweeps are exact but cost a shape cast per fast body per step, so engines limit them: usually to bodies you mark as fast, against static geometry only, which covers what matters most (projectiles through walls, debris through floors). Some engines sweep fast bodies by default; others leave it off until you ask. Either way it's a per-body setting worth finding on day one. A linear sweep also doesn't see rotation, so long, fast-spinning objects can still tunnel.
+
+The engine on this page sweeps only circles flagged as bullets, against static shapes, which is enough to show the idea.
+
+## Takeaways
+
+- **Islands** are groups of touching dynamic bodies: solved independently, put to **sleep** together.
+- Sleep makes bodies at rest **free** and **exactly still**; touching, joints or code wake them.
+- **Tunnelling** happens when a body moves further than an obstacle's thickness in one step.
+- **Speculative contacts** are cheap and general but can snag on corners; **sweeps** are exact but cost a cast, so engines save them for fast bodies against static geometry.

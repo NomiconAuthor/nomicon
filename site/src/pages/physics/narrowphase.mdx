@@ -1,0 +1,64 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Narrowphase: SAT, GJK and contact manifolds'
+order: 3
+part: Concepts
+summary: 'The exact test for a pair of shapes and what it has to produce: separating axes, GJK and EPA on the Minkowski difference, reference faces and clipping, feature ids that let contacts persist, and the rounded shapes and margins engines use to keep it robust.'
+---
+import PhysicsWidget from '../../components/PhysicsWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The broadphase hands over pairs whose boxes overlap. The **narrowphase** decides whether the shapes themselves touch, and if they do, produces what the solver needs: a **contact manifold**. That's a normal (which way to push) and a small set of contact points (where to push), each with a **separation** (negative when overlapping).
+
+Two families of algorithm do the test, and the widget shows both on the same pair. Drag a shape to move it; drag near its edge to turn it.
+
+<PhysicsWidget kind="narrowphase" />
+
+## Separating axes
+
+The **separating axis theorem** says two convex shapes don't overlap if and only if there's a line you can project both onto where their shadows don't overlap. For polygons in 2D you don't have to search every direction: it's enough to try each **face normal** of both shapes. In 3D you also need the cross products of every edge of one shape with every edge of the other, which is why 3D SAT gets expensive for complex hulls.
+
+In **Separating axes** mode the table lists every candidate axis, the two shadows on it and the gap between them. Pull the shapes apart and one gap turns positive: that axis alone proves they're separate, and an implementation can stop at the first one it finds. Push them together and every gap is negative; the *least negative* one is the **minimum translation**: its depth is how far they overlap and its axis is the contact normal.
+
+SAT's appeal is that the axis it finds *is* the contact normal, and the faces that produced it are the ones to build contact points from.
+
+## GJK and EPA
+
+**GJK** (Gilbert–Johnson–Keerthi) works on the **Minkowski difference**: the set of every point of B minus every point of A. The shapes overlap exactly when that set contains the origin, and when they don't, the distance between them is the distance from the origin to the set. The difference is never built: GJK only needs a **support function**, the furthest point of a shape in a given direction, and the difference's support point is B's support point in that direction minus A's in the opposite one. So the same code handles boxes, hulls, spheres, capsules and anything else with a support function.
+
+Switch to **GJK and EPA** and step through it. GJK keeps a **simplex** (a point, a segment, or a triangle in 2D) of support points and repeatedly replaces it with the part closest to the origin, searching past it. Either the triangle ends up around the origin (they overlap) or no new support point gets any closer (they're apart, and that closest point is the separation).
+
+When they overlap, GJK says *that* they do but not *by how much*. **EPA** (the expanding polytope algorithm) takes GJK's final simplex and grows it towards the boundary of the difference, always pushing out its edge closest to the origin, until that edge is on the boundary. Its distance from the origin is the penetration depth and its normal is the contact normal.
+
+## Building the manifold
+
+One normal and one depth aren't enough to rest a box on the floor: with a single contact point it would rock. A box lying flat needs a point at each end of its bottom face. Switch to **Contact manifold**:
+
+1. Take the axis of least overlap. The face it came from is the **reference face** (green).
+2. On the other shape, find the **incident edge**: the one whose normal is most opposed to the reference normal (orange).
+3. **Clip** the incident edge against the side planes of the reference face, so the points can't stick out past it.
+4. Keep the clipped points that are behind the reference face, or within a small speculative margin in front of it. Each one is a contact point, with its separation measured along the normal.
+
+In 3D the incident face is clipped against the reference face's side planes as a polygon, which can produce many points, and engines reduce them to four (usually the deepest point plus the three that cover the largest area).
+
+## Feature ids: the same contact next step
+
+Each contact point gets a **feature id**: which edge of which shape was the reference, which vertex or clip produced it. Turn a shape slightly and the points move, but their ids stay the same. That's how the engine recognises "the same contact as last step" without comparing positions, and it matters a lot: the solver starts each point from last step's impulse ([warm starting](/physics/solving-contacts/)), and that only works if it can match points from one step to the next. When the ids change, the engine has to start those points from zero.
+
+<Tip title="Rounded shapes and margins">
+Exact sharp polygons are fragile: when the shapes just touch, GJK's distance is near zero and its answer flips between "touching" and "not". Engines dodge this with a little rounding. Jolt gives convex shapes a **convex radius**: GJK runs on a slightly shrunk core shape, and the radius is added back, so the core stays separated while the rounded shell touches and EPA is rarely needed. Rounded polygons and capsules exist for the same reason. Contacts are also kept while bodies are slightly apart (Jolt's speculative contact distance is 0.02 m by default), so a resting body doesn't lose and regain its contacts every step.
+</Tip>
+
+## Which engines do what
+
+- **SAT with clipping** is the classic polygon and box collider, as in Box2D's polygon manifolds and most box–box tests in 3D engines.
+- **GJK and EPA** are the general convex test. Jolt uses them for convex shapes, with the convex radius keeping EPA rare.
+- Special pairs get special code: sphere against sphere, capsule against capsule, anything against a triangle mesh or height field, which test triangles one at a time and need extra care at shared edges so objects sliding across a mesh don't catch on the internal edges ("ghost collisions").
+
+## Takeaways
+
+- The narrowphase produces a **manifold**: a normal, a few points, their separations.
+- **SAT**: try face normals (plus edge pairs in 3D); the least overlap is the normal.
+- **GJK** works on the **Minkowski difference** through support functions; **EPA** finds the depth when they overlap.
+- **Reference face, incident edge, clip**: enough points for a box to rest flat.
+- **Feature ids** make contacts persist, which warm starting depends on; **rounding and margins** keep it robust.

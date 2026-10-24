@@ -18,7 +18,7 @@ interface Entry {
   x: string;
 }
 
-const SECTION: Record<string, string> = { engine: 'engine', flecs: 'flecs', ai: 'game AI' };
+const SECTION: Record<string, string> = { engine: 'engine', flecs: 'flecs', ai: 'game AI', physics: 'physics' };
 
 function plain(md: string): string {
   return md
@@ -36,7 +36,7 @@ function plain(md: string): string {
 }
 
 export function GET() {
-  const raw = import.meta.glob<string>('./{engine,flecs,ai}/*.mdx', { query: '?raw', import: 'default', eager: true });
+  const raw = import.meta.glob<string>('./{engine,flecs,ai,physics}/*.mdx', { query: '?raw', import: 'default', eager: true });
   const out: Entry[] = [];
   for (const [file, src] of Object.entries(raw)) {
     const [, section, name] = file.match(/^\.\/(\w+)\/([\w-]+)\.mdx$/)!;
