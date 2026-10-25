@@ -3,38 +3,34 @@ layout: ../../layouts/Lesson.astro
 title: What the command queue merges away
 order: 11
 part: Systems, commands and reactions
-summary: When a system queues several operations for one entity, flecs applies them as a batch. Which of those operations observers get to see, and how that changed on master in October 2026.
+summary: When a system queues several operations for one entity, flecs applies them as a batch. What that batching skips, what it never hides, and what observers see when you queue a remove and an add of the same component.
 ---
 import FlecsDebugger from '../../components/FlecsDebugger.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
 [The commands lesson](/flecs/commands/) showed that operations inside a system are queued, and that commands for the same entity are **batched**: the first command for an entity applies all of them at once, so it moves once, to its final table. That's great for performance. It also means the intermediate states in your code never exist in storage, so observers can't see them.
 
-That raises some questions. What happens when the queue says *remove, then add* the same component? Does an `OnRemove` observer see the value you `set` between two removes? Until October 2026 the answers were surprising. A fix to remove/add command batching (commit `9062901`, "Fix deferred remove of overridden components and remove/add command batching") changed them, and it is on master now.
-
-The debugger below can run **both builds**: current master, and master from just before the fix (`68631db`). Each line runs a system once on its own entity (A to D, each starting with `Foo{40}`), and three observers record what they see. Step through it, then switch the build at the top and compare.
+That raises some questions. What happens when the queue says *remove, then add* the same component? Does an `OnRemove` observer see the value you `set` between two removes? The debugger below answers them. Each line runs a system once on its own entity (A to D, each starting with `Foo{40}`), and three observers record what they see.
 
 <FlecsDebugger scenario="batching" />
 
-## What each build does
+## What observers see
 
 Observer calls are shown with the value of `Foo` they were given.
 
-| Case (queued in one system) | Before the fix (`68631db`) | flecs master (`9062901` and later) |
+| Case (queued in one system) | Observers see | Moves |
 |---|---|---|
-| **A** `remove<Foo>()`, `add<Foo>()` | `OnAdd(40)` only. No move, and Foo keeps 40. There's no `OnRemove`, yet `OnAdd` fires for a component that never left. | `OnRemove(40)`, then `OnAdd(0)`. A really leaves and re-enters the table, so Foo is constructed fresh: **0**. |
-| **B** `remove`, `set<Foo>({50})`, `remove` | `OnRemove(50)` **twice**. The 40 that was really removed is never seen. | `OnRemove(40)` **once**. The 50 never existed, so nobody sees it. |
-| **C** `remove`, `set<Foo>({50})` | `OnAdd(50)`, `OnSet(50)`. The old 40 is overwritten without an `OnRemove`. | `OnRemove(40)`, `OnAdd(0)`, `OnSet(50)`: a full remove, then a fresh add and set. |
-| **D** `set<Foo>({50})`, `remove` | `OnRemove(50)` | `OnRemove(50)` |
+| **A** `remove<Foo>()`, `add<Foo>()` | `OnRemove(40)`, then `OnAdd(0)`. A really leaves and re-enters the table, so Foo is constructed fresh: **0**, not the old 40. | 2 |
+| **B** `remove`, `set<Foo>({50})`, `remove` | `OnRemove(40)` **once**. The 50 only ever existed in the queue, so nobody sees it. | 1 |
+| **C** `remove`, `set<Foo>({50})` | `OnRemove(40)`, `OnAdd(0)`, `OnSet(50)`: a full remove, then a fresh add and set. | 2 |
+| **D** `set<Foo>({50})`, `remove` | `OnRemove(50)`: the set is applied, then the remove sees it. | 1 |
 
-So on current master the rule is simple. **The command queue applies your operations in order. Batching only skips work that can't be observed, and never invents or hides events.** A queued remove really removes, so the component's `OnRemove` sees the value that was in storage, and a later add constructs a new value. A value that only ever existed inside the queue (B's 50) is never visible to anyone.
+The rule behind all four: **the command queue applies your operations in order. Batching only skips work that can't be observed, and never invents or hides events.** A queued remove really removes, so the component's `OnRemove` sees the value that was in storage, and a later add constructs a new value. A value that only ever existed inside the queue (B's 50) is never visible to anyone.
 
-Before the fix, batching folded remove/add pairs together in ways that produced events that didn't match what happened: an `OnAdd` with no `OnRemove`, or two `OnRemove`s for one removal reporting a value that was never stored.
-
-<Tip kind="warn" title="Don't rely on either behaviour by accident">
-If an observer has to see a "reset" (remove then add), don't do both in the same command batch and hope. Older flecs versions behave differently, and on current master you get a freshly constructed value, not the old one. If you want to reset a component, `set` it to its initial value. If you need "it was removed" and "it was added" handled separately, make them two separate sync points, for example two systems with a merge between them.
+<Tip kind="warn" title="A queued remove and add is not a reset to the old value">
+If an observer has to see a "reset" (remove then add), you get a freshly constructed value, not the old one, and every observer of both events runs. If you just want to reset a component, `set` it to its initial value. If you need "it was removed" and "it was added" handled separately, make them two separate sync points, for example two systems with a merge between them.
 </Tip>
 
 <Tip kind="note" title="Why the moves column matters">
-Watch the stats line and the move events. Before the fix, A and C caused no moves at all, because the pair cancelled out. On current master they cause two each (out of the table and back in), which is the honest cost of what the code asked for. If you queue remove/add pairs every frame for a reset, that's two moves per entity per frame: another reason to use `set`.
+Watch the stats line and the move events. A and C move twice each (out of the table and back in), which is the honest cost of what the code asked for. If you queue remove/add pairs every frame for a reset, that's two moves per entity per frame: another reason to use `set`.
 </Tip>

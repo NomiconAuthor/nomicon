@@ -20,19 +20,20 @@ interface Props {
   title: string;
   description?: string;
   /** Which navbar entry is current. */
-  section?: 'engine' | 'flecs' | 'ai' | 'physics' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'home';
+  section?: 'engine' | 'flecs' | 'ai' | 'physics' | 'network' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'feel-lab' | 'home';
 }
-const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, physics, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
+const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, physics, networking, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
 const fullTitle = section === 'home' ? title : `${title} · nomicon`;
 const nav = [
   { id: 'engine', label: 'engine', href: '/engine/' },
   { id: 'flecs', label: 'flecs', href: '/flecs/' },
   { id: 'ai', label: 'ai', href: '/ai/' },
   { id: 'physics', label: 'physics', href: '/physics/' },
+  { id: 'network', label: 'network', href: '/network/' },
   { id: 'labs', label: 'labs', href: '/labs/' },
 ];
 // Both labs live under the one "labs" tab.
-const current = section === 'pathing-lab' || section === 'tactics-lab' ? 'labs' : section;
+const current = section === 'pathing-lab' || section === 'tactics-lab' || section === 'feel-lab' ? 'labs' : section;
 const themes = THEMES;
 
 // Link previews (Discord, Slack, social sites). Each page's card is a JPEG made by

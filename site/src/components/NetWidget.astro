@@ -1,0 +1,35 @@
+---
+/** Mounts one of the networking lesson widgets (src/net/). */
+interface Props {
+  kind: 'problem' | 'snapshots' | 'prediction' | 'lagcomp' | 'sync';
+}
+const { kind } = Astro.props;
+---
+
+<net-widget data-kind={kind}><p class="ll-loading">Loading…</p></net-widget>
+
+<script>
+  import '../engine/engine.css';
+  import '../net/net.css';
+
+  class NetWidget extends HTMLElement {
+    async connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const w = await import('../net/widgets');
+      const k = this.dataset.kind;
+      if (k === 'problem') new w.ProblemViz(this);
+      else if (k === 'snapshots') new w.SnapshotViz(this);
+      else if (k === 'prediction') new w.PredictionViz(this);
+      else if (k === 'lagcomp') new w.LagCompViz(this);
+      else if (k === 'sync') new w.SyncViz(this);
+    }
+  }
+  if (!customElements.get('net-widget')) customElements.define('net-widget', NetWidget);
+</script>
+
+<style>
+  net-widget {
+    display: block;
+  }
+</style>

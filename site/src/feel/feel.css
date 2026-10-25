@@ -1,0 +1,97 @@
+/* Feel lab, on top of the lab layout (lab/lab.css). */
+.feel-view {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+  background: var(--bg);
+}
+.feel-view:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.feel-strip {
+  width: 100%;
+  height: 190px;
+  display: block;
+  margin-top: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.feel-spots {
+  margin-bottom: 8px;
+}
+.feel-spots button {
+  padding: 4px 10px;
+}
+.feel-l {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.feel-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.feel-h .cx-link {
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+.feel-slider {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--body);
+}
+.feel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.feel-v {
+  color: var(--ink);
+  font-family: var(--f-mono);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.feel-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.feel-chk {
+  font-size: 0.85rem;
+  color: var(--body);
+}
+.feel-note,
+.feel-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.feel-hint {
+  margin-top: 8px;
+}
+.feel-stats {
+  margin-top: 8px;
+}
+.feel-pads {
+  display: none;
+  gap: 10px;
+  margin-top: 10px;
+}
+.feel-pad {
+  flex: 1;
+  padding: 16px 0;
+  font-size: 1.1rem;
+  touch-action: none;
+  user-select: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .feel-pads {
+    display: flex;
+  }
+}

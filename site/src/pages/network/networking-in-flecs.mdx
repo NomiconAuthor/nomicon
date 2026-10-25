@@ -1,14 +1,14 @@
 ---
 layout: ../../layouts/Lesson.astro
-title: Networking patterns
-order: 18
-part: Engine integration
+title: Networking in flecs
+order: 7
+part: In practice
 summary: 'Two worlds that must agree on what an entity id means. Making ids match with make_alive, keeping local ids out of the way with entity ranges, choosing what to send with a Replicated tag, and sending frequent and rare data differently.'
 ---
 import FlecsNet from '../../components/FlecsNet.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
-flecs has no networking layer, and that's deliberate: what to send, how often and how reliably is a game decision. What flecs does give you is a set of id tools that make the usual designs straightforward, and a few traps that are easy to fall into. This lesson collects the patterns that come up again and again.
+The lessons before this one are about networking models: what to send and how to hide the delay. This one is about the ECS side, in flecs. flecs has no networking layer, and that's deliberate: what to send, how often and how reliably is a game decision. What flecs does give you is a set of id tools that make the usual designs straightforward, and a few traps that are easy to fall into. This lesson collects the patterns that come up again and again.
 
 The running example is a server-authoritative game. The server owns the ships, and the client mirrors them by **using the same entity ids**, so a message can say "entity #5001 moved" and both sides know which entity that is.
 
@@ -31,13 +31,13 @@ flecs::entity e = world.make_alive(server_id);   // C: ecs_make_alive(world, ser
 
 ## Try it
 
-Two real flecs worlds run below, one for the server and one for the client. Start with ranges **off**:
+Two real flecs worlds run below, one for the server and one for the client. They start with entity ranges on; click the button to turn them **off** (which resets both worlds), then:
 
 1. Spawn a local spark on the client.
 2. Spawn a ship on the server.
 3. Send an update.
 
-Both worlds handed out the same next id, so the ship's components land on the client's spark. Then turn ranges **on** (which resets both worlds) and do the same thing.
+Both worlds handed out the same next id, so the ship's components land on the client's spark. Then turn ranges back **on** and do the same thing.
 
 To see versions at work: with a ship already on the client, delete it on the server and spawn another, which recycles the index with a new version. Tick **lose the deletes** and send. The client still has the old version alive, `make_alive` refuses the new one, and the client has to delete the stale entity first.
 

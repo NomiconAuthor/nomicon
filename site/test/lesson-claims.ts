@@ -37,6 +37,8 @@ import { Box3DEngine, BulletEngine, JoltEngine, SCENES as ENGINE_SCENES, type En
 import { averageLatency } from '../src/physics/asyncTick';
 import { PhysicsBridge } from '../src/physics/ecsBridge';
 import { runTrouble } from '../src/physics/trouble';
+import { DumbTerminal, SnapshotClient, PredictedClient, LagCompensation, PeerToPeer } from '../src/net/models';
+import { Player as FeelPlayer, makeLevel as feelLevel, TIGHT as FEEL_TIGHT, type Settings as FeelSettings } from '../src/feel/controller';
 import { FlecsWorld } from '../src/flecs/runtime';
 import initJolt from 'jolt-physics/wasm';
 
@@ -831,8 +833,175 @@ function trouble(): void {
   claim(L, `it drifts only about ${d1(runTrouble('platform', true))} m`);
 }
 
-const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, steering, formations, cover: coverSampling, avoidance, jobs, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
-const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
+// Networking: every number the lessons quote, from the same models the widgets run.
+function network(): void {
+  const run = <T extends { step(): void }>(m: T, secs = 60): T => {
+    for (let i = 0; i < secs * 60; i++) m.step();
+    return m;
+  };
+  const pct = (a: number, b: number) => ((100 * a) / Math.max(1, b)).toFixed(1);
+  // 1. The problem
+  const P = 'network/the-problem.mdx';
+  for (const lat of [20, 50, 100, 200]) {
+    const m = run(new DumbTerminal({ link: { latency: lat, jitter: 5, loss: 0 }, bots: 2, seed: 1 }));
+    claim(P, `| ${lat} ms | ${Math.round(m.averageDelay)} ms |`);
+  }
+  const jit = run(new DumbTerminal({ link: { latency: 50, jitter: 30, loss: 0 }, bots: 2, seed: 1 }));
+  claim(P, `${pct(jit.framesNoNew, jit.frames)}% of frames have nothing new to draw, and ${pct(jit.framesSkipped, jit.frames)}% skip over a state`);
+  const l5 = run(new DumbTerminal({ link: { latency: 50, jitter: 5, loss: 0.05 }, bots: 2, seed: 1 }));
+  fact(P, Math.round((100 * l5.framesNoNew) / l5.frames) === 5, 'with 5% loss about 5% of frames have nothing new');
+  const l20 = run(new DumbTerminal({ link: { latency: 50, jitter: 5, loss: 0.2 }, bots: 2, seed: 1 }));
+  claim(P, `With 20%, it's ${pct(l20.framesNoNew, l20.frames)}%, and the longest freeze grows to ${Math.round(l20.longestGap)} ms`);
+
+  // 2. Snapshots
+  const S = 'network/snapshots-and-interpolation.mdx';
+  const snap = (rate: number, mode: 'latest' | 'interpolate' | 'extrapolate', poor = false) =>
+    run(new SnapshotClient({ link: poor ? { latency: 100, jitter: 40, loss: 0.05 } : { latency: 50, jitter: 10, loss: 0.02 }, rate, mode, delay: 2000 / rate, bots: 12, seed: 1 }));
+  const cell = (m: SnapshotClient) => {
+    const j = Math.round(m.jumps / 12);
+    return `${m.averageError.toFixed(2)} m off, ${j ? `${j} jumps/min` : '0 jumps'}`;
+  };
+  for (const rate of [10, 20, 60]) {
+    const a = snap(rate, 'latest');
+    const b = snap(rate, 'interpolate');
+    const c = snap(rate, 'extrapolate');
+    claim(S, `| ${rate} | ${cell(a)} | ${cell(b)} | ${cell(c)} |`);
+    const kb = (x: number) => `${(x / 1000).toFixed(1)} kB/s`;
+    const bw = a.bytesPerSecond;
+    claim(S, `| ${rate} | ${kb(bw.full)} | ${kb(bw.quantised)} | ${kb(bw.delta)} |`);
+  }
+  claim(S, `every player visibly jumps about ${Math.round(snap(20, 'latest').jumps / 12)} times a minute`);
+  claim(S, `the client runs dry ${snap(20, 'interpolate', true).late} times a minute; at 60 a second with a 33 ms delay, ${snap(60, 'interpolate', true).late} times`);
+
+  // 3. Prediction
+  const R = 'network/prediction-and-reconciliation.mdx';
+  const pred = (mode: 'wait' | 'predict' | 'reconcile' | 'smooth', lat = 100, alone = false) => run(new PredictedClient({ link: { latency: lat, jitter: 10, loss: 0.02 }, mode, seed: 1, alone }));
+  const w = pred('wait');
+  const pr = pred('predict');
+  const rc = pred('reconcile');
+  const sm = pred('smooth');
+  const cm = (x: number) => `${Math.round(x * 100)} cm`;
+  claim(R, `| Wait for the server | ${Math.round(w.averageDelay)} ms | none | ${cm(w.biggestJump)} |`);
+  claim(R, `| Predict | 0 ms | none, and ${pr.averageDrift.toFixed(2)} m adrift | none |`);
+  claim(R, `| Predict and reconcile | 0 ms | ${rc.corrections} | ${cm(rc.biggestJump)} |`);
+  claim(R, `| Reconcile, smoothed | 0 ms | ${sm.corrections} | ${cm(sm.biggestJump)} |`);
+  fact(R, pr.averageDelay === 0 && pr.corrections === 0 && pr.biggestJump <= 0.001, 'prediction alone: no delay, no corrections, no jumps');
+  claim(R, `At 100 ms latency a turn takes ${Math.round(w.averageDelay)} ms to show`);
+  claim(R, `by ${pr.averageDrift.toFixed(2)} m on average over a minute`);
+  // Walking straight into the guard for two seconds, with nobody else about.
+  const guardWalk = (predictPlayers: boolean) => {
+    const m = new PredictedClient({ link: { latency: 100, jitter: 10, loss: 0.02 }, mode: 'reconcile', seed: 1, predictPlayers, noPusher: true });
+    m.input = (t) => (t < 120 ? { mx: 1, my: 0, fire: false } : { mx: 0, my: 0, fire: false });
+    let deepest = 0;
+    for (let i = 0; i < 300; i++) {
+      m.step();
+      deepest = Math.max(deepest, m.me.x - (10 - 0.8));
+    }
+    return { deepest, corrections: m.corrections, biggestJump: m.biggestJump };
+  };
+  const gw = guardWalk(false);
+  claim(R, `you stay about a round trip's walk inside him: ${(gw.deepest).toFixed(2)} m at 100 ms`);
+  fact(R, gw.biggestJump < 0.1, 'walking into the guard: no single big snap, it slides');
+  fact(R, guardWalk(true).corrections === 0, 'predicting other players: walking into the guard causes no corrections');
+  fact(R, pred('reconcile', 100, true).corrections === 0, '2% loss alone causes no corrections');
+
+  // 4. Lag compensation
+  const C = 'network/lag-compensation.mdx';
+  const lag = (lat: number, rewind: boolean, maxRewind = 1000) => run(new LagCompensation({ link: { latency: lat, jitter: 5, loss: 0 }, delay: 100, rewind, maxRewind, seed: 1 }));
+  const rate = (m: LagCompensation) => Math.round(100 * m.hitRate);
+  fact(C, [25, 75, 150].every((l) => rate(lag(l, false)) === 0), 'without rewinding, 0% hit at 25, 75 and 150 ms');
+  fact(C, [25, 75, 150].every((l) => rate(lag(l, true)) === 100), 'with rewinding, 100% hit at every latency');
+  const far = lag(150, true);
+  const hits = far.results.filter((r) => r.hit).length;
+  claim(C, `${far.results.filter((r) => r.hit && r.inCover).length} of ${hits} hits are on a target`);
+  fact(C, rate(lag(150, true, 250)) === 0, 'a 250 ms cap at 150 ms latency: every shot misses');
+  fact(C, rate(lag(75, true, 250)) === 100 && rate(lag(75, true, 100)) === 0, 'at 75 ms, a 250 ms cap compensates fully and 100 ms does not');
+
+  // 5. Lockstep and rollback
+  const L = 'network/lockstep-and-rollback.mdx';
+  const p2p = (mode: 'lockstep' | 'rollback', lat: number, d: number, desync = false, secs = 60) => run(new PeerToPeer({ link: { latency: lat, jitter: 5, loss: 0.01 }, mode, inputDelay: d, maxRollback: 8, desync, seed: 1 }), secs);
+  for (const d of [0, 1, 2, 4]) {
+    const m = p2p('lockstep', 50, d);
+    claim(L, `| ${d} frame${d === 1 ? '' : 's'} | ${Math.round((100 * m.a.stalls) / m.tick)}% | ${Math.round(m.a.frame / 60)} |`);
+  }
+  const rb = p2p('rollback', 50, 0);
+  claim(L, `peer A rolls back ${(rb.a.rollbacks / 60).toFixed(1)} times a second (each time B changes what it's pressing), re-simulating ${(rb.a.rolledFrames / rb.a.rollbacks).toFixed(0)} frames on average, at most ${rb.a.deepest}`);
+  const rb2 = p2p('rollback', 50, 2);
+  claim(L, `With 2 frames of delay, rollbacks average ${(rb2.a.rolledFrames / rb2.a.rollbacks).toFixed(0)} frames`);
+  fact(L, p2p('rollback', 50, 4).a.rollbacks < 30, 'with 4 frames of delay, rollbacks are almost gone');
+  // Both peers agree with each other, and with the game run with no network at all.
+  const n = Math.min(rb.a.confirmedRemote, rb.b.confirmedRemote);
+  const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
+  fact(L, same(rb.a.states[n]?.players, rb.b.states[n]?.players) && same(rb.truthAt(n).players, rb.a.states[n]?.players), 'rollback peers end in the same state as a network-free run');
+  const ds = p2p('rollback', 50, 0, true, 10);
+  claim(L, `differ at the first check, frame ${Math.max(ds.a.desyncAt, ds.b.desyncAt)}`);
+}
+
+// The feel lab: the controller does what its concept cards say.
+function feel(): void {
+  const F = 'feel lab';
+  const L = feelLevel();
+  const K = (left = false, right = false, jump = false) => ({ left, right, jump });
+  // A held jump reaches the height you set (no apex hang, no cut).
+  const plain = { ...FEEL_TIGHT, apexHang: 1, jumpCut: 1 };
+  const p = new FeelPlayer(L, plain);
+  for (let i = 0; i < 5; i++) p.step(K());
+  const y0 = p.y;
+  let top = y0;
+  for (let i = 0; i < 90; i++) {
+    p.step(K(false, false, true));
+    top = Math.min(top, p.y);
+  }
+  fact(F, Math.abs(y0 - top - plain.jumpHeight) < 0.02, `a held jump reaches the set height (${(y0 - top).toFixed(3)} of ${plain.jumpHeight})`);
+  // Coyote time: a jump pressed 3 ticks after running off the gap's edge.
+  const coyote = (s: FeelSettings) => {
+    const q = new FeelPlayer(L, s);
+    q.teleport(12, 15);
+    let left = -1;
+    const out: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      const e = q.step(K(false, true, left >= 0 && i === left + 3));
+      if (left < 0 && !q.grounded && i > 5) left = i;
+      if (e.jumped) out.push(e.jumped);
+      if (e.eaten) out.push('eaten');
+    }
+    return out.join(',');
+  };
+  fact(F, coyote(FEEL_TIGHT) === 'coyote' && coyote({ ...FEEL_TIGHT, coyoteTime: 0 }) === 'eaten', 'coyote time saves a late jump; without it the press is eaten');
+  // Jump buffer: a press 4 ticks before landing.
+  const buffer = (s: FeelSettings) => {
+    const probe = new FeelPlayer(L, s);
+    probe.teleport(33.5, 10);
+    let land = -1;
+    for (let i = 0; i < 200 && land < 0; i++) if (probe.step(K()).landed !== undefined) land = i;
+    const q = new FeelPlayer(L, s);
+    q.teleport(33.5, 10);
+    const out: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      const e = q.step(K(false, false, i === land - 4));
+      if (e.jumped) out.push(e.jumped);
+      if (e.eaten) out.push('eaten');
+    }
+    return out.join(',');
+  };
+  fact(F, buffer(FEEL_TIGHT) === 'buffered' && buffer({ ...FEEL_TIGHT, jumpBuffer: 0 }) === 'eaten', 'the buffer turns an early press into a jump; without it the press is eaten');
+  // Corner correction: from just under the low ledge's left edge, holding right.
+  const corner = (s: FeelSettings) => {
+    const q = new FeelPlayer(L, s);
+    q.teleport(26.8, 15);
+    for (let i = 0; i < 5; i++) q.step(K());
+    let on = false;
+    for (let i = 0; i < 90; i++) {
+      q.step(K(false, i > 2, i < 30));
+      if (q.grounded && Math.abs(q.y - 12) < 0.01) on = true;
+    }
+    return on;
+  };
+  fact(F, corner(FEEL_TIGHT) && !corner({ ...FEEL_TIGHT, cornerCorrection: 0 }), 'corner correction gets you onto the low ledge; without it the jump dies');
+}
+
+const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
+const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
 const args = process.argv.slice(2);
 const chosen = args.includes('--all') ? Object.keys(GROUPS) : args.filter((a) => !a.startsWith('-')).length ? args.filter((a) => !a.startsWith('-')) : FAST;
 for (const name of chosen) {

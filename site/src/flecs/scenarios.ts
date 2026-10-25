@@ -523,10 +523,6 @@ D { Foo: {x: 40}
         },
       },
     ],
-    variants: [
-      { label: 'flecs master' },
-      { label: 'Before the fix (68631db)', wasm: '/flecs-68631db.wasm', note: 'Running flecs master as of 68631db, before the remove/add batching fix (9062901).' },
-    ],
     ops: [
       { code: 'removeAdd.run();        // A', run: (c) => c.runSystem('RemoveAdd') },
       { code: 'removeSetRemove.run();  // B', run: (c) => c.runSystem('RemoveSetRemove') },

@@ -3,7 +3,7 @@ import Base from '../layouts/Base.astro';
 import '../styles/home.css';
 ---
 
-<Base title="Labs" section="labs" description="Interactive labs: pathfinding algorithms, and tactical terrain analysis.">
+<Base title="Labs" section="labs" description="Interactive labs: pathfinding algorithms, tactical terrain analysis, and game feel.">
   <main class="home">
     <section class="intro">
       <h1>Labs</h1>
@@ -25,6 +25,15 @@ import '../styles/home.css';
         <p>
           Terrain analysis for AI on a 2.5D map: clearance, choke points for movement and for sight, traffic, openness, cover generation
           by scanning and by sampling, exposure to threats, and picking the best cover.
+        </p>
+        <span class="go">Open the lab →</span>
+      </a>
+      <a class="card" href="/feel-lab/">
+        <span class="kicker">Lab</span>
+        <h2>feel lab</h2>
+        <p>
+          A platformer with every game-feel setting exposed: acceleration, jump height and timing, fall gravity, coyote time, jump
+          buffering, corner correction, input delay, camera smoothing and juice. Turn one off and feel what breaks.
         </p>
         <span class="go">Open the lab →</span>
       </a>

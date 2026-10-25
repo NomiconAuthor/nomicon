@@ -1,0 +1,16 @@
+/* Networking lesson widgets. Colours come from the theme tokens. */
+.net-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.net-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.net-note {
+  margin: 0;
+}

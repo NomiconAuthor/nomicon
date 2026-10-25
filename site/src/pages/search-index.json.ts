@@ -5,6 +5,7 @@
 import GithubSlugger from 'github-slugger';
 import { CONCEPTS as PATHING } from '../lab/learn/concepts';
 import { CONCEPTS as TACTICS } from '../tactics/concepts';
+import { CONCEPTS as FEEL } from '../feel/concepts';
 
 interface Entry {
   /** Section name shown as a kicker. */
@@ -18,7 +19,7 @@ interface Entry {
   x: string;
 }
 
-const SECTION: Record<string, string> = { engine: 'engine', flecs: 'flecs', ai: 'game AI', physics: 'physics' };
+const SECTION: Record<string, string> = { engine: 'engine', flecs: 'flecs', ai: 'game AI', physics: 'physics', network: 'networking' };
 
 function plain(md: string): string {
   return md
@@ -36,7 +37,7 @@ function plain(md: string): string {
 }
 
 export function GET() {
-  const raw = import.meta.glob<string>('./{engine,flecs,ai,physics}/*.mdx', { query: '?raw', import: 'default', eager: true });
+  const raw = import.meta.glob<string>('./{engine,flecs,ai,physics,network}/*.mdx', { query: '?raw', import: 'default', eager: true });
   const out: Entry[] = [];
   for (const [file, src] of Object.entries(raw)) {
     const [, section, name] = file.match(/^\.\/(\w+)\/([\w-]+)\.mdx$/)!;
@@ -58,6 +59,7 @@ export function GET() {
   for (const [lab, url, list] of [
     ['Pathing lab', '/pathing-lab/', PATHING],
     ['Tactics lab', '/tactics-lab/', TACTICS],
+    ['Feel lab', '/feel-lab/', FEEL],
   ] as const)
     for (const c of list) out.push({ s: 'labs', t: lab, h: c.title, u: `${url}#concept-${c.id}`, x: plain([...c.body, c.look ?? ''].join(' ')) });
   return new Response(JSON.stringify(out), { headers: { 'Content-Type': 'application/json' } });

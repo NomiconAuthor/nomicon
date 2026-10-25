@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / 'site' / 'dist'
 OUT = ROOT / 'site' / 'public' / 'og'
 LIST = ROOT / 'site' / 'src' / 'og-cards.json'
-SECTIONS = {'engine': 'Engine fundamentals', 'flecs': 'flecs', 'ai': 'Game AI', 'physics': 'Physics', 'labs': 'Labs', 'pathing-lab': 'Labs', 'tactics-lab': 'Labs'}
+SECTIONS = {'engine': 'Engine fundamentals', 'flecs': 'flecs', 'ai': 'Game AI', 'physics': 'Physics', 'network': 'Networking', 'labs': 'Labs', 'pathing-lab': 'Labs', 'tactics-lab': 'Labs', 'feel-lab': 'Labs'}
 
 fonts = None
 if '--fonts' in sys.argv:

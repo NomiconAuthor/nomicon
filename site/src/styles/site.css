@@ -78,6 +78,7 @@ a {
 }
 .site-nav .links {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   list-style: none;
   margin: 0;
@@ -132,6 +133,9 @@ a {
 @media (max-width: 560px) {
   .theme-pick-l {
     display: none;
+  }
+  .site-nav .links a {
+    padding: 6px 8px;
   }
 }
 /* Chrome that only some themes draw: in Dusk the frame is transparent to layout. */

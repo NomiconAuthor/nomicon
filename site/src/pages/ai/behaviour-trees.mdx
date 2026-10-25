@@ -3,12 +3,36 @@ layout: ../../layouts/Lesson.astro
 title: Behaviour trees
 order: 3
 part: Decisions
-summary: 'A behaviour tree is a priority list you can read: selectors try children until one works, sequences run children until one fails, and every node reports success, failure or still running. The same agent driven by a tree, with every node lit up as it ticks, and what reactive and memory composites change.'
+summary: 'Why state machines tangle as they grow, and the behaviour tree that replaces their transitions with a priority list you can read: selectors try children until one works, sequences run children until one fails, and every node reports success, failure or still running. The same agent driven by a tree, with every node lit up as it ticks, and what reactive and memory composites change.'
 ---
 import AiWidget from '../../components/AiWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
 Utility AI answers "what's the best thing to do?" by scoring everything. A **behaviour tree** answers "what should I do?" by walking a structure a designer wrote, in priority order. It's the most widely used decision structure in games, and the reason is visible below: you can read it.
+
+## Before trees: state machines
+
+Most game AI starts as a **finite state machine** (FSM): the agent is always in exactly one state (*Patrol*, *Fight*, *Recharge*, *Heal*), each state runs its own behaviour, and **transitions** say when to move from one state to another.
+
+```cpp
+enum class State { Patrol, Fight, Recharge, Heal };
+
+void think(Agent& a) {
+    switch (a.state) {
+    case State::Patrol:   if (a.enemy_near) a.state = State::Fight;                break;
+    case State::Fight:    if (a.health < 40) a.state = State::Heal;
+                          else if (a.charges == 0) a.state = State::Recharge;
+                          else if (!a.enemy_near) a.state = State::Patrol;        break;
+    case State::Recharge: if (a.health < 40) a.state = State::Heal;
+                          else if (a.charges == 6) a.state = State::Fight;        break;
+    case State::Heal:     if (a.health >= 80) a.state = a.enemy_near ? State::Fight : State::Patrol; break;
+    }
+}
+```
+
+That's easy to write, cheap to run and easy to debug (print the state). Every engine has one somewhere, and for a door, a lift, an animation or an enemy with three behaviours, it's the right tool. The trouble is the transitions. With *n* states there can be up to *n*(*n* − 1) of them, and each new state has to be wired to the others by hand. Notice that "health below 40 means heal" is already written twice above, once for each state it can interrupt, and a fifth state would need it a third time. Priorities ("healing beats everything") aren't anywhere you can see them; they're spread across the transitions. **Hierarchical state machines** help by nesting states (a *Combat* state containing *Fight* and *Recharge*, with one transition out to *Heal*), but the wiring still grows with every state you add.
+
+A behaviour tree replaces those transitions with structure. The order of a selector's children *is* the priority list, so "heal before anything else" is written once, at the top, and a new behaviour goes where it belongs in that order without touching the others.
 
 ## Nodes and statuses
 

@@ -2,7 +2,7 @@
 
 https://nomicon.app/
 
-**Interactive explainers for game programmers.** Every lesson has something running in the page that you can poke: a real ECS compiled to WebAssembly, engine mechanisms modelled step by step, game-AI techniques running on small deterministic worlds, a physics engine you can pause and step (plus real Jolt, Box3D and Bullet side by side), and two labs for pathfinding and terrain analysis.
+**Interactive explainers for game programmers.** Every lesson has something running in the page that you can poke: a real ECS compiled to WebAssembly, engine mechanisms modelled step by step, game-AI techniques running on small deterministic worlds, a physics engine you can pause and step (plus real Jolt, Box3D and Bullet side by side), a small game over a simulated network, and three labs: pathfinding, terrain analysis and game feel.
 
 Every number a lesson quotes from a simulation is checked by the test suite against the code the widget runs, so the text can't quietly drift from the behaviour it describes.
 
@@ -19,10 +19,11 @@ npm run dev        # http://localhost:4321
 | Section | URL | What it is |
 |---|---|---|
 | **engine** | `/engine/` | 11 lessons on what the hardware and the engine underneath do: cache lines and data layout, handles and allocators, game loops, determinism, deadlines and async work, spatial partitioning, octrees, jobs and task graphs, threads/pools/fibers, profiling, hot reloading code. |
-| **flecs** | `/flecs/` | 19 lessons on the flecs ECS (plus further reading on the index page), each running **real flecs master** in the browser with its internals instrumented, plus a free-form **sandbox** at `/flecs/sandbox/` whose worlds can be shared as links. |
+| **flecs** | `/flecs/` | 18 lessons on the flecs ECS (plus further reading on the index page), each running **real flecs master** in the browser with its internals instrumented, plus a free-form **sandbox** at `/flecs/sandbox/` whose worlds can be shared as links. |
 | **game ai** | `/ai/` | 17 lessons: utility AI, behaviour trees, GOAP, HTN planning, steering, local avoidance, formations, Recast and Detour, terrain analysis, cover, influence and threat maps, shared knowledge (blackboards), party roles (tank, healer, damage). Set in one fantasy world. |
 | **physics** | `/physics/` | 12 lessons in three parts. **Concepts**: seven lessons on a small deterministic 2D engine written for the site (the step, broadphase and filtering, narrowphase with SAT/GJK/EPA and manifolds, solving contacts with Baumgarte vs soft step, sleeping and fast bodies, joints, queries and characters), kept free of engine-by-engine detail. **Choosing an engine**: a short decision lesson, then deep dives with **real Jolt, Box3D and Bullet** side by side in 3D, and Chaos and PhysX (with a six-engine comparison including Havok). **In practice**: when physics goes wrong (four mistakes live with their fixes, and a symptom table), and physics wired into **real flecs** through handles. |
-| **labs** | `/labs/` | **Pathing lab** (`/pathing-lab/`): grid A*/JPS/Theta*, HPA*, Recast navmesh, PRM/RRT roadmaps, multi-unit, vehicles with Hybrid A* / state lattice / car RRT. **Tactics lab** (`/tactics-lab/`): clearance, chokes, traffic, openness, cover generation, exposure and best-cover queries on a 2.5D grid. |
+| **network** | `/network/` | 7 lessons. Six on one small game over a simulated network (latency, jitter, loss): what a dumb terminal suffers, snapshots with interpolation and extrapolation (and bandwidth: quantising, deltas), client-side prediction and reconciliation, lag compensation with a rewind cap, lockstep and rollback between two peers (with checksums catching a desync), and choosing a model; then networking in flecs (matching entity ids, entity ranges, what to replicate), moved here from the flecs section (`/flecs/networking` redirects). |
+| **labs** | `/labs/` | **Pathing lab** (`/pathing-lab/`): grid A*/JPS/Theta*, HPA*, Recast navmesh, PRM/RRT roadmaps, multi-unit, vehicles with Hybrid A* / state lattice / car RRT. **Tactics lab** (`/tactics-lab/`): clearance, chokes, traffic, openness, cover generation, exposure and best-cover queries on a 2.5D grid. **Feel lab** (`/feel-lab/`): a platformer with every game-feel setting exposed (acceleration, jump height and time, jump cut, fall gravity, apex hang, coyote time, jump buffer, corner correction, input delay, camera lerp/spring, dead zone, look-ahead, platform snapping, squash and shake), presets, a five-second input/state strip, and concept cards. |
 
 There are also site-wide search (Ctrl/⌘ K or `/`), shareable lab and sandbox links, and three themes: **Nomicon** (the default: violet and gold, Cinzel headings), Dusk and Visual Studio. The whole site is static: no server code, no accounts, no tracking, and no third-party requests (fonts are served from the site). `sitemap.xml` and `robots.txt` are generated from the pages, so search engines find new lessons with no upkeep.
 
@@ -34,7 +35,7 @@ LICENSE              MIT
 site/                the website: Astro 7 + MDX, TypeScript widgets
   src/pages/         lessons (.mdx) and pages (.astro); one folder per section
   src/components/    custom elements that mount widgets into lessons
-  src/engine/ src/flecs/ src/ai/ src/physics/ src/recast/ src/tactics/ src/influence/ src/knowledge/ src/party/ src/sprites/ src/lab/
+  src/engine/ src/flecs/ src/ai/ src/physics/ src/net/ src/feel/ src/recast/ src/tactics/ src/influence/ src/knowledge/ src/party/ src/sprites/ src/lab/
                      widget and simulation code, by topic (see "Code map")
   src/styles/        site chrome, lesson layout, themes
   public/            flecs.wasm builds, box3d.wasm, bullet.wasm, themes.js (runtime theme switch), favicon.svg/.ico, apple-touch and 192/512 icons
@@ -70,7 +71,7 @@ Batch runs that produce the numbers lessons quote: `npm run ai-batch`, `steer-ba
 
 - **`test/runtime-check.ts`**: the flecs runtime (scripts, REST, JS systems and observers, deferred ops through `it->stage`, reset, multiple worlds).
 - **`test/debugger-check.ts`**: for every debugger scenario and variant, replaying the recorded trace onto the "before" snapshot must reproduce the real "after" storage. This keeps the step-through debugger truthful.
-- **`test/lesson-claims.ts`**: **every number a lesson quotes from a simulation.** Each claim recomputes the value with the same code the widget runs, formats it as the lesson writes it, and checks that exact text is in the MDX. Changing a simulation therefore fails the build and prints the sentence or table row the lesson should now contain. Groups: `ai goap htn hotreload physics engines chaos ecs trouble steering formations cover avoidance jobs waiting profiling influence knowledge party recast`. **When you add a measured number to a lesson, add a claim for it.** Numbers measured live in the browser (memory benchmarks, the flecs spatial benchmark, µs timings) aren't checked, because they vary by machine.
+- **`test/lesson-claims.ts`**: **every number a lesson quotes from a simulation.** Each claim recomputes the value with the same code the widget runs, formats it as the lesson writes it, and checks that exact text is in the MDX. Changing a simulation therefore fails the build and prints the sentence or table row the lesson should now contain. Groups: `ai goap htn hotreload physics engines chaos ecs trouble network feel steering formations cover avoidance jobs waiting profiling influence knowledge party recast`. **When you add a measured number to a lesson, add a claim for it.** Numbers measured live in the browser (memory benchmarks, the flecs spatial benchmark, µs timings) aren't checked, because they vary by machine.
 
 Browser checks in `tools/` are optional and need Python with Playwright and Chromium, plus a static server on the built site. `tools/browser-step-all-lessons.py [port]` (default 4330: `cd site/dist && python3 -m http.server 4330`) steps every debugger and variant to the end, clicks query presets, runs benchmarks, script presets and the networking demo, and reports page errors.
 
@@ -93,7 +94,7 @@ The site is static files only; the server has no Node.
 
 | Path (under `site/src/`) | What |
 |---|---|
-| `layouts/Base.astro` | Shell, navbar (`engine`, `flecs`, `ai`, `physics`, `labs`), search, theme menu. `[data-nav-slot]` is where pages put buttons (the labs' Concepts button). Always renders `.frame`, `.statusbar` and `.clock`; themes decide whether they show. |
+| `layouts/Base.astro` | Shell, navbar (`engine`, `flecs`, `ai`, `physics`, `network`, `labs`), search, theme menu. `[data-nav-slot]` is where pages put buttons (the labs' Concepts button). Always renders `.frame`, `.statusbar` and `.clock`; themes decide whether they show. |
 | `layouts/Lesson.astro`, `styles/lesson.css` | Lesson layout: sidebar built from MDX frontmatter (`order`, `part`, `title`, `summary`), grouped into parts, prev/next, collapsible list on phones. Lesson numbers come from position, not from `order`. |
 | `styles/site.css`, `styles/themes/*.css`, `themes.ts` | Dusk is the unscoped `site.css`; each other theme (`nomicon.css`, the default, and `vs.css`) is scoped to `html[data-theme='<id>']` and mostly re-points colour tokens. The Nomicon theme's heading face is one token, `--f-display` (Cinzel). Fonts come from the `@fontsource` packages, imported in `Base.astro` and bundled into `_astro/`. Code blocks are highlighted for all themes at once (Shiki dark/light/vs). |
 | `components/EngineWidget.astro`, `AiWidget.astro`, `TacticsWidget.astro` | Custom elements that lazy-load a widget by `kind` (`data-kind`, plus `data-preset` JSON for options such as `scenario="simple"`). AI pages also load `engine.css` and `ai.css`. |
@@ -131,7 +132,7 @@ Widget kinds and what they model:
 Lessons in order: entities, archetypes, references, relationships, prefabs, query-language, query-caching, systems, commands, sync-points-and-threads, command-merging, observers, deleting, fragmentation, storage-traits, spatial-data, reflection-and-scripts, networking, thinking-in-flecs. "Where to learn more" is a section of the flecs index (`components/lesson/FlecsLearnMore.mdx`); `/flecs/learn-more/` redirects there.
 
 #### Building flecs.wasm (`flecs-wasm/`)
-- Source: flecs **master**, amalgamated `distr/flecs.c/.h` (currently commit 1d5850a, 22 Oct 2026, built without `FLECS_DEBUG`, so asserts are compiled out). The commit is also set in `src/flecs/version.ts`, which every flecs lesson shows at the bottom; update both together. A second build at 68631db (just before the remove/add batching fix) is `public/flecs-68631db.wasm`, used only by the command-merging lesson's "Before the fix" variant.
+- Source: flecs **master**, amalgamated `distr/flecs.c/.h` (currently commit 75fa09f, 23 Oct 2026, built without `FLECS_DEBUG`, so asserts are compiled out). The commit is also set in `src/flecs/version.ts`, which every flecs lesson shows at the bottom; update both together. When upgrading, rebuild, run `npm test`, and diff every debugger scenario's trace between the old and new builds: that's what shows whether a lesson's description of what happens has changed.
 - Build: `pip install ziglang`, then `cd flecs-wasm && ./build.sh /path/to/flecs/distr && cp flecs.wasm ../site/public/flecs.wasm`. Uses `zig cc -target wasm32-wasi`.
 - `instrument.py` adds WASI detection and socket stubs (REST is called in-process via `ecs_http_server_request`), and injects about 15 `FW_TRACE(...)` calls inside named functions after short anchors (`flecs_table_init/fini`, `flecs_move_entity`, `flecs_observer_invoke`, `flecs_commands_flush`, sparse insert/remove, ...). If a flecs update moves an anchor, it prints which one; fix the anchor string.
 - `flecs_web.c` (one translation unit with the instrumented flecs.c) exports the `fw_*` API: init/reset, REST, scripts, JS systems and observers, iterator ops through `it->stage` (or `it->world` with `fw_it_use_world(1)`), dumps, benchmarks (`fw_bench_ladder/spatial`), raw components, and networking helpers (`fw_range_new/set`, `fw_make_alive`, ...; ids cross as BigInt).
@@ -142,7 +143,7 @@ Lessons in order: entities, archetypes, references, relationships, prefabs, quer
 - `ecs_entity_desc_t` has no `.add`; systems take `.phase` directly. Script struct syntax: `struct Position(x: f32, y: f32)`.
 - Moves: remove actions run before the row is appended to the destination table. The row-delete trace is recorded after `on_remove` hooks.
 - Command batching: the first command for an entity applies the whole batch (one move); since 9062901 a queued remove really removes.
-- DontFragment components aren't in the type and aren't serialised by REST/JSON. Since 1d5850a tables carry no DontFragment flag (`EcsTableHasDontFragment` is gone), so `fw_tables` reports `dontFragment: false` for every table; the sparse-set dump says whether a component is DontFragment.
+- DontFragment components aren't in the type and aren't serialised by REST/JSON. Tables carry no DontFragment flag (`EcsTableHasDontFragment` is gone), so `fw_tables` reports `dontFragment: false` for every table; the sparse-set dump says whether a component is DontFragment.
 - Instantiating a prefab runs `OnSet` observers for copied components with `it->event` reported as `OnAdd`.
 - `make_alive` on an alive id with the same version is a silent no-op; with a different version it fails.
 - Hierarchical names print with `.`; REST paths use `/`.
@@ -172,6 +173,17 @@ Lessons in order: entities, archetypes, references, relationships, prefabs, quer
 #### Building bullet.wasm (`bullet-wasm/`)
 - `./build.sh /path/to/bullet3`: Bullet's unity sources (`btLinearMathAll.cpp`, `btBulletCollisionAll.cpp`, `btBulletDynamicsAll.cpp`) plus `bullet_web.cpp`, with `zig c++ -target wasm32-wasi -O2 -fno-exceptions -fno-rtti`. Currently built from bullet3 master d3afe76 (9 Oct 2026; VERSION 3.27, last tagged release 3.25). Copy `bullet.wasm` to `site/public/`.
 - `bullet_web.cpp` mirrors `box3d_web.c`: `bt_create` (gravity, solver iterations, split impulse), `bt_add_box`/`bt_add_sphere` (spheres can get CCD: motion threshold and swept-sphere radius), `bt_step(dt, internal steps)`, `bt_transforms`, `bt_counters`.
+
+### Networking (`src/net/`, lessons in `pages/network/`)
+- `core.ts`: the arena game (players as circles, 8-way input, walls, players push apart), stateless scripted players (`scriptedInput`), `keepInside`, and `Link`: one direction of a connection with latency, jitter (reorders) and loss, all seeded. 60 ticks a second; only +, -, *, / and sqrt in the simulation.
+- `models.ts`: one model per lesson, each stepped a tick at a time on a shared clock: `DumbTerminal` (inputs up, full state down), `SnapshotClient` (snapshot rate, newest/interpolate/extrapolate, server-clock estimate from the smallest recent delay, bytes counted for full/quantised/delta encodings), `PredictedClient` (wait/predict/reconcile/smooth, redundant input sends, a "pusher" that causes mispredictions), `LagCompensation` (shooter, target past cover, rewind with a cap), `PeerToPeer` (lockstep or rollback with input delay, redundant inputs, checksums every 30 frames, an optional different-order maths peer to show a desync; `truthAt` replays the game with no network to check both peers).
+- `widgets.ts` (canvas views, keyboard driving on the problem and prediction widgets), `components/NetWidget.astro`.
+- Claims: `network` (every table and figure in the six lessons, plus both rollback peers matching a network-free run).
+
+### Feel lab (`src/feel/`, page `pages/feel-lab.astro`)
+- `controller.ts`: `Settings` (every feel knob, in tiles and seconds), presets (`TIGHT`, floaty, heavy, everything off), `jumpPhysics` (gravity and take-off speed from height and time to apex), `makeLevel` (the test course, built in code: gap, low ledge, steps, pit, long run, tower, shaft, with named spots), `Player` (fixed 60 Hz; input delay queue, acceleration by time, turnaround boost, air control, jump buffer, coyote time, jump cut, fall gravity, apex hang, corner correction; position integrated with the average velocity so jumps reach the set height) and `Camera` (locked, frame-rate-independent lerp, or critically damped spring; dead zone, look-ahead, platform snapping, trauma shake).
+- `app.ts`: the lab UI on the shared lab layout and Concepts drawer; keyboard (presses latched so taps shorter than a tick count) and touch pads; the strip shows jump key, grounded, coyote window, buffered press, events and run speed for the last five seconds. `concepts.ts`: the cards and glossary (also in site search).
+- Claims: `feel` (jump height exact, coyote time and buffer save presses that are otherwise eaten, corner correction gets you onto the low ledge).
 
 ### Labs
 - **Pathing lab** (`lab/`, page `pages/pathing-lab.astro`): mounted from `lab/ui/app.ts`; keeps settings in `localStorage` (`pathfinding-lab/v1`).

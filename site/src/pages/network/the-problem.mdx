@@ -1,0 +1,61 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Latency, jitter and loss'
+order: 1
+part: The problem
+summary: 'What the network does to a game that simply sends inputs to a server and draws whatever comes back: a round trip of delay on every key press, stutter when packets arrive unevenly, and freezes when they don''t arrive at all. Drive it yourself and feel each one.'
+---
+import NetWidget from '../../components/NetWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The simplest networked game has one copy of the world, on a server. Each client sends what its player pressed and draws whatever state the server sends back. The client is a **dumb terminal**: it never guesses, so it can never be wrong. It's how the first internet shooters worked, and it's the right place to start, because every technique in these lessons is a fix for something this version does badly.
+
+Three things go wrong between client and server, and the widget lets you turn each one up:
+
+- **Latency**: the time a packet takes to cross the network, one way. Light in fibre covers about 200 km a millisecond, so distance alone sets a floor, and every router on the way adds to it.
+- **Jitter**: how much that time varies from packet to packet. Packets sent evenly arrive unevenly, and sometimes in a different order.
+- **Loss**: packets that never arrive. Fast-paced games usually use UDP, which doesn't resend lost packets, because a resent position is out of date by the time it arrives.
+
+<NetWidget kind="problem" />
+
+Under the pictures are two readouts. The bar shows your last key press: how long it took to reach the server, and how long until the state with it applied reached your screen. The histogram shows the gaps between new states arriving over the last three seconds. On a perfect connection every gap is one tick, 17 ms; jitter and loss push gaps into the red.
+
+## Latency: every key press waits a round trip
+
+Your key press has to reach the server, be simulated, and come back before you see it. That's a full **round trip** (twice the one-way latency), plus a little waiting at each end for the next tick. Measured over a minute of play, with 0–5 ms of jitter:
+
+| One-way latency | From key press to seeing it |
+|---|---|
+| 20 ms | 67 ms |
+| 50 ms | 133 ms |
+| 100 ms | 233 ms |
+| 200 ms | 433 ms |
+
+In fast games, play starts to suffer from around 50 ms of input delay; how much players notice varies a lot by game and by player. A strategy game can live with a quarter of a second; a shooter or a fighting game can't. And latency is the one problem no technique removes: physics sets its floor. What the next lessons do is *hide* it.
+
+## Jitter: an even stream arrives unevenly
+
+The server sends a state every tick, 60 a second. With jitter, some arrive close together and some late, so the client gets two in one frame and none in the next. At 50 ms latency with 0–30 ms of jitter, **25.4%** of frames have nothing new to draw, and **9.9%** skip over a state because two arrived at once. Motion that's smooth on the server stutters on the screen.
+
+The fix is a **buffer**: hold states back a little, and play them out evenly. That costs latency on purpose, and choosing how much is the trade at the heart of the next lesson.
+
+## Loss: holes in the stream
+
+With 5% loss, about 5% of frames have nothing new. With 20%, it's **18.5%**, and the longest freeze grows to 83 ms. Inputs are lost too: the server then keeps applying the last input it received, so your player carries on in the old direction for a moment.
+
+Games don't resend lost state, because by the time a resend could arrive there's a newer state anyway. They send **redundantly** instead: each input packet also carries the last few inputs, so one lost packet costs nothing. The [prediction lesson](/network/prediction-and-reconciliation/) does exactly that.
+
+<Tip title="Measure in round trips and ticks">
+Most networking choices come down to comparing a few times: the round trip, the tick, how often state is sent, and how much jitter there is. Write them down for the connections you care about, say a 30 ms round trip across a country and 150 ms across an ocean, before choosing a model. A design that's fine at one is often hopeless at the other.
+</Tip>
+
+## Bandwidth
+
+There's a fourth limit: how many bytes a second the connection carries, and how many you're willing to pay for. Every UDP packet costs 28 bytes of IPv4 and UDP headers (48 over IPv6) before the game puts anything in it, and sending the whole world 60 times a second to every player doesn't scale. [Snapshots](/network/snapshots-and-interpolation/) covers sending less, less often.
+
+## Takeaways
+
+- **Latency** puts a round trip between every key press and its result. Nothing removes it; good netcode hides it.
+- **Jitter** makes an even stream arrive unevenly; a small buffer smooths it, at a cost in delay.
+- **Loss** leaves holes; games don't resend old state, they send redundantly and move on.
+- A client that only draws what the server sends is simple and never wrong, and it feels every one of these.

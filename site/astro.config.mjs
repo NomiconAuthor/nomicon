@@ -14,6 +14,7 @@ export const baseConfig = {
   redirects: {
     '/flecs/systems-and-commands': '/flecs/commands/',
     '/flecs/learn-more': '/flecs/#learn-more',
+    '/flecs/networking': '/network/networking-in-flecs/',
   },
   build: { format: 'directory' },
   markdown: {

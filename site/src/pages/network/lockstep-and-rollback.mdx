@@ -1,0 +1,80 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Lockstep and rollback
+order: 5
+part: Peer to peer
+summary: 'Send inputs instead of state, and let every machine run the whole game. Lockstep waits for everyone''s input before each frame; rollback guesses the missing inputs, and when the real ones arrive, rewinds and re-simulates. Input delay as the dial between them, and why both need a perfectly deterministic game.'
+---
+import NetWidget from '../../components/NetWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Everything so far sent **state**: positions, from a server that owns the world. There's another way. If every machine runs exactly the same simulation, they only need to exchange **inputs**: what each player pressed, each frame. A few bytes a frame, however big the world is. That's how real-time strategy games keep thousands of units in sync, and how fighting games play online.
+
+The catch is in "exactly the same". Each machine runs the game itself, so the simulation must be **deterministic**: the same inputs must give the same result, bit for bit, on every machine. The [determinism lesson](/engine/determinism/) covers how; this lesson assumes it, and then shows what happens when it fails.
+
+<NetWidget kind="sync" />
+
+Two peers, A and B, each control one player. Each draws its own copy of the game. The strip at the bottom shows, for every tick on peer A, how many frames it had to re-simulate (bars) or whether it was stuck waiting for B (red).
+
+## Lockstep: wait for everyone
+
+**Lockstep** advances frame *n* only when it has every player's input for frame *n*. Nobody guesses, so nothing is ever wrong, and the peers can't drift apart. The cost is waiting: an input takes the one-way latency to arrive, so a peer that waits for it every frame runs at the speed of the network, not 60 frames a second.
+
+The standard remedy is **input delay**: what you press now is scheduled for a few frames later, and sent at once, so it has a head start. If the delay covers the latency, the input is already there when it's needed. At 50 ms latency:
+
+| Input delay | Ticks spent waiting | Frames a second |
+|---|---|---|
+| 0 frames | 80% | 12 |
+| 1 frame | 60% | 24 |
+| 2 frames | 40% | 36 |
+| 4 frames | 2% | 59 |
+
+Four frames is 67 ms between pressing and seeing, which a strategy game doesn't notice. *Age of Empires* ran its lockstep at about five turns a second, carrying out commands two turns later, and its developers found that 250 ms of command delay went unnoticed. Blizzard's strategy games hid the delay with instant feedback, like a unit's spoken reply. A fighting game can't hide that much.
+
+## Rollback: guess, then fix
+
+**Rollback** never waits. When the other player's input for a frame hasn't arrived, it guesses: they're probably still pressing what they pressed last. Most of the time that's right. When the real input arrives and it's different, the peer:
+
+1. restores its saved state from the frame where the guess went wrong,
+2. re-simulates every frame since, with the real input,
+3. carries on from the present, all within one tick.
+
+```cpp
+void on_remote_input(int frame, Input real) {
+    remote[frame] = real;
+    if (frame < current_frame && used_remote[frame] != real)
+        rollback_from = std::min(rollback_from, frame);
+}
+
+void tick() {
+    if (rollback_from < current_frame) {
+        state = saved[rollback_from];
+        for (int f = rollback_from; f < current_frame; f++) simulate(f);   // real or guessed inputs
+        rollback_from = INT_MAX;
+    }
+    local[current_frame + input_delay] = read_controller();
+    send_unacknowledged_inputs();
+    simulate(current_frame++);       // guess the remote input if it hasn't arrived
+}
+```
+
+At 50 ms latency with no input delay, peer A rolls back **2.6** times a second (each time B changes what it's pressing), re-simulating **4** frames on average, at most **5**. The game never waits, and your own inputs show the frame you press them. The price is visible: when a rollback changes where B's player is, it jumps on screen.
+
+Input delay helps rollback too: each frame of delay is a frame less to roll back. With 2 frames of delay, rollbacks average 2 frames; with 4, they're almost gone. That's the dial rollback games tune, and many let players set it. GGPO, the rollback library that popularised the technique in fighting games (and is now open source), lets the game choose a few frames of input delay and rolls back the rest.
+
+<Tip kind="warn" title="Rollback costs CPU">
+Re-simulating 5 frames in one tick means running the game 6 times in 16.7 ms. The simulation must be fast enough to do that, and its state small enough to save every frame. Fighting games, with two characters and a small stage, are ideal. A strategy game with ten thousand units is not, which is why most RTS games use lockstep.
+</Tip>
+
+## Desyncs
+
+Tick **Peer B does the movement maths in a different order**. Peer B now computes each step as (position × 60 + velocity) / 60, which is the same as position + velocity × (1/60) in arithmetic but not always in floating point. The peers still exchange the same inputs, and for a while both screens look identical. The difference is a trillionth of a metre. But it's there, and the peers' checksums of the same frame differ at the first check, **frame 30**.
+
+Lockstep and rollback games both exchange checksums of confirmed frames for exactly this reason. Here the error stays tiny, because the arena's walls keep resetting positions. In a real game it grows: a unit that survives on one machine dies on the other, and from then on the two are playing different games. Desyncs come from anything that isn't the same everywhere: compiler flags, a different maths library, iterating an unordered container, uninitialised memory, a random number drawn outside the simulation. The [determinism lesson](/engine/determinism/) lists the usual suspects.
+
+## Takeaways
+
+- **Send inputs, not state**: every peer runs the whole, **deterministic** game.
+- **Lockstep** waits for every input before each frame; **input delay** hides the latency, until it's too long to hide.
+- **Rollback** guesses missing inputs and re-simulates when the real ones arrive: no waiting, occasional visible corrections, extra CPU.
+- **Input delay is the dial** between them. Exchange **checksums** to catch desyncs early.

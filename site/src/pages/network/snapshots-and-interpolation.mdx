@@ -1,0 +1,81 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Snapshots and interpolation
+order: 2
+part: Client and server
+summary: 'Drawing other players from a server that sends the world a few times a second. Snap to the newest snapshot, interpolate between two old ones, or extrapolate past the newest: smoothness against how current the picture is. Then making snapshots smaller: quantising and sending only what changed.'
+---
+import NetWidget from '../../components/NetWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The server owns the world: it's **authoritative**. Clients send inputs; the server simulates and sends back **snapshots** of the state. Sending one every tick is wasteful (and [jitter](/network/the-problem/) scrambles them anyway), so servers send fewer, typically 10 to 60 a second, and each client has to draw something smooth for every frame in between.
+
+This lesson is about other players: things you see but don't control. Your own player is the [next lesson](/network/prediction-and-reconciliation/).
+
+<NetWidget kind="snapshots" />
+
+Twelve players wander the arena on the server; half of them stand about most of the time. The solid circles are where your client draws them; the faint rings are where they really are, on the server, right now.
+
+## Three ways to draw from snapshots
+
+- **Newest snapshot.** Draw each player where the latest snapshot says. Between snapshots nothing moves, then everything jumps: at 20 snapshots a second, every player visibly jumps about 557 times a minute.
+- **Interpolate.** Draw the world as it was a little in the past, between the two snapshots either side of that moment. Motion is perfectly smooth, because both ends of every segment are already known. The cost is that everything you see is late: by the latency, plus the interpolation delay.
+- **Extrapolate** (dead reckoning). Take the newest snapshot and project each player forward along its velocity. It's the most current picture, but whenever a player changes direction, the guess is wrong and they jump to where they really are.
+
+Measured over a minute at 50 ms latency (two snapshots behind for interpolation):
+
+| Snapshots a second | Newest snapshot | Interpolate | Extrapolate |
+|---|---|---|---|
+| 10 | 0.28 m off, 308 jumps/min | 0.65 m off, 0 jumps | 0.06 m off, 78 jumps/min |
+| 20 | 0.21 m off, 557 jumps/min | 0.42 m off, 0 jumps | 0.04 m off, 71 jumps/min |
+| 60 | 0.17 m off, 0 jumps | 0.25 m off, 0 jumps | 0.03 m off, 75 jumps/min |
+
+*Off* is the average distance between where a player is drawn and where it really is; jumps are per player.
+
+Extrapolation looks best on paper here, because these players walk in straight lines and turn about once a second. Real players are less predictable: they strafe, stop, jump and dodge on purpose, and every change of mind is a visible snap. **Interpolation** is what most shooters use for other players: they'd rather show a smooth picture a tenth of a second old than a current one that jitters. Extrapolation suits things that really do move predictably, like vehicles, projectiles and aircraft, or a short gap when a snapshot is late.
+
+## How far behind to draw
+
+The interpolation delay has to cover the gap between snapshots *and* the jitter, or the client runs out of snapshots and has to freeze or guess. Two snapshot intervals is a common choice (Valve's Source engine documentation gives defaults of 100 ms at 20 snapshots a second, so that one lost snapshot still leaves two to interpolate between). Tick **Poor connection** (100 ms latency, 0–40 ms jitter, 5% loss): at 20 snapshots a second with a 100 ms delay the client runs dry 23 times a minute; at 60 a second with a 33 ms delay, 71 times. A faster snapshot rate needs a bigger buffer than "two intervals" once the connection gets worse.
+
+```cpp
+// Draw remote entities as they were `delay` ms before the server's present.
+double render_time = estimated_server_time() - delay;
+const Snapshot* a = last_snapshot_at_or_before(render_time);
+const Snapshot* b = first_snapshot_after(render_time);
+if (a && b) {
+    float t = float((render_time - a->time) / (b->time - a->time));
+    for (Entity& e : remote_entities) e.draw_pos = lerp(a->pos(e), b->pos(e), t);
+} else {
+    // Out of snapshots: hold the last one, or extrapolate briefly, and consider a bigger delay.
+}
+```
+
+The client also needs an estimate of the server's clock to know what "now" is. The widget uses the smallest delay it has seen recently between a snapshot being sent and it arriving: jitter only ever adds delay, so the smallest is the best guess at the latency.
+
+## Making snapshots smaller
+
+The widget's bandwidth line counts the bytes for each snapshot three ways, including 36 bytes of IP, UDP and game headers per packet:
+
+- **Full floats**: for each player, an id and four 32-bit floats (position and velocity), 17 bytes.
+- **Quantised**: positions to the nearest centimetre in 16 bits each, which covers 655 m, and the movement direction in one byte. That's 6 bytes per player, and nobody can see the difference.
+- **Changes only** (delta compression): each client acknowledges the snapshots it receives, and the server sends only the players that changed since the newest acknowledged one, with a bitmask saying which.
+
+| Snapshots a second | Full floats | Quantised | Quantised, changes only |
+|---|---|---|---|
+| 10 | 2.4 kB/s | 1.1 kB/s | 0.8 kB/s |
+| 20 | 4.8 kB/s | 2.2 kB/s | 1.5 kB/s |
+| 60 | 14.4 kB/s | 6.5 kB/s | 4.5 kB/s |
+
+That's for twelve players, to one client. The server pays it once per client, so 64 players at 60 a second would cost it hundreds of times as much. With twelve players the 36-byte header is a big share of each packet, which is one reason servers send fewer, larger snapshots rather than many small ones.
+
+<Tip title="Send each client only what it needs">
+Past quantising and deltas, the biggest savings come from not sending things at all. **Interest management** (Unreal calls it relevancy) only sends a client the entities near it or visible to it. **Priorities** send important things more often and distant scenery rarely, within a fixed byte budget per packet. A thousand-player world is only possible because each client sees a few dozen of them.
+</Tip>
+
+## Takeaways
+
+- The server sends **snapshots** a few times a second; clients have to draw every frame in between.
+- **Interpolation** is smooth but late, by the latency plus the delay. **Extrapolation** is current, but every unexpected turn is a snap.
+- The interpolation delay must cover the **snapshot interval and the jitter**, or the client runs dry.
+- **Quantise**, send **only what changed**, and send each client **only what it can see**.

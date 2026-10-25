@@ -1,0 +1,139 @@
+---
+import Base from '../../layouts/Base.astro';
+import '../../styles/lesson.css';
+
+const modules = import.meta.glob<{ frontmatter: { title: string; order: number; summary: string; part?: string }; url: string }>('./*.mdx', { eager: true });
+const lessons = Object.values(modules)
+  .map((m) => ({ ...m.frontmatter, url: m.url }))
+  .sort((a, b) => a.order - b.order)
+  .map((l, k) => ({ ...l, n: k + 1 }));
+// Group consecutive lessons by their `part` frontmatter.
+const parts: Array<{ name: string; lessons: typeof lessons }> = [];
+for (const l of lessons) {
+  const name = l.part ?? '';
+  if (!parts.length || parts.at(-1)!.name !== name) parts.push({ name, lessons: [] });
+  parts.at(-1)!.lessons.push(l);
+}
+---
+
+<Base title="Networking" section="network" description="Interactive lessons on game networking: what latency, jitter and loss do, snapshots and interpolation, client-side prediction and reconciliation, lag compensation, lockstep and rollback, how to choose a model for your game, and networking in flecs.">
+  <main class="flecs-index">
+    <p class="kicker">Lessons</p>
+    <h1>How networked games hide the network</h1>
+    <p class="lede">
+      One small game, run over a simulated network you can make worse. <b>The problem</b>: what latency, jitter and loss do to
+      a game that just waits for the server. <b>Client and server</b>: drawing other players from snapshots, predicting your
+      own, and the server rewinding time to judge your shots. <b>Peer to peer</b>: sending inputs instead of state, with
+      lockstep and rollback. Then <b>choosing</b> a model for your game, and <b>in practice</b>: keeping entity ids in step
+      between machines in flecs.
+    </p>
+    {
+      parts.map((p) => (
+        <section class="part">
+          {p.name && <h2 class="part-h">{p.name}</h2>}
+          <ol class="lesson-list" start={p.lessons[0].n}>
+            {p.lessons.map((l) => (
+              <li>
+                <a href={l.url}>
+                  <span class="n">{l.n}</span>
+                  <span class="t">{l.title}</span>
+                  <span class="s">{l.summary}</span>
+                </a>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))
+    }
+    <p class="fine">The network is simulated in your browser with seeded randomness, so the same settings always give the same numbers. Code examples are in C++.</p>
+  </main>
+</Base>
+
+<style>
+  .flecs-index {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 16px 0 80px;
+  }
+  .part-h {
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 28px 0 10px;
+  }
+  .flecs-index h1 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+    margin: 4px 0 12px;
+  }
+  .kicker {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0;
+  }
+  .lede {
+    color: var(--body);
+    font-size: 1.05rem;
+    max-width: 70ch;
+  }
+  .sandbox-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 24px;
+    padding: 16px 18px;
+    border-radius: 12px;
+    border: 1px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--paper));
+    color: inherit;
+    text-decoration: none;
+  }
+  .sandbox-card .t {
+    color: var(--accent);
+    font-weight: 500;
+    font-size: 1.1rem;
+  }
+  .lesson-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 10px;
+  }
+  .lesson-list a {
+    display: grid;
+    grid-template-columns: 2.2em 1fr;
+    gap: 2px 12px;
+    padding: 14px 18px;
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .lesson-list a:hover {
+    border-color: var(--accent);
+  }
+  .n {
+    grid-row: span 2;
+    font-family: var(--f-mono);
+    color: var(--accent);
+    font-size: 1.2rem;
+  }
+  .t {
+    color: var(--ink);
+    font-weight: 500;
+    font-size: 1.05rem;
+  }
+  .s {
+    color: var(--body);
+    font-size: 0.92rem;
+  }
+  .fine {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+</style>

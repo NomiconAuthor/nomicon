@@ -1,0 +1,70 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Prediction and reconciliation
+order: 3
+part: Client and server
+summary: 'Why your own player responds instantly even though the server is a round trip away: the client runs your inputs itself, keeps the ones the server hasn''t confirmed, and when the server''s answer arrives, rewinds to it and replays them. What goes wrong without each part, and smoothing the corrections that remain.'
+---
+import NetWidget from '../../components/NetWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[The first lesson](/network/the-problem/)'s dumb terminal made every key press wait a round trip. Other players can be shown in the past, as [interpolation](/network/snapshots-and-interpolation/) does, because you don't know exactly when they pressed anything. Your own player can't: you know exactly when you pressed the key, and a delay is the first thing you notice.
+
+The fix, made famous by *QuakeWorld* in 1996, is **client-side prediction**: the client doesn't wait. It runs your input through the same movement code the server uses and shows the result at once. The server stays authoritative; the client is betting that the server will agree.
+
+<NetWidget kind="prediction" />
+
+Click the picture and drive with the arrow keys. The dashed ring is where the newest server state says you are; it trails behind you by the round trip. Other players are solid on the server. The *guard* never moves; the *pusher* walks into you for two seconds in every five.
+
+## Four ways to handle your own player
+
+- **Wait for the server.** The dumb terminal: correct, and a round trip late. At 100 ms latency a turn takes 234 ms to show.
+- **Predict.** Apply each input locally as well as sending it. Turns show at once. But the client only knows its own inputs: when you walk into another player, or the pusher shoves you, the server moves you and the client never hears about it. Its copy of you drifts away from the server's, by 2.60 m on average over a minute, and never comes back.
+- **Predict and reconcile.** Keep every input the server hasn't confirmed yet. Each server state says which of your inputs it has applied (the **acknowledgement**). When one arrives, throw away the confirmed inputs, start from the server's position, and replay the unconfirmed ones on top. The result is where the server *will* say you are, once it has applied the inputs still on their way.
+- **Reconcile, smoothed.** The same, but when the replayed position differs from what's on screen, don't jump: keep drawing at the old position and close the gap over a few frames.
+
+```cpp
+void on_server_state(const ServerState& s) {
+    // Inputs up to s.ack have been applied by the server: they're in s.my_position already.
+    pending.erase_if([&](const InputCmd& c) { return c.seq <= s.ack; });
+    Vec2 corrected = s.my_position;
+    for (const InputCmd& c : pending) corrected = move(corrected, c.input);   // same code as the server
+    Vec2 error = predicted - corrected;
+    if (length(error) > 0.01f) smoothing_offset += error;   // draw at the old place, decay towards zero
+    predicted = corrected;
+}
+```
+
+Measured over a minute of the same play, at 100 ms latency with 2% loss:
+
+| Your player | Before a turn shows | Corrections a minute | Biggest jump on screen |
+|---|---|---|---|
+| Wait for the server | 234 ms | none | 10 cm |
+| Predict | 0 ms | none, and 2.60 m adrift | none |
+| Predict and reconcile | 0 ms | 305 | 67 cm |
+| Reconcile, smoothed | 0 ms | 305 | 7 cm |
+
+The corrections all come from other players: everything you do on your own, the client predicts exactly, because it runs the same code on the same inputs.
+
+## Walking into the guard
+
+The guard shows a subtler case. Walk straight into him: your client doesn't know he's solid, so it shows you walking on into him. Each server state has you stopped at the guard, but the client then replays the inputs still on their way, and those walk on through. So while you hold the key, you stay about a round trip's walk inside him: 1.25 m at 100 ms. Let go, and you don't snap back; you slide out over one round trip, as the unconfirmed inputs run out. It's reconciliation doing exactly what it should, with a client that predicts badly.
+
+Tick **Client also predicts bumping into other players**. The client now runs into other players too, at the positions it has for them. Walking into the guard causes no corrections at all, because he's exactly where the client thinks he is. The pusher still causes corrections, because the client sees him as he was a round trip ago and predicts bumping into where he *was*. Predict everything you reliably can, and accept corrections for the rest.
+
+## What makes prediction work
+
+- **The same code on both sides.** Movement has to be a function of state and input that the client and server compute the same way. It doesn't need bit-for-bit determinism, as [lockstep](/network/lockstep-and-rollback/) does, because the server corrects small drift; but the closer they agree, the fewer corrections.
+- **Inputs with sequence numbers.** The server applies each input exactly once, in order, and reports the last one it applied. Each input packet also repeats the last few inputs, so one lost packet costs nothing: in the widget, 2% loss causes no corrections at all.
+- **Predict only what you can.** Your own movement, firing your own weapon, the sound and muzzle flash. Not other players' movement (you don't have their inputs) and not outcomes the server must decide, like whether a shot killed someone.
+
+<Tip kind="warn" title="Mispredictions are part of the design">
+Anything that moves you that you didn't cause (being pushed, knocked back, standing on something moving) is a misprediction waiting to happen. Some games predict those too, simulating nearby objects on the client; others make them rare or slow enough to correct gently. A correction that snaps you back through a doorway feels much worse than one spread over a quarter of a second.
+</Tip>
+
+## Takeaways
+
+- **Prediction** runs your inputs locally so your own player responds at once; the server is still the authority.
+- **Reconciliation**: keep unacknowledged inputs; on each server state, start from the server's position and replay them.
+- Without reconciliation, anything the client didn't foresee leaves it **permanently adrift**.
+- **Smooth** the corrections that remain, and design so they're small and rare.

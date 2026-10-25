@@ -32,7 +32,7 @@ What to look for:
 - **Writes go straight into the column.** `Input` and `Move` change values in place: no command, no move, no event. The locals panel is the iterator: `it.table`, `it.count` and each field's values, as a debugger would show the `ecs_iter_t` in your callback.
 
 <Tip kind="warn" title="Writing a field doesn't fire OnSet">
-Writing through a field or a `T&` in `.each()` is just a memory write. Observers for `OnSet` don't see it, and nothing records that the value changed. If something needs to know (a network layer, an `OnSet` observer, a cached derived value), call `modified<T>()` on the entity after writing, or use `set()` instead. The [networking lesson](/flecs/networking/) leans on this.
+Writing through a field or a `T&` in `.each()` is just a memory write. Observers for `OnSet` don't see it, and nothing records that the value changed. If something needs to know (a network layer, an `OnSet` observer, a cached derived value), call `modified<T>()` on the entity after writing, or use `set()` instead. The [networking in flecs lesson](/network/networking-in-flecs/) leans on this.
 </Tip>
 
 ## Say what you read and write

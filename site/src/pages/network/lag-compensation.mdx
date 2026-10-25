@@ -1,0 +1,62 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Lag compensation
+order: 4
+part: Client and server
+summary: 'You see other players in the past, so aiming where you see them misses on the server. Lag compensation has the server rewind everyone to what you saw when you fired. Why it''s necessary, what it costs the player being shot, and why servers cap how far back they''ll go.'
+---
+import NetWidget from '../../components/NetWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+[Interpolation](/network/snapshots-and-interpolation/) shows other players where they were a little while ago: the latency, plus the interpolation delay. That's fine for watching them. It's a problem the moment you shoot at them, because you aim at where they *were*, and by the time your shot reaches the server, they've moved on.
+
+<NetWidget kind="lagcomp" />
+
+You're at the top, firing twice a second at the target exactly where your screen shows it. The faint ring is where it really is. Each line turns green or red when the server's verdict comes back, and the dot shows where the server tested the target.
+
+## Without compensation, perfect aim misses
+
+Untick **Server rewinds to what you saw**. Every shot misses: **0%** of perfectly aimed shots hit, at 25 ms latency as much as at 150. The target runs at 5 m/s and is 0.8 m across; the 100 ms interpolation delay alone puts it half a metre behind where it is on the server, more than its radius, before latency adds anything.
+
+Without compensation, players have to **lead** their targets by how far in the past they see them (their latency plus the interpolation delay), which changes with every connection and every target's speed. That's tolerable for slow projectiles, where leading is part of the game anyway, and hopeless for hitscan weapons.
+
+## Rewinding the world
+
+**Lag compensation**, as Valve described it for the Source engine, moves the server's judgement to the shooter's point of view:
+
+1. The server keeps a short history of every player's position, a second or so.
+2. Each shot says what time the client was drawing when it fired: its estimate of the server's clock minus its interpolation delay.
+3. On receiving a shot, the server moves every other player back to where they were at that time, tests the shot against those positions, and puts everyone back.
+
+```cpp
+void on_shot(Client& shooter, const ShotCmd& shot) {
+    double back = std::min(now - shot.view_time, max_rewind);    // how far into the past the shooter saw
+    RewindScope rewind(world, now - back);                         // move everyone to their positions then
+    HitResult hit = trace(shooter.eye, shot.direction, /*ignore*/ shooter.entity);
+    // rewind's destructor restores the present before anything else runs
+    if (hit.entity) apply_damage(hit.entity, shot.weapon);
+}
+```
+
+Tick it again: **100%** of shots hit, at every latency. What you see is what you hit.
+
+## The cost: shot around a corner
+
+Rewinding is fair to the shooter and unfair to the target. Set latency to **150 ms** and watch the target run behind the cover: some shots land after it's already behind the wall on the server. With a 1 s rewind limit, **30** of 88 hits are on a target that, from its own point of view, had already reached cover. It's the classic complaint, "I was shot round a corner", and it's lag compensation working as designed: the shooter saw you in the open and fired.
+
+That's why servers **cap the rewind**. Set **Rewind at most** to **250 ms**, and at 150 ms latency every shot misses again: the shooter's view is about 270 ms old (150 ms of latency, the 100 ms interpolation delay, and a tick or so), so it's more than the server will go back. At 75 ms latency, the 250 ms cap still compensates fully; a 100 ms cap doesn't. The cap decides who carries the cost of a bad connection: under it, the people being shot; over it, the person with the bad connection, who has to lead their targets again.
+
+<Tip title="Favour the shooter, within reason">
+Most shooters favour the shooter, because missing a shot you clearly landed feels worse than being hit just behind cover. They limit the damage: a rewind cap, sometimes a stricter one for players with very high ping, and short interpolation delays so the rewind is small to begin with. Fast-paced competitive games also tend to run high tick and snapshot rates, which shrink everyone's view of the past.
+</Tip>
+
+## What gets rewound
+
+Only what the shot can hit: players' hit boxes, sometimes their animation pose. Not the shooter (it's in the present on its own screen), not the walls (they don't move), and not things the server can't rewind exactly, like physics objects mid-flight. Some games rewind only the shot's victim candidates, those near the line of fire, to keep the cost down.
+
+## Takeaways
+
+- Clients see other players **in the past**; aiming at what you see misses on the server.
+- **Lag compensation** rewinds the targets to the shooter's view time, tests the shot, and restores the present.
+- It's fair to the shooter and occasionally unfair to the target: **shot round a corner**.
+- **Cap the rewind**, and keep interpolation delays short, so the past being judged stays recent.

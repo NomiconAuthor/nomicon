@@ -1,0 +1,47 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Choosing a model
+order: 6
+part: Choosing
+summary: 'Which model suits which game: an authoritative server with prediction, interpolation and lag compensation for shooters, lockstep for strategy games, rollback for fighting games, and the mixes in between. The questions that decide it, and where the rest of the site fits in.'
+---
+import Tip from '../../components/lesson/Tip.astro';
+
+The previous lessons each fixed one problem. Real games pick a combination, and the choice mostly follows from a few questions about the game rather than from taste.
+
+## Start here
+
+1. **How many things does the simulation have?** If it's thousands of units, as in a strategy game, sending their state is out of the question: send inputs, with **lockstep**. If it's dozens of players and a few hundred objects, state is affordable.
+2. **How much does input delay hurt?** In a strategy game, a few hundred milliseconds between a click and a response is acceptable, and lockstep's delay costs nothing. In a fighting game every frame matters: **rollback**. In a shooter your own movement must respond at once: **prediction**.
+3. **Who must you not trust?** Peer-to-peer models trust every machine with the whole game state, which makes cheating easy (a modified client can see through fog of war, or reveal the other player's hand). An **authoritative server** keeps the truth to itself and only tells each client what it needs.
+4. **How many players, and how far apart?** Lockstep and rollback get harder with each extra player and each extra millisecond: everyone waits for, or rolls back to, the slowest connection. A server-based game copes with one player on a bad connection without hurting the others.
+
+## The usual combinations
+
+| Kind of game | Model | Why |
+|---|---|---|
+| Shooters, action games | Authoritative server; [snapshots](/network/snapshots-and-interpolation/) with interpolation for others; [prediction](/network/prediction-and-reconciliation/) for your own player; [lag compensation](/network/lag-compensation/) for shots | Responsive controls, fair hit registration, the server as referee, cheating contained |
+| Strategy games | Deterministic [lockstep](/network/lockstep-and-rollback/), often peer to peer or through a relay | Thousands of units for the price of a few inputs; input delay hidden by the pace of the game |
+| Fighting games | Deterministic [rollback](/network/lockstep-and-rollback/), peer to peer, a few frames of input delay | Instant inputs, two players, a small state that's cheap to save and re-simulate |
+| Co-op and casual games | One player's machine as the server (a listen server), with prediction | No servers to pay for; the host has no latency and a small advantage that matters less in co-op |
+| Large online worlds | Authoritative servers, interest management, interpolation; the world split across servers | Only nearby entities are sent; nobody's client sees the whole world |
+
+The lines blur. Some shooters use rollback-style prediction for physics objects near the player. Some strategy games run a server that relays inputs and checks checksums, getting lockstep's bandwidth with a referee. Racing games often extrapolate other cars, because cars move predictably. And plenty of games mix models per system: state replication for most things, deterministic simulation for one that has to be exact.
+
+<Tip title="Decide early">
+Determinism is the decision that's hardest to add later. A game built for lockstep or rollback has to be deterministic from its first line of simulation code: fixed-point or carefully controlled floating point, a fixed update order, no stray randomness. A state-replicating game doesn't need that, and getting it afterwards usually means rewriting the simulation.
+</Tip>
+
+## Where the rest of the site fits
+
+- **Determinism** for lockstep and rollback: the [determinism lesson](/engine/determinism/) covers floating point, random numbers and threads.
+- **A fixed tick**: every model here steps the game at a fixed rate; the [game loops lesson](/engine/game-loops/) covers running one and drawing between ticks.
+- **Entity ids that match on every machine**: in an ECS, client and server have to agree on what an entity id means. [Networking in flecs](/network/networking-in-flecs/), the next lesson, covers making ids match, keeping local entities out of the way, and choosing what to replicate.
+- **Physics**: deterministic physics engines make rollback and lockstep possible for physical games. The [physics section](/physics/choosing-an-engine/) says which engines promise it.
+
+## Takeaways
+
+- **Shooters**: an authoritative server, interpolation for others, prediction for yourself, lag compensation for shots.
+- **Strategy**: deterministic lockstep, input delay hidden by the game's pace.
+- **Fighting games**: deterministic rollback with a little input delay.
+- Decide on **determinism** first; it's the choice you can't easily change.
