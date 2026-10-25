@@ -201,8 +201,9 @@ Gotcha found twice: a Dijkstra that skips stale heap entries (`if (c > cost[i]) 
 - Labs: big maps and heavy planners block the main thread (move planning to a worker or show progress); no pinch-zoom on touch; in the pathing lab a vertical paint stroke on a phone has to start sideways; tooltips explaining "Cost" vs "Length".
 - A cover lab: discovering cover from navmesh boundary edges, storing it in a spatial index, scoring it and keeping it valid.
 - Physics: a ragdoll or vehicle lesson on Jolt; Box3D with WebAssembly SIMD (needs Emscripten's SSE headers or a port to `wasm_simd128.h`); move-event based transform sync in the Box3D adapter.
-- flecs: more short lessons on non-obvious behaviour (verify on master first; add a variant when a PR changes behaviour); sandbox systems that modify values; relationships that aren't always Exclusive.
-- Networking: rollback and client prediction.
+- flecs: more short lessons on non-obvious behaviour (verify on master first, and describe what master does now); sandbox systems that modify values; relationships that aren't always Exclusive.
+- Networking: interest management (relevancy, priorities and a byte budget) is described but not simulated; bandwidth is counted from a byte layout rather than real packets; lockstep and rollback only with two peers; the client's server-clock estimate is simple (smallest recent delay), with no proper time sync.
+- Feel lab: wall jumps, dashes, slopes and moving platforms; a top-down mode.
 
 ## Contributing
 
