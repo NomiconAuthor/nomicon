@@ -56,7 +56,9 @@ Press **Step** a few times during a fight and follow the tick from the root:
 
 - **Patch up** fails at its first condition while health is fine, so the root moves on. Below 40 health it runs: get a potion if needed (a selector: "already carrying one" or "go and get one"), then heal.
 - **Recharge** only runs with an empty staff and spare crystals, and it goes somewhere safe first. *Take cover* returns running while it moves, success once the agent is in cover, and only then does the sequence reach *Recharge*.
+- **Restock crystals** goes for more crystals when both the staff and the spare crystals are running low, even mid-fight, which is why it sits above *Fight*.
 - **Fight** prefers cover when it's taking hits and exposed, and otherwise attacks.
+- **Restock potion** fetches a potion from the shrine once the arena is clear and the agent has none.
 - **Patrol** at the bottom catches everything else.
 
 ## Reactive or memory
@@ -120,7 +122,7 @@ The tree's structure is the same for every agent of a type, so build it once. Pe
 - **Priority is fixed.** The order of a selector's children can't depend on the situation. "Attack, unless the enemy is weak and I'm hurt, in which case..." turns into duplicated branches and extra conditions.
 - **Big trees get hard to change.** Inserting a behaviour means deciding where it goes relative to everything else, and subtle interactions between branches appear.
 
-That's why hybrids are common: a **utility selector** node that scores its children instead of trying them in order, keeping the tree for structure and sequences and the curves for choosing between options. [Choosing an architecture](/ai/choosing-an-architecture/), two lessons on, comes back to this.
+That's why hybrids are common: a **utility selector** node that scores its children instead of trying them in order, keeping the tree for structure and sequences and the curves for choosing between options. [Choosing an architecture](/ai/choosing-an-architecture/), after the two planning lessons, comes back to this.
 
 Trees came to wide attention through *Halo 2*'s AI and are now built into Unreal and most other engines. They suit anything with prioritised, step-by-step behaviour, not only combat: a shopkeeper's daily routine, a boss's attack phases, a companion keeping up with the player.
 

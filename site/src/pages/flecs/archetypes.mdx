@@ -42,6 +42,6 @@ Row indices are an implementation detail that changes whenever any entity in the
 
 **Don't flip a tag every frame to mean "this frame".** Each add or remove of a tag moves the entity, copying all of its components. For state that changes constantly, a field inside a component (or a `DontFragment` or `CanToggle` component, see [choosing storage](/flecs/storage-traits/)) avoids the moves. Tags work well for state that changes rarely and that you query for often, because queries then skip whole tables.
 
-**Prefer setting up an entity's full type in one go.** Each separate add is its own move. Instantiating a prefab adds its whole set of components at once, which is one reason to use prefabs for things you spawn often.
+**Prefer setting up an entity's full type in one go.** Outside a system, each separate add is its own move (inside one, the command queue batches them into a single move; see [commands](/flecs/commands/)). Instantiating a prefab adds its whole set of components at once, which is one reason to use prefabs for things you spawn often.
 
 Inside the debugger, the **Try it** controls under the code let you make your own moves: pick an entity, add or remove `Frozen` or `Velocity`, and step through what flecs does.

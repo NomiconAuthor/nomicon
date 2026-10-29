@@ -482,7 +482,7 @@ export class WalkTrace extends EventTrace<WalkEvent> {
       case 'sample':
         return {
           title: '3. Walk the edges and probe.',
-          text: `Every ${this.spacing} m along each simplified edge, stand half a metre out on the walkable side and cast a short probe back towards the wall, at crouch and at standing height. Hit at standing height: full cover (blue). Only at crouch height: low cover (yellow). Missed: no cover here (red), usually where simplification cut a corner or the wall is a ravine or water edge.`,
+          text: `Every ${this.spacing} m along each simplified edge, stand half a metre out on the walkable side and cast a short probe back towards the wall, at crouch and at standing height. Hit at standing height: full cover (blue). Only at crouch height: low cover (yellow). Missed: no cover here (red), where simplification cut a corner so the probe falls short of the wall.`,
         };
       case 'rail':
         return {

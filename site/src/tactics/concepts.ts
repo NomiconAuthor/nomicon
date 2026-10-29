@@ -66,7 +66,7 @@ export const CONCEPTS: TConcept[] = [
     layer: 'chokes',
     body: [
       'A choke is a narrow opening between two wider areas. That definition has two halves, and both matter: narrow alone describes every alley; it is narrow relative to what it joins that makes a doorway between two halls a choke.',
-      'The lab finds them with a watershed over the clearance field. Sort every free cell from widest to narrowest and flood: each local maximum starts a region, and regions grow as narrower cells join them. When two regions meet, look at the meeting cell. If it is nearly as wide as the regions, they are really one space and merge. If it is much narrower (the slider sets how much), the meeting cell is a choke and the regions stay apart. The first meeting cell of a pair is the saddle point, the widest point of the narrowest crossing, so its clearance is the choke\'s half-width. Recast builds its regions with the same watershed idea.',
+      'The lab finds them with a watershed over the clearance field. Sort every free cell from widest to narrowest and flood: each local maximum starts a region, and regions grow as narrower cells join them. When two regions meet, look at the meeting cell. If it is nearly as wide as the regions, they are really one space and merge. If it is much narrower (the slider sets how much), the meeting cell is a choke and the regions stay apart. The first meeting cell of a pair is the saddle point, the widest point of the narrowest crossing, so its clearance is the choke\'s half-width. Recast\'s watershed partitioning floods its distance field in the same order, but merges regions by size rather than by how narrow the opening is, so its region borders aren\'t chokes.',
       "Width isn't the whole story. A narrow gap that no route uses doesn't matter. The circle on each choke is sized by traffic: the share of sampled shortest routes that pass through it.",
     ],
     look: 'doorways and gaps between buildings get chokes; long open streets do not, because the street is no narrower than the regions on either side.',
@@ -138,13 +138,13 @@ export const CONCEPTS: TConcept[] = [
     layer: 'cover',
     body: [
       'This is how cover is usually generated from a navmesh, and it works the same way from building footprints. Five steps, each visible in playback:',
-      '1. Trace the outline where walkable space meets obstacles, as chains of edges with the walkable side always on the same side. Recast already does this when it builds a navmesh: its contours are these outlines, so with Recast you start from step 2.',
+      '1. Trace the outline where walkable space meets obstacles, as chains of edges with the walkable side always on the same side. Recast already does this, and step 2 too, when it builds a navmesh: its contours are these outlines, already simplified, so with Recast you start from step 3 (keep only contour edges that face a wall, and remember they sit one agent radius out from it).',
       '2. Simplify the outlines with Douglas-Peucker, so a staircase of grid edges becomes one straight wall. The tolerance trades accuracy for fewer, longer edges: too loose and the simplified line cuts corners, which shows up later as probes that miss.',
-      '3. Walk each edge at a fixed spacing (here 1 m), half a metre out on the walkable side, and cast short probes back towards the wall at crouch height and at standing height. Which ones hit decides full cover, low cover, or none (a ravine edge, a gap, a corner the simplification cut).',
+      '3. Walk each edge at a fixed spacing (here 1 m), half a metre out on the walkable side, and cast short probes back towards the wall at crouch height and at standing height. Which ones hit decides full cover, low cover, or none (where the simplification cut a corner; from a navmesh, also edges that border a drop or water rather than a wall).',
       '4. Merge consecutive samples of the same kind into rails. A rail is what the AI reasons about: "slide along this wall to stay hidden".',
       '5. Find peek points: just past the end of each rail, if the cover stops and the ground is walkable, a unit can lean or step out to attack. Attack positions are at the ends of rails, not in their middles, which matters a lot when choosing cover.',
     ],
-    look: 'pause at each stage and read the caption above the map. In stage 3, the red probes are where the simplified outline drifted off the real wall.',
+    look: 'pause at each stage and read the caption above the map. Then raise the Simplify tolerance and replay stage 3: red probes appear where the simplified outline has drifted off the real wall.',
     tries: [
       { label: 'Walk the town', scenario: { preset: 'town', layer: 'cover', coverMethod: 'walk' } },
       { label: 'Walk the countryside', scenario: { preset: 'country', layer: 'cover', coverMethod: 'walk' } },
@@ -174,7 +174,7 @@ export const CONCEPTS: TConcept[] = [
     layer: 'dynamic',
     body: [
       'Bake everything that depends only on the static world before play, in tiles. When the world changes (a door opens, a wall is destroyed, a crater appears), mark the tiles the change touches as dirty, grown by a margin of how far the analysis looks, and rebuild only those, as a background job spread over frames. Keep using the old tile data until the new data is ready, then swap it in. Units that had claimed cover in a dirty tile re-query.',
-      "The margin is the subtle part. Cover depends only on direct neighbours, so a 1 m margin is enough. Clearance and chokes depend on the widest open space, so a change can affect them tens of metres away. Exposure depends on sight lines, so a demolished wall changes it across the whole sight range: that is usually recomputed lazily, only near units that ask, rather than re-baked.",
+      "The margin is the subtle part. Per-cell cover depends only on direct neighbours, so a 1 m margin is enough (rails and peek points from a boundary walk need a couple of metres). Clearance and chokes depend on the widest open space, so a change can affect them tens of metres away. Exposure depends on sight lines, so a demolished wall changes it across the whole sight range: that is usually recomputed lazily, only near units that ask, rather than re-baked.",
       'Recast already works this way for navmeshes: a tiled navmesh with Detour\'s TileCache rebuilds just the tiles that temporary obstacles touch. A cover bake keyed to the same tiles can be rebuilt by the same job.',
       'Things that move (wagons, platforms, large creatures) should not be baked at all. Give them a cover template: points around the wagon in the object\'s own frame, transformed each frame and put in the spatial index next to the baked cover. They cost nothing to keep valid, and a cover query treats them like any other candidate.',
     ],

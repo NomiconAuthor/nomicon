@@ -46,13 +46,13 @@ struct Behaviour {
 };
 
 float score(const Behaviour& b, const Factors& f) {
-    float s = b.weight;
+    float s = 1.0f;
     for (const Consideration& c : b.considerations) {
         float x = std::clamp((f[c.factor] - c.min) / (c.max - c.min), 0.0f, 1.0f);
         s *= c.curve(x);
         if (s == 0.0f) break;               // vetoed: no need to look further
     }
-    return s;
+    return s * b.weight;
 }
 ```
 
@@ -76,7 +76,7 @@ The curve is where the design lives: it says *how much* a factor matters across 
 
 ## The inspector
 
-This is the whole decision for the arena agent used in the decision-making lessons, a battle-mage holding off waves of goblins: its staff holds six charges, it recharges from spare mana crystals, and it can carry one healing potion. Seven behaviours, three to five considerations each. Pick a situation or drag the factors, and click any small curve to edit it.
+This is the whole decision for the arena agent used in the decision-making lessons, a battle-mage holding off waves of goblins: its staff holds six charges, it recharges from spare mana crystals, and it can carry one healing potion. Seven behaviours, one to five considerations each. Pick a situation or drag the factors, and click any small curve to edit it.
 
 <AiWidget kind="inspector" />
 
@@ -85,7 +85,7 @@ Things to try:
 1. **Under attack in the open.** *Take cover* wins over *Attack*, 0.85 to 0.73. Click *Take cover › Hurt* and lower its output minimum: the agent becomes braver, and only takes cover once it's actually hurt.
 2. **Staff empty, in cover.** *Attack* is vetoed by *Charges left* (the red 0.00), and *Recharge* wins easily. Move **In cover** to *no*: *Not exposed* halves recharge's raw score and *Take cover* overtakes it. Nobody wrote "recharge in cover"; it falls out of two considerations.
 3. **Badly hurt, no potion.** *Get potion* wins, because the shrine has one. Set **Potion at the shrine** to *no* and its score drops to zero: the agent fights on, since nothing else makes sense.
-4. **Drag health down slowly** and watch *Attack* fade while *Take cover* and *Heal* rise. The crossovers are where the agent changes its mind, and they come from the curves' shapes, not from thresholds written anywhere.
+4. **Enemy closing in.** Drag health down slowly and watch *Attack* fade while *Heal* rises: somewhere below 50 the agent switches to drinking its potion. That crossover is where the agent changes its mind, and it comes from the curves' shapes, not from a threshold written anywhere.
 
 ## Compensating for the number of considerations
 
@@ -94,7 +94,7 @@ Multiplying has a side effect: the more considerations a behaviour has, the lowe
 The usual fix gives back part of the lost score, more for behaviours with more considerations:
 
 ```cpp
-// After multiplying n considerations into `s` (before the weight):
+// After multiplying n considerations into `s`, before applying the weight:
 float mod     = 1.0f - 1.0f / n;
 float make_up = (1.0f - s) * mod;
 s = s + make_up * s;

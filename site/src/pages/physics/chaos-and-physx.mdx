@@ -32,12 +32,12 @@ The timeline shows why. Click anywhere on it to press a key at that moment:
 
 On the game thread, an input read at the start of a frame is simulated in that frame (if the frame has a physics step in it) and shown when the frame is presented. With an async fixed tick, the input waits for the game thread to read it, then for the next physics tick to start, then for that tick to finish, then for the next frame to draw the result. Interpolating between the last two physics results, which smooths motion when the tick is slower than the frame rate, puts the picture another tick behind. Averaged over 400 key presses at 90 fps:
 
-| Physics tick | On the game thread | Own thread | Own thread, interpolated |
+| Physics tick | Game thread, same fixed tick | Own thread | Own thread, interpolated |
 |---|---|---|---|
 | 30 Hz | 30 ms | 61 ms | 95 ms |
 | 60 Hz | 22 ms | 44 ms | 60 ms |
 
-This is a model rather than a measurement of Unreal (it ignores render latency, and real ticks overlap with frames differently), but the shape holds: a decoupled fixed tick buys determinism, stable networking and a game thread free of physics work, and pays for it in input latency. Unreal's character movement, below, runs on the game thread rather than in the physics tick.
+This is a model rather than a measurement of Unreal (it ignores render latency, and real ticks overlap with frames differently), and the game-thread column uses the same fixed tick for comparison; Unreal's default, a step every frame with a variable delta, shows an input in about 18 ms in this model whatever the tick rate. But the shape holds: a decoupled fixed tick buys determinism, stable networking and a game thread free of physics work, and pays for it in input latency. Unreal's character movement, below, runs on the game thread rather than in the physics tick.
 
 ### Networked physics
 

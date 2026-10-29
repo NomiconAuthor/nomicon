@@ -142,13 +142,13 @@ export const GLOSSARY: Record<string, Term> = {
   anyangle: {
     term: 'Any-angle path',
     aliases: ['any-angle', 'any angle', 'line of sight', 'line-of-sight'],
-    def: "A path whose segments aren't limited to the grid's 8 directions. Theta* gets one by letting a node take any node it can see as its parent; smoothing gets one afterwards by shortcutting.",
+    def: "A path whose segments aren't limited to the grid's 8 directions. Theta* gets one by letting a node skip to its predecessor's parent whenever it can see it; smoothing gets one afterwards by shortcutting.",
     concept: 'anyangle',
   },
   clearance: {
     term: 'Clearance',
     aliases: ['clearance', 'clearance map', 'distance field'],
-    def: 'Per cell, how much free space there is around it. A unit can stand where clearance is at least its size, so one clearance map serves every unit size; turn on "Clearance numbers" to see it.',
+    def: 'Per cell, the chessboard distance to the nearest wall or map edge. A (2k−1)×(2k−1) unit can stand where clearance is at least k, so one clearance map serves every unit size; turn on "Clearance numbers" to see it.',
     concept: 'clearance',
   },
   cspace: {
@@ -461,8 +461,8 @@ export const CONCEPTS: Concept[] = [
     group: SEARCH,
     title: 'Any-angle paths and smoothing',
     body: [
-      'Grid paths zig-zag because the grid allows only 8 directions. Two fixes: smooth afterwards (skip any waypoint the unit can see past, then re-check), or search with any-angle moves directly. Theta* lets a node take any node it can see as its parent, so paths come out as a few long segments; Lazy Theta* defers the line-of-sight checks until a node is expanded and does far fewer of them.',
-      'Neither is truly shortest (that needs a visibility graph or a navmesh plus funnel), but both are very close.',
+      'Grid paths zig-zag because the grid allows only 8 directions. Two fixes: smooth afterwards (skip any waypoint the unit can see past, then re-check), or search with any-angle moves directly. Theta* lets a node take its predecessor’s parent as its own whenever it can see it, so parent links stretch across open space and paths come out as a few long segments; Lazy Theta* defers the line-of-sight checks until a node is expanded and does far fewer of them.',
+      'Neither is truly shortest (that needs a visibility graph; a navmesh plus funnel is taut, but its corridor is picked with approximate costs, so it is only close too), but both are very close.',
     ],
     look: 'Turn on "Search tree" in the sidebar: Theta*\'s parent links stretch across open space.',
     tries: [
@@ -491,7 +491,7 @@ export const CONCEPTS: Concept[] = [
     group: NAV,
     title: 'Clearance: one map for every unit size',
     body: [
-      'A unit is not a point. Rather than a separate graph per size, measure once how much room each cell has (its clearance: the size of the largest square centred on it that touches no wall). A unit fits where clearance is at least its size. A 1×1 unit needs 1, a 3×3 unit needs 2, and so on: same map, different threshold.',
+      'A unit is not a point. Rather than a separate graph per size, measure once how much room each cell has (its clearance: how many chessboard steps it is to the nearest wall or map edge). A cell with clearance k has a clear (2k−1)×(2k−1) square centred on it, so a 1×1 unit needs 1, a 3×3 unit needs 2, and so on: same map, different threshold.',
       'This is planning in configuration space: grow the obstacles by the unit (inflation) and the unit becomes a point again. Navmeshes do the same thing at build time, which is why they need one mesh per unit radius.',
     ],
     look: 'With a 3×3 unit the one-cell doors close, so the "reachable areas" overlay splits the rooms into islands and the reachability check answers "no" without searching. Set the footprint back to 1×1 and the rooms join up again.',
@@ -539,7 +539,7 @@ export const CONCEPTS: Concept[] = [
     title: 'Hierarchy: plan on the highways',
     body: [
       "On big maps the win comes from searching less of the world, not from a faster inner loop. HPA* cuts the map into tiles and places doors wherever a unit can cross a tile border. Inside each tile it caches the cost of walking between every pair of doors. A query connects start and goal to their tiles' doors, runs A* on the small door graph, and fills in each hop from the cache.",
-      'Paths come out a few percent longer than optimal (smoothing recovers most of it), and the search touches doors, not cells: often a hundred times fewer nodes.',
+      'Paths come out a few percent longer than optimal (smoothing recovers most of it), and the search touches doors, not cells: often ten to thirty times fewer nodes on a big map.',
     ],
     look: 'Compare "Expanded": cells for A*, doors for HPA*. Then try terrain costs on.',
     tries: [

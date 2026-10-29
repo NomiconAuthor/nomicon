@@ -283,7 +283,7 @@ export class SnapshotClient {
       const age = (this.now - last.time) / 1000;
       return last.players.map((p) => ({ x: p.x + p.vx * age, y: p.y + p.vy * age, vx: p.vx, vy: p.vy }));
     }
-    // Interpolate: draw the world as it was `delay` ms before the server's present, between the two
+    // Interpolate: draw the world as it was `delay` ms before the newest server time the client has received, between the two
     // snapshots around then.
     const t = this.now - this.clockOffset - this.s.delay;
     for (let i = b.length - 1; i > 0; i--) {
@@ -639,7 +639,7 @@ export class LagCompensation {
       }
     }
     if (this.snaps.length > 60) this.snaps.splice(0, this.snaps.length - 60);
-    // The client draws the target `delay` ms before its estimate of the server's present.
+    // The client draws the target `delay` ms before the newest server time it has received.
     const vt = this.now - this.clockOffset - this.s.delay;
     this.seen = null;
     for (let i = this.snaps.length - 1; i > 0; i--) {

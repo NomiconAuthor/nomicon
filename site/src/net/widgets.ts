@@ -573,7 +573,7 @@ export class SyncViz {
     const bw = 960 / 240;
     this.log.forEach((v, i) => {
       if (v < 0) {
-        ctx.fillStyle = p.pal.get('--c6');
+        ctx.fillStyle = p.pal.get('--alert');
         ctx.fillRect(i * bw, y0 + hgt - 8, bw - 0.5, 8);
       } else if (v > 0) {
         ctx.fillStyle = p.pal.get('--c2');

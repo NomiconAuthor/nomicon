@@ -16,7 +16,7 @@ You're at the top, firing twice a second at the target exactly where your screen
 
 ## Without compensation, perfect aim misses
 
-Untick **Server rewinds to what you saw**. Every shot misses: **0%** of perfectly aimed shots hit, at 25 ms latency as much as at 150. The target runs at 5 m/s and is 0.8 m across; the 100 ms interpolation delay alone puts it half a metre behind where it is on the server, more than its radius, before latency adds anything.
+Untick **Server rewinds to what you saw**. Every shot misses: **0%** of perfectly aimed shots hit, at 25 ms latency as much as at 150. The target runs at 6 m/s and is 0.8 m across; the 100 ms interpolation delay alone puts it 0.6 m behind where it is on the server, more than its radius, before latency adds anything.
 
 Without compensation, players have to **lead** their targets by how far in the past the server will judge them (a full round trip plus the interpolation delay), which changes with every connection and every target's speed. That's tolerable for slow projectiles, where leading is part of the game anyway, and hopeless for hitscan weapons.
 
@@ -31,9 +31,11 @@ Without compensation, players have to **lead** their targets by how far in the p
 ```cpp
 void on_shot(Client& shooter, const ShotCmd& shot) {
     double back = std::min(now - shot.view_time, max_rewind);    // how far into the past the shooter saw
-    RewindScope rewind(world, now - back);                         // move everyone to their positions then
-    HitResult hit = trace(shooter.eye, shot.direction, /*ignore*/ shooter.entity);
-    // rewind's destructor restores the present before anything else runs
+    HitResult hit;
+    {
+        RewindScope rewind(world, now - back);                     // move everyone to their positions then
+        hit = trace(shooter.eye, shot.direction, /*ignore*/ shooter.entity);
+    }                                                              // rewind's destructor restores the present here
     if (hit.entity) apply_damage(hit.entity, shot.weapon);
 }
 ```

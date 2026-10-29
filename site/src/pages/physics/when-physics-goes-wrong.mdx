@@ -18,9 +18,9 @@ Here are four of the commonest, each with its fix one tick away. Each runs for a
 
 **Heavy on light** drops a block 2,000 times heavier than the box under it. Within six seconds the box is pushed 28.1 cm into the ground or the block, and it's only 50 cm tall. With the fix, the box is denser and the ratio is 10 to 1: it sinks 1.5 cm, which is what any ordinary stack does at first before it settles.
 
-The cause is the solver going round the contacts one at a time ([solving contacts](/physics/solving-contacts/)). A light body squeezed between something heavy and the ground can't pass on a large impulse in one pass, so most of the weight never reaches the ground, and with a limited number of passes the box loses. More substeps or iterations barely help here; changing the masses does.
+The cause is the solver going round the contacts one at a time ([solving contacts](/physics/solving-contacts/)). A light body squeezed between something heavy and the ground can't pass on a large impulse in one pass, so most of the weight never reaches the ground, and with a limited number of passes the box loses. More substeps or iterations barely help at a ratio like this (they do help a moderate one); changing the masses does.
 
-- **Keep mass ratios between touching or jointed bodies under about 10 to 1.** Nobody can tell that a crate is three times denser than a real crate, so cheat.
+- **Keep mass ratios between touching or jointed bodies to a few to one, and under about 10 to 1.** Nobody can tell that a crate is three times denser than a real crate, so cheat.
 - If something really must be huge, consider making it **kinematic** while it's resting on things that matter, or making the light things heavier only while they're under it.
 
 ## Chains stretch or explode

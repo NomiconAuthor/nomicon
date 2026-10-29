@@ -18,7 +18,7 @@ This is how cover is usually generated from a navmesh, and it works the same fro
 
 <TacticsWidget preset="town" layer="cover" method="walk" />
 
-1. **Trace the outline** where walkable space meets obstacles, as chains of edges with the walkable side always on the left. Recast already does this when it builds a navmesh (its *contours*), so with Recast you start at step 2.
+1. **Trace the outline** where walkable space meets obstacles, as chains of edges with the walkable side always on the left. Recast already does steps 1 and 2 when it builds a navmesh (its *contours*, traced and then simplified), so with Recast you start at step 3. Two catches: keep only the wall edges (those with no neighbouring region), and remember that Recast shrinks the walkable area by the agent radius first, so its contours sit that far out from the wall. Place the samples on the contour and make the probes long enough to reach the wall.
 2. **Simplify** each outline with Douglas-Peucker, so staircases of grid edges become straight walls. Raise the tolerance and the lines start cutting corners, which shows up in the next step as probes that miss.
 3. **Walk each edge** at a fixed spacing, half a metre out on the walkable side, and cast two short probes back towards the wall: at crouch height and at standing height. Which ones hit decides full cover, low cover or none.
 4. **Merge samples into rails**: runs of the same kind along one edge, split wherever the outline turns a convex corner, because the cover ends there.
@@ -56,7 +56,7 @@ When nothing was baked (a procedurally generated level, dynamic geometry, a quer
 <TacticsWidget preset="thin" layer="cover" method="random" size="medium" />
 
 - **Random** points clump by chance and leave holes. A thin gap is found only if a sample happens to land within a metre of it.
-- **Poisson-disk** sampling (Bridson's algorithm) keeps samples a minimum distance apart, so coverage is even with no big holes. On average it finds about as much as random sampling, but far more predictably.
+- **Poisson-disk** sampling (Bridson's algorithm) keeps samples a minimum distance apart, so coverage is even with no big holes. Because it never wastes samples on top of each other, it finds a little more than random sampling and varies a little less from run to run, but it still finds a thin gap only if a sample happens to land near it.
 - **Edge-biased** sampling puts the samples where cover can be, on obstacle cells bordering walkable ground. Almost every sample is useful, and thin gaps are found because their walls are edges like any other.
 
 With 300 samples on this map, random and Poisson sampling find 40 and 44 of the 128 cover positions inside the gaps, about a third; edge-biased finds 112, nearly nine in ten. Unreal's Environment Query System is a production example of the sampling style: generate candidate points, then filter and score them.

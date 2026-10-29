@@ -895,7 +895,7 @@ function network(): void {
     claim(S, `| ${rate} | ${kb(bw.full)} | ${kb(bw.quantised)} | ${kb(bw.delta)} |`);
   }
   claim(S, `every player visibly jumps about ${Math.round(snap(20, 'latest').jumps / 12)} times a minute`);
-  claim(S, `the client runs dry ${snap(20, 'interpolate', true).late} times a minute; at 60 a second with a 33 ms delay, ${snap(60, 'interpolate', true).late} times`);
+  claim(S, `the client is out of snapshots on ${snap(20, 'interpolate', true).late} frames a minute; at 60 a second with a 33 ms delay, on ${snap(60, 'interpolate', true).late}`);
 
   // 3. Prediction
   const R = 'network/prediction-and-reconciliation.mdx';

@@ -29,7 +29,7 @@ Switch to **Tower of 20**: twenty cubes, every other one turned 45°. Box3D hold
 That's the [solver lesson](/physics/solving-contacts/) in three real engines. All three are sequential-impulse solvers with warm starting, and they differ in how they get rid of overlap:
 
 - **Jolt** solves velocities with a fixed number of iterations, then runs 2 position iterations that correct overlap directly (scaled by a Baumgarte factor of 0.2).
-- **Bullet** uses **split impulse** by default: overlap is fixed with a separate "push" velocity that moves bodies apart in the position update and is then thrown away, so it never becomes real momentum. It's the same idea as a position pass, done inside the velocity solver.
+- **Bullet** uses **split impulse** by default for deep overlap (more than 4 cm): that overlap is fixed with a separate "push" velocity that moves bodies apart in the position update and is then thrown away, so it never becomes real momentum, the same idea as a position pass done inside the velocity solver. Shallower overlap, including ordinary resting contact, is corrected Baumgarte-style inside the normal velocity solve.
 - **Box3D**'s soft step spends its effort on substeps, each of which also moves the bodies, with soft contacts and a relax pass.
 
 None of the defaults is wrong: a 20-high stack of unsupported cubes is rare in a game, and Jolt's defaults favour a lower cost per step. If you need tall stacks in Jolt, raise `mNumVelocitySteps`, or add collision steps.
@@ -102,7 +102,7 @@ All three run single-threaded on this page.
 ## Determinism and replay
 
 - **Jolt** is deterministic on one platform if you make the same API calls in the same order. Cross-platform determinism is a build option, `CROSS_PLATFORM_DETERMINISTIC`, off by default and about 8% slower. `SaveState` and `RestoreState` snapshot what the step changes, which is enough for rollback networking as long as the game handles bodies added or removed between snapshots.
-- **Box3D** lists cross-platform determinism as a feature, along with **recording and replay**: record every API call into a buffer, then play it back frame by frame or seek to a frame, and validate that a replay reproduces the recording. Box2D, which it shares code with, explicitly doesn't offer rollback determinism.
+- **Box3D** lists cross-platform determinism as a feature, along with **recording and replay**: record every API call into a buffer, then play it back frame by frame or seek to a frame, and validate that a replay reproduces the recording. Like Box2D, though, it doesn't offer rollback determinism: there's no public way to restore a past world state and resume with identical results (the snapshot that seeds a recording is internal for now). Its determinism suits lockstep networking and reproducing bugs.
 - **Bullet** makes no cross-platform promise. It's repeatable on one machine for the same calls in the same order, which is what most tools and robotics uses needed.
 
 ## Characters

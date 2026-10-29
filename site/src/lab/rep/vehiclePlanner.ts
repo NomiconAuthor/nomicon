@@ -52,7 +52,7 @@ export const VEHICLE_ALGS: Array<{
     chips: [
       ['Optimal', 'No, but close'],
       ['Complete', 'Resolution-complete, roughly'],
-      ['Path', 'Drivable arcs, exact goal pose'],
+      ['Path', 'Drivable arcs; exact goal pose only via the analytic shot'],
     ],
     watch:
       'Turn the analytic shot off and the search has to hit the goal cell and heading on its own: watch the expansions climb. On a tight map, watch it back out of dead ends (purple is reversing). The faint purple bands are the "ignoring turning" heuristic: it flows round walls, so the search is not lured into cul-de-sacs.',
@@ -64,7 +64,7 @@ export const VEHICLE_ALGS: Array<{
     summary:
       'States are cell centres with one of 16 headings. A small set of motion primitives (a straight step and the tightest clean turns to nearby headings, all ending exactly on the lattice) is computed once for the vehicle, together with every cell each primitive sweeps. Search is then plain A*, and collision checks are table lookups.',
     chips: [
-      ['Optimal', 'Yes, for paths made of these primitives'],
+      ['Optimal', 'Yes, for paths made of these primitives (with terrain costs, nearly)'],
       ['Complete', 'For this lattice'],
       ['Path', 'Drivable, but only 16 headings'],
     ],

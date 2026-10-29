@@ -450,6 +450,9 @@ export interface LatticeTable {
   served: number;
 }
 
+/** Worst ratio of 8-direction grid distance to straight-line distance (at 22.5°). */
+const OCTILE_OVER_EUCLID = Math.sqrt(4 - 2 * Math.SQRT2);
+
 const latticeCache = new Map<string, LatticeTable>();
 
 /** Forget every lattice table (for "replan from cold"). */
@@ -633,11 +636,14 @@ export function latticeAStar(pr: VehicleProblem, table: LatticeTable, limit: num
   const prim: Array<Primitive | null> = [];
   const heap = new MinHeap();
   const centre = (cell: number): Pose => ({ x: (cell % w) + 0.5, y: Math.floor(cell / w) + 0.5, theta: 0 });
+  // The field is an 8-direction grid cost, up to OCTILE_OVER_EUCLID times the straight-line
+  // distance on open diagonals. Shrink it by that much so the heuristic never overestimates and
+  // A* stays optimal over the primitives (the shared field stays as it is for Hybrid A*).
   const hOf = (cell: number) => {
     const f = pr.field[cell];
     if (!Number.isFinite(f)) return Infinity;
     const c = centre(cell);
-    return Math.max(f, Math.hypot(pr.goal.x - c.x, pr.goal.y - c.y) * space.minCostPerUnit);
+    return Math.max(f / OCTILE_OVER_EUCLID, Math.hypot(pr.goal.x - c.x, pr.goal.y - c.y) * space.minCostPerUnit);
   };
   const sp = centre(sCell);
   const root = tree.add({ x: sp.x, y: sp.y, theta: LATTICE_ANGLES[sHead] }, -1, 1);

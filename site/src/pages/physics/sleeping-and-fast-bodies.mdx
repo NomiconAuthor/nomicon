@@ -17,7 +17,7 @@ An **island** is a group of dynamic bodies connected by contacts or joints. Stat
 - They're **independent**: nothing in one island can affect another this step, so islands can be solved in parallel.
 - They **sleep as a unit**. A box resting on another box can't sleep on its own: if the bottom one moved, the top one would have to wake up too.
 
-This page's engine finds islands each step with a union-find over touching contacts and joints, which is close to linear in the number of contacts. Real engines usually keep islands from step to step instead, merging them when contacts begin and splitting them lazily when contacts end.
+This page's engine finds islands each step with a union-find over touching contacts and joints, which is close to linear in the number of contacts. Engines differ here. Jolt and Bullet also rebuild islands every step with a union-find; Box2D v3, Box3D and PhysX keep them from step to step instead, merging them when contacts begin and splitting them lazily when contacts end.
 
 <PhysicsWidget kind="sleep" />
 
@@ -53,7 +53,7 @@ It's cheap, it works for every pair (dynamic against dynamic too), and it fits i
 
 A **sweep** casts the body's shape along this step's motion and finds the **time of impact** (TOI): the fraction of the step at which it first touches something. The body is moved back to that moment, so the next step finds the contact normally. Choose **Sweep (time of impact)**: the dashed line shows where the sweep moved the ball back from.
 
-Sweeps are exact but cost a shape cast per fast body per step, so engines limit them: usually to bodies you mark as fast, against static geometry only, which covers what matters most (projectiles through walls, debris through floors). Some engines sweep fast bodies by default; others leave it off until you ask. Either way it's a per-body setting worth finding on day one. A linear sweep also doesn't see rotation, so long, fast-spinning objects can still tunnel.
+Sweeps are exact but cost a shape cast per fast body per step, so engines limit them. Box2D and Box3D sweep any dynamic body that moves far enough, but only against static geometry (which covers projectiles through walls and debris through floors) unless you mark it as a bullet; Jolt, PhysX and Bullet sweep only the bodies you flag, against everything. Either way it's a per-body setting worth finding on day one. A linear sweep also doesn't see rotation, so long, fast-spinning objects can still tunnel.
 
 The engine on this page sweeps only circles flagged as bullets, against static shapes, which is enough to show the idea.
 
@@ -62,4 +62,4 @@ The engine on this page sweeps only circles flagged as bullets, against static s
 - **Islands** are groups of touching dynamic bodies: solved independently, put to **sleep** together.
 - Sleep makes bodies at rest **free** and **exactly still**; touching, joints or code wake them.
 - **Tunnelling** happens when a body moves further than an obstacle's thickness in one step.
-- **Speculative contacts** are cheap and general but can snag on corners; **sweeps** are exact but cost a cast, so engines save them for fast bodies against static geometry.
+- **Speculative contacts** are cheap and general but can snag on corners; **sweeps** are exact but cost a cast, so engines save them for flagged bodies, or for sweeps against static geometry only.

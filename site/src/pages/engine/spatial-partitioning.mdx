@@ -60,7 +60,7 @@ Sort objects by the left edge of their box. Walk the sorted list keeping the obj
 
 - **Keeping the list sorted is nearly free when things move a little.** Insertion sort on an almost-sorted list costs about one step per object plus one per swap. In the widget, a frame of 5,000 moving objects needs a few thousand swaps.
 - **It finds pairs well** (under 1% of brute force with even spreading) and has almost no build cost.
-- **It falls over when objects line up on the sorting axis.** Choose **All in a column**: every object overlaps every other on x, so most pairs survive the first cut. With 5,000 objects it tests somewhere between 15% and 30% of all pairs, depending on how far they've drifted apart, against under 1% for the BVH. Engines sort on the axis of greatest spread, or use one list per region (*multi sweep and prune*).
+- **It falls over when objects line up on the sorting axis.** Choose **All in a column**: the objects all share a narrow band of x, so far more pairs survive the first cut. With 5,000 objects it starts out testing about a quarter of all pairs (falling as they drift apart), against under 1% for the BVH. Engines sort on the axis of greatest spread, or use one list per region (*multi sweep and prune*).
 - It's a poor fit for one-off queries, since it only orders on one axis.
 
 ## Choosing

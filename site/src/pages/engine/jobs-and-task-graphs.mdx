@@ -8,7 +8,7 @@ summary: 'Spreading a frame across every core. Job systems and how big a job sho
 import EngineWidget from '../../components/EngineWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
-A frame is a lot of separate work: move a thousand units, rebuild the spatial index, answer a few hundred path queries, run every brain, animate, prepare the draw lists. A desktop CPU has 8 to 16 cores and a console 7 or 8 usable ones. Running the frame on one of them leaves the rest idle.
+A frame is a lot of separate work: move a thousand units, rebuild the spatial index, answer a few hundred path queries, run every brain, animate, prepare the draw lists. A desktop CPU has 8 to 16 cores and a console 6 or 7 usable ones (it has eight, but keeps some for the OS). Running the frame on one of them leaves the rest idle.
 
 The old answer was a thread per subsystem: a physics thread, an audio thread, a render thread. It doesn't scale, because there are more cores than subsystems and the subsystems aren't the same size. The modern answer is a **job system**: one worker thread per core, and the frame cut into many small **jobs** that any worker can run.
 

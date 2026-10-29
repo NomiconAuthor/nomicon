@@ -104,7 +104,7 @@ export const CONCEPTS: FConcept[] = [
     body: [
       'The mirror image of coyote time. Players press jump a little before they land, expecting to jump the moment they touch down. Without a buffer, a press made 50 ms before landing does nothing, and the character lands and stands still: an "eaten" jump.',
       'A buffer remembers the press for a short window (100 to 150 ms) and fires the jump on the first frame it becomes possible. Climb the steps with the buffer off, pressing jump just before each landing, and watch the strip mark eaten presses. Turn it back on and every one becomes a jump marked “buffer”.',
-      'To build it: store the time since jump was pressed, and on any tick where a jump is possible, jump if that time is under the buffer window. Clear it once used, so one press can’t jump twice.',
+      'To build it: store the time since jump was pressed, and on any tick where a jump is possible, jump if that time is under the buffer window. Clear it once used, so one press can’t jump twice. If jump is no longer held when the buffered jump fires, cut it straight away, or every early tap becomes a full jump.',
     ],
     look: 'presses marked “✕ eaten” with the buffer off; “buffer” jumps with it on.',
     tries: [

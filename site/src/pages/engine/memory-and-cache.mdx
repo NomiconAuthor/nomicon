@@ -41,11 +41,11 @@ An ECS table stores each component in its own column, one array per component pe
 
 ## Measure it
 
-The same experiment at real scale, in JavaScript typed arrays (the JIT compiles these loops to plain machine code). A million 48-byte units is 48 MB, far bigger than any cache, so every pass streams from memory:
+The same experiment at real scale, in JavaScript typed arrays (the JIT compiles these loops to plain machine code). A million 48-byte units is 48 MB, more than most CPUs' last-level cache, so the array-of-structs passes stream from memory. The struct-of-arrays loops touch much less (Damage reads a single 4 MB array), and a working set that small can stay in cache from one pass to the next, which is part of the win:
 
 <EngineWidget kind="bench-layout" />
 
-The array-of-structs loops typically come out two to four times slower than the struct of arrays, for identical arithmetic, and the hot/cold split lands in between. In native code with SIMD the gap is usually larger still, because the struct of arrays also vectorises cleanly.
+The array-of-structs loops typically come out two to four times slower than the struct of arrays, for identical arithmetic. The hot/cold split matches the struct of arrays on Move, because its hot struct holds exactly the fields Move reads. On Damage it's closer to the array of structs, because `hp` sits in the cold part. In native code with SIMD the gap is usually larger still, because the struct of arrays also vectorises cleanly.
 
 ## Order matters as much as layout
 
@@ -73,7 +73,7 @@ With the counters side by side, almost every write is a transfer. Padded to a li
 
 ```cpp
 // Per-thread data written in a hot loop: give each one its own cache line.
-struct alignas(std::hardware_destructive_interference_size) WorkerStats {
+struct alignas(128) WorkerStats {  // 128 covers every common line size; see below
     uint64_t processed = 0;
     uint64_t skipped = 0;
 };
@@ -85,7 +85,7 @@ for (auto& job : my_jobs) processed += run(job);
 stats[worker].processed = processed;
 ```
 
-`std::hardware_destructive_interference_size` (C++17) is 64 on most targets. Some compilers warn when it's used in a header, because the value can differ between compilation units. Writing `alignas(64)` is the usual fallback.
+`std::hardware_destructive_interference_size` (C++17) is 64 on x86, but the value is up to the compiler: GCC uses 256 on 64-bit ARM, Clang's answer has changed between releases, and Clang/libc++ only gained it in LLVM 19, so older toolchains (Apple's included) don't have it at all. Some compilers warn when it's used in a header, because the value can differ between compilation units. A fixed `alignas(128)` is a common portable choice: it covers Apple's 128-byte lines and x86 CPUs that fetch lines in adjacent pairs.
 
 <Tip kind="warn" title="Where false sharing hides">
 Per-thread counters or stats in one array, a job queue's head and tail indices next to each other, a "done" flag beside data another thread is writing, small per-worker structs packed into a `std::vector`. Look for anything that several threads write in a hot loop.

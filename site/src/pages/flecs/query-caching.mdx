@@ -19,7 +19,7 @@ flecs has both kinds:
 | Iterating | walks a prematched list of tables | searches the component index each time |
 | Creating | slower: the cache is filled first | cheap, stateless |
 | Memory | a list per query | almost none |
-| New tables | every cached query is told, and tests the table once | no cost |
+| New tables | each cached query with a term on one of the table's components is told, and tests the table once | no cost |
 
 By default, queries with an entity (every system, and named queries) are cached, and ad-hoc queries aren't. You can choose explicitly with the cache kind (`.cached()` in C++, or `EcsQueryCacheAuto` / `EcsQueryCacheNone` in C).
 
@@ -41,5 +41,5 @@ Cache what you iterate every frame: systems are cached by default for that reaso
 </Tip>
 
 <Tip kind="note" title="Not everything can be cached">
-Caching works per table, so only terms that match whole tables are cached: components, tags, pairs, wildcards, operators and traversal. `Sparse` components are still in the table type, so their tables are cached too, but their values are fetched per entity. `DontFragment` components aren't in the type at all, so they're matched per entity while you iterate, even in a cached query. [Choosing storage](/flecs/storage-traits/) shows this happening.
+Caching works per table, so only terms that match whole tables are cached: components, tags, pairs, wildcards, operators and traversal. `Sparse` components are still in the table type, but a term on a Sparse component isn't cached: the cache is built from the query's other terms, and the Sparse term is checked again each time you iterate (its values are fetched per entity anyway). A query on nothing but Sparse components ends up uncached. `DontFragment` components aren't in the type at all, so they're also matched per entity while you iterate, even in a cached query. [Choosing storage](/flecs/storage-traits/) shows this happening.
 </Tip>

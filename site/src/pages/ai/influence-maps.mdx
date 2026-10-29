@@ -26,7 +26,7 @@ A third is often derived from them: **vulnerability** = tension − |control|, h
 How the value spreads matters. **In a straight line**, influence passes through buildings: a unit on one street "controls" the next street over, which it can neither reach nor see. **Along the streets**, the value spreads by walking distance (a flood over walkable cells, the same [Dijkstra](/pathing-lab/) the pathing lab uses), so influence goes round buildings and stops at walls. Switch between them in the widget and watch the goblins' control stop leaking into the knights' side of the blocks. The flood costs a little more to compute and is almost always the more honest picture.
 
 <Tip kind="note" title="Momentum and decay">
-Many games don't recompute influence from scratch: each update, every cell blends towards the maximum of its neighbours' values (falling off with distance), plus the units' own stamps. With a *momentum* term it keeps a memory of where units have been, and with a *decay* term that memory fades. It's cheap to update incrementally, and it's the same thing as the flood above, spread over several frames.
+Many games don't recompute influence from scratch. Each update, every cell takes the strongest of its neighbours' values, reduced by a *decay* factor for the distance between them, plus the units' own stamps, and moves part of the way towards that. A high *momentum* keeps it close to the old value, so the map remembers where units have been, and that memory fades as new values blend in. It's cheap to update incrementally and approximates the flood above, spread over several frames, except that where units overlap it keeps the strongest instead of adding them up.
 </Tip>
 
 ## Threat: where can they hit me?

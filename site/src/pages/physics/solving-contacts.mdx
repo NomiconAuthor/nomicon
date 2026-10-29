@@ -47,7 +47,7 @@ p.tangent_impulse = new_t;
 
 ## Warm starting
 
-A box resting on the floor needs the same impulse every step, about its weight times the step. Starting each step from zero means the solver spends its iterations rediscovering it, and with too few iterations it never quite gets there, so the box sinks a little and bounces back, forever. **Warm starting** begins each contact point with last step's accumulated impulse, matched by [feature id](/physics/narrowphase/). A resting stack then starts each step almost solved. Every engine here does it.
+A box resting on the floor needs the same impulse every step, about its weight times the step. Starting each step from zero means the solver spends its iterations rediscovering it, and with too few iterations it never quite gets there, so the box sinks a little and bounces back, forever. **Warm starting** begins each contact point with last step's accumulated impulse, matched by [feature id](/physics/narrowphase/) or, in some engines, by position. A resting stack then starts each step almost solved. Every engine here does it.
 
 ## Fixing overlap: Baumgarte, or soft constraints
 
@@ -56,7 +56,7 @@ Velocities alone can't undo an overlap that already exists (a box that sank 1 cm
 Engines have found three ways round that:
 
 - **A separate position pass** (Box2D v2's "non-linear Gauss–Seidel"): after integrating, correct positions directly, without touching velocities, so no energy is added. **Jolt** does this: 10 velocity iterations then 2 position iterations by default, the position pass scaled by its Baumgarte factor of 0.2.
-- **Soft constraints**: model each contact as a stiff spring with damping, set by a frequency in hertz and a damping ratio, and integrate the spring implicitly over the step. For a single constraint that's stable at any stiffness; coupled with its neighbours through Gauss–Seidel it behaves best with the frequency well below the step rate (Box2D caps contact stiffness at a quarter of the substep rate).
+- **Soft constraints**: model each contact as a stiff spring with damping, set by a frequency in hertz and a damping ratio, and integrate the spring implicitly over the step. For a single constraint that's stable at any stiffness; coupled with its neighbours through Gauss–Seidel it behaves best with the frequency well below the step rate (Box2D caps contact stiffness at an eighth of the substep rate, which at 4 substeps of a 60 Hz step is exactly its default 30 Hz).
 - **Substepping with relaxation**, below.
 
 ## Soft step
@@ -98,10 +98,10 @@ Each configuration run for 10 seconds at 60 Hz on the pyramid (55 boxes) and the
 | Baumgarte, 20 iterations | 0.1 cm, asleep at 0.53 s | 9.2 cm, never sleeps |
 | Baumgarte, 10 iterations, no warm starting | 69.4 cm, never sleeps | fell over |
 
-The pyramid is forgiving: it's wide, and every configuration with warm starting holds it. The tower is the real test, because any sideways error at the bottom is amplified by everything above. Two caveats keep this fair. Our Baumgarte solver has no separate position pass, so it's the weakest form of the idea; Jolt's solver, with position iterations, holds stacks well. And all of these cost different amounts: 20 Baumgarte iterations solve every contact 20 times a step, soft step with 4 substeps solves them 8 times (4 solves and 4 relaxes).
+The pyramid is forgiving: it's wide, and every configuration with warm starting holds it. The tower is the real test, because any sideways error at the bottom is amplified by everything above. Two caveats keep this fair. Our Baumgarte solver has no separate position pass, so it's the weakest form of the idea: a position pass like Jolt's removes overlap without adding energy, so stacks settle instead of fidgeting. Keeping a tall tower upright is a separate matter of iterations: Jolt needs more velocity steps for that ([Jolt, Box3D and Bullet](/physics/jolt-box3d-and-bullet/)). And all of these cost different amounts: 20 Baumgarte iterations solve every contact 20 times a step, soft step with 4 substeps solves them 8 times (4 solves and 4 relaxes).
 
 <Tip title="Mass ratios">
-Every one of these solvers struggles when a heavy body rests on a light one, or hangs from a chain of light links: each pass moves the light body a lot and the heavy one hardly at all, and convergence crawls. Keep mass ratios at a few to one where you can (a 10:1 ratio is already asking for trouble), and add substeps when you can't.
+Every one of these solvers struggles when a heavy body rests on a light one, or hangs from a chain of light links: each pass moves the light body a lot and the heavy one hardly at all, and convergence crawls. Keep mass ratios to a few to one where you can, and under about 10 to 1. Substeps help with moderate ratios, but not extreme ones: a block 2,000 times heavier than the box under it sinks about as far with 8 substeps as with 4 ([when physics goes wrong](/physics/when-physics-goes-wrong/)).
 </Tip>
 
 ## Takeaways

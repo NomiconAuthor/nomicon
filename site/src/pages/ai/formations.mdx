@@ -12,8 +12,8 @@ A formation is a set of **slots**: positions relative to a **leader**, expressed
 
 ```cpp
 Vec2 slot_world(const Vehicle& leader, Vec2 slot /* x forward, y right */) {
-    Vec2 fwd   = normalize(leader.vel);
-    Vec2 right = { -fwd.y, fwd.x };
+    Vec2 fwd   = leader.facing;          // unit vector; kept when the leader stops
+    Vec2 right = { fwd.y, -fwd.x };      // y up; use { -fwd.y, fwd.x } if y points down
     return leader.pos + fwd * slot.x + right * slot.y;
 }
 ```
@@ -54,7 +54,7 @@ Rigid slots are hopeless: followers spend three quarters of the time pressed aga
 
 **Turn the shape, not just the leader.** Slots are placed in the formation's frame, and if that frame snaps to the leader's velocity, every slowdown or corner swings the back rank metres sideways in one frame. Here the formation's facing follows the leader's heading at most 1.6 radians a second, so the shape sweeps round a corner instead of jumping.
 
-**Slot assignment.** Here each follower keeps the slot it was given. When the shape changes, or followers end up on the wrong side after a turn, reassigning slots to minimise total travel (a small assignment problem; a greedy nearest-first pass is usually good enough) stops followers crossing through each other.
+**Slot assignment.** Here each follower keeps the slot it was given. When the shape changes, or followers end up on the wrong side after a turn, reassigning slots to minimise total travel (a small assignment problem: the Hungarian algorithm, or brute force for a handful of followers) stops followers crossing through each other. A greedy nearest-first pass is cheaper and usually close, but it can still cross.
 
 <Tip title="Ranks, not just shapes">
 Real parties have structure: the healer stays near the middle, the archers at the back, the shield-bearer in front. Slots can carry roles and priorities, and when the party collapses into single file the order of the queue can come from role rather than slot position. The formation is data; the shape is only one field of it.

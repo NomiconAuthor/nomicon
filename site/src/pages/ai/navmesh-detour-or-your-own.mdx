@@ -26,10 +26,10 @@ The [pathing lab](/pathing-lab/#concept-navmesh) builds a tiled Recast navmesh a
 
 ## What Detour assumes
 
-Detour is very good at one problem: getting a **point-sized, holonomic** agent (one that can move in any direction, and turn on the spot) along the **shortest** path. Each part of that sentence is a place where your game might differ:
+Detour is very good at one problem: getting a **point-sized, holonomic** agent (one that can move in any direction, and turn on the spot) along the **shortest** path (nearly: its A* costs each polygon crossing between edge midpoints, so the result can be a little longer than the true shortest). Each part of that sentence is a place where your game might differ:
 
 - **Agent size** is baked into the navmesh by erosion: one navmesh per size class.
-- **Shortest** is measured by distance with per-area cost multipliers. Costs that depend on the situation (exposure to known enemies, a danger map, the time of day) need a custom query filter or your own search.
+- **Shortest** is measured by distance with per-area cost multipliers. Costs that depend on the situation (exposure to known enemies, a danger map, the time of day) need a custom query filter (a subclass of `dtQueryFilter`, which needs Detour built with `DT_VIRTUAL_QUERYFILTER`) or your own search.
 - **Holonomic** is the big one. `findStraightPath` returns corners. Someone on foot can turn on a corner; a cart, a wagon or a horse with a turning circle can't.
 
 ## Keep the navmesh, replace the search

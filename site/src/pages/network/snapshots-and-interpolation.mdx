@@ -36,11 +36,11 @@ Extrapolation looks best on paper here, because these players walk in straight l
 
 ## How far behind to draw
 
-The interpolation delay has to cover the gap between snapshots *and* the jitter, or the client runs out of snapshots and has to freeze or guess. Two snapshot intervals is a common choice (Valve's Source engine documentation gives defaults of 100 ms at 20 snapshots a second, so that one lost snapshot still leaves two to interpolate between). Tick **Poor connection** (100 ms latency, 0–40 ms jitter, 5% loss): at 20 snapshots a second with a 100 ms delay the client runs dry 23 times a minute; at 60 a second with a 33 ms delay, 71 times. A faster snapshot rate needs a bigger buffer than "two intervals" once the connection gets worse.
+The interpolation delay has to cover the gap between snapshots *and* the jitter, or the client runs out of snapshots and has to freeze or guess. Two snapshot intervals is a common choice (Valve's Source engine documentation gives defaults of 100 ms at 20 snapshots a second, so that one lost snapshot still leaves two to interpolate between). Tick **Poor connection** (100 ms latency, 0–40 ms jitter, 5% loss): at 20 snapshots a second with a 100 ms delay the client is out of snapshots on 23 frames a minute; at 60 a second with a 33 ms delay, on 71. A faster snapshot rate needs a bigger buffer than "two intervals" once the connection gets worse.
 
 ```cpp
-// Draw remote entities as they were `delay` ms before the server's present.
-double render_time = estimated_server_time() - delay;
+// Draw remote entities as they were `delay` ms before the newest server time the client has heard about.
+double render_time = (now() - estimated_latency()) - delay;
 const Snapshot* a = last_snapshot_at_or_before(render_time);
 const Snapshot* b = first_snapshot_after(render_time);
 if (a && b) {
@@ -51,7 +51,7 @@ if (a && b) {
 }
 ```
 
-The client also needs an estimate of the server's clock to know what "now" is. The widget uses the smallest delay it has seen recently between a snapshot being sent and it arriving: jitter only ever adds delay, so the smallest is the best guess at the latency.
+The client also needs to know which server time the newest snapshot it could have received belongs to. The widget subtracts the smallest delay it has seen recently between a snapshot being sent and it arriving: jitter only ever adds delay, so the smallest is the best guess at the latency.
 
 ## Making snapshots smaller
 

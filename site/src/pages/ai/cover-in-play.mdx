@@ -16,7 +16,7 @@ Store the bake in tiles (here 16 × 16 m). When the world changes, mark the tile
 
 <TacticsWidget preset="town" layer="dynamic" />
 
-1. **Mark dirty tiles**: every tile the change overlaps, grown by a margin of how far the analysis looks. Cover depends only on direct neighbours, so a 1 m margin is enough.
+1. **Mark dirty tiles**: every tile the change overlaps, grown by a margin of how far the analysis looks. Per-cell cover depends only on direct neighbours, so a 1 m margin is enough. A boundary-walk bake looks a little further (a peek point checks about 2 m from the end of its rail), so give it a couple of metres, and split rails at tile edges.
 2. **Invalidate** the old cover in those tiles: points the change destroyed are dropped at once, and any unit that had claimed a position there must re-query. Everything outside the dirty tiles stays valid.
 3. **Rebuild** each dirty tile, as a background job spread over frames (with a [fixed deadline in ticks](/engine/deadlines-and-async-work/) if the game must replay exactly). Whatever survived of the old tile stays in use until the new one is ready.
 4. **Swap** the new tiles in. For a crater, the lip appears as new low cover.
@@ -44,7 +44,7 @@ The generation counter matters: if a second fireball dirties the same tile befor
 This is exactly how Recast handles changing navmeshes: Detour's TileCache rebuilds just the tiles that temporary obstacles touch. A cover bake keyed to the same tiles can be rebuilt by the same job.
 
 <Tip kind="warn" title="The margin depends on the analysis">
-Cover needs a 1 m margin. Clearance and chokes depend on the widest open space, so a change can affect them tens of metres away. Exposure depends on sight lines, so a demolished wall changes it across the whole sight range. That's why exposure is usually computed lazily, only for the cells a unit is considering, instead of being re-baked.
+Per-cell cover needs a 1 m margin, rails and peek points a couple of metres. Clearance and chokes depend on the widest open space, so a change can affect them tens of metres away. Exposure depends on sight lines, so a demolished wall changes it across the whole sight range. That's why exposure is usually computed lazily, only for the cells a unit is considering, instead of being re-baked.
 </Tip>
 
 **Moving cover** (a wagon, a moving platform, a large creature) isn't baked at all. Add the wagon in the widget and drag it around: it carries a **template** of cover points in its own frame, moved with it every frame and found through the spatial index next to the baked cover. It costs nothing to keep valid, and it blocks line of sight like any other obstacle.
@@ -65,19 +65,20 @@ With cover found and kept valid, picking a spot is a scoring problem, and the [u
 In code it's the same shape as any utility behaviour:
 
 ```cpp
-float score(const CoverPoint& c, const CoverQuery& q) {
+float score(const CoverPoint& c, const CoverQuery& q, float best) {
     float s = 1.f;
-    s *= hidden.eval(hidden_fraction(c, q.threats, q.stance));
-    s *= can_attack.eval(can_attack_from(c, q.threats));        // stand up, or lean out to a neighbour
+    s *= walk.eval(q.path_length[c.cell]);                      // one Dijkstra flood, shared
     s *= facing.eval(cover_between(c, q.nearest_threat));
     s *= too_close.eval(distance(c.pos, q.nearest_threat));
-    s *= walk.eval(path_length(q.unit, c.pos));
+    if (s <= best) return 0.f;                                  // every factor is <= 1
+    s *= hidden.eval(hidden_fraction(c, q.threats, q.stance));
+    s *= can_attack.eval(can_attack_from(c, q.threats));        // stand up, or lean out to a neighbour
     s *= route.eval(route_exposure(q.unit, c.pos, q.threats));
-    return compensate(s, 6);                                // as in the utility lesson
+    return s;   // rank by compensate(s, 6), as in the utility lesson: it keeps the order
 }
 ```
 
-Order the considerations cheapest first and stop as soon as the product hits zero: most candidates fail *hidden* or *walk* before anything casts a ray.
+Order the considerations cheapest first and stop as soon as the product falls below the best score so far (every factor is at most 1, so it can only go down). The walking distance comes from one Dijkstra flood from the unit, shared by every candidate, so filter on it first. *Faces* and *too close* need no rays. Only then cast rays for *hidden*, *can attack* and the route.
 
 Hover any candidate to see its breakdown; drag a threat round the unit and watch the best spot move. The "can attack" consideration is what separates a hiding place from a fighting position. Without it, almost every spot behind a building scores the same, and the nearest one wins every time; with it, the best spot is usually at the end of a rail, where a peek point lets the unit hide and fight. That is why the boundary walk's peek points matter.
 

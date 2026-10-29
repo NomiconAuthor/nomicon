@@ -201,7 +201,7 @@ export class NarrowViz {
       h(
         'div',
         { class: 'det-sums' },
-        h('table', { class: 'det-table' }, h('thead', {}, h('tr', {}, h('th', {}, 'Axis'), h('th', {}, 'A on it'), h('th', {}, 'B on it'), h('th', {}, 'Gap'))), h('tbody', {}, ...axes.map((a) => h('tr', { class: a === best ? 'ref' : '' }, h('td', {}, `${a.body} face ${a.edge + 1}`), h('td', { class: 'mono' }, `${a.a[0].toFixed(2)} … ${a.a[1].toFixed(2)}`), h('td', { class: 'mono' }, `${a.b[0].toFixed(2)} … ${a.b[1].toFixed(2)}`), h('td', { class: `mono ${a.gap > 0 ? 'det-ok' : ''}` }, a.gap.toFixed(2)))))),
+        h('table', { class: 'det-table' }, h('thead', {}, h('tr', {}, h('th', {}, 'Axis'), h('th', {}, 'A on it'), h('th', {}, 'B on it'), h('th', {}, 'Separation'))), h('tbody', {}, ...axes.map((a) => h('tr', { class: a === best ? 'ref' : '' }, h('td', {}, `${a.body} face ${a.edge + 1}`), h('td', { class: 'mono' }, `${a.a[0].toFixed(2)} … ${a.a[1].toFixed(2)}`), h('td', { class: 'mono' }, `${a.b[0].toFixed(2)} … ${a.b[1].toFixed(2)}`), h('td', { class: `mono ${a.gap > 0 ? 'det-ok' : ''}` }, a.gap.toFixed(2)))))),
       ),
       h('p', { class: 'll-muted' }, 'The line beside the shapes is the best axis, with each shape\'s shadow (projection) on it.'),
     ];

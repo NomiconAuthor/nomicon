@@ -42,7 +42,7 @@ The game here has registered `Position`, `RigidBody` and a `Shape` enum with ref
 
 Nothing about a script is special at runtime. `Crate { RigidBody: {...} }` creates (or finds) the entity `Crate` and calls `set` on it. So:
 
-- **Every assignment is a set.** `OnSet` fires, exactly as if your C++ had called `entity.set<RigidBody>()`. Re-running a script sets the values again and fires `OnSet` again, even if nothing changed.
+- **Every assignment is a set.** `OnSet` fires, exactly as if your C++ had called `entity.set<RigidBody>()`. Re-running a script sets the values again and fires `OnSet` again, even if nothing changed. That's for a script you run once (`ecs_script_run`, as the playground does). A managed script (`ecs_script()` / `world.script()`, which is what hot reload and the Explorer's editor use) works differently: on every update flecs first deletes every entity the script created *or assigned to*, then runs it again. Your glue sees `OnRemove`, then `OnSet` on entities with new ids, and any id your code kept for them is dead. The create-or-update and destroy pattern below handles both.
 - **Hooks and observers don't know who called.** That's the point: if your physics, rendering or audio glue lives in hooks or observers, entities from scripts, from code, from prefabs and from the network all get resources through the same path. If it lives in a "spawn crate" function instead, the first entity a script creates is broken.
 - **Prefabs follow the usual rules.** Instances copy the prefab's components (unless the component is marked `(OnInstantiate, Inherit)`; see [prefabs](/flecs/prefabs/)), so each copy fires the glue, and editing the prefab later doesn't change instances that already exist.
 

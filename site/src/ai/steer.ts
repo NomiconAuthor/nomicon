@@ -97,7 +97,7 @@ function avoidObstacles(a: Vehicle, obs: Circle[], lookahead = 0.8): { force: V;
 export function cols(el: Element) {
   const cs = getComputedStyle(el);
   const g = (n: string) => cs.getPropertyValue(n).trim() || '#888';
-  return { bg: g('--bg'), line: g('--line'), soft: g('--line-soft'), raised: g('--raised'), accent: g('--accent'), warn: g('--warn'), good: g('--good'), alert: g('--alert'), muted: g('--muted'), ink: g('--ink'), c2: g('--c2'), c5: g('--c5'), mono: g('--f-mono') };
+  return { bg: g('--bg'), line: g('--line'), soft: g('--line-soft'), raised: g('--raised'), accent: g('--accent'), warn: g('--warn'), good: g('--good'), alert: g('--alert'), muted: g('--muted'), ink: g('--ink'), c2: g('--c2'), c5: g('--c5'), c7: g('--c7'), mono: g('--f-mono') };
 }
 
 export function arrow(ctx: CanvasRenderingContext2D, from: V, d: V, colour: string, scale = 0.35, dash = false): void {
@@ -467,7 +467,7 @@ export class SteerLab {
       for (const { ag, i } of order) drawUnit(ctx, ag, PARTY_LOOKS[i % PARTY_LOOKS.length].sprite, c.accent);
     } else drawUnit(ctx, a, LEADER_LOOK.sprite, c.accent);
     if (this.mode !== 'flock') {
-      arrow(ctx, a.p, a.vel, c.accent, 0.5);
+      arrow(ctx, a.p, a.vel, c.c7, 0.5); // --c7 is blue in every theme, as the lesson says
       if (L.desired) arrow(ctx, a.p, L.desired, c.good, 0.5, true);
       if (L.steer) arrow(ctx, add(a.p, mul(a.vel, 0.5)), L.steer, c.warn, 0.25);
       ctx.font = `12px ${c.mono}`;

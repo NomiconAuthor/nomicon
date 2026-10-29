@@ -78,7 +78,7 @@ Once the simulation only ever advances in fixed steps, nothing in it depends on 
 - **Headless runs:** servers, bots, AI training, automated tests and replay scrubbing can step the simulation as fast as the CPU allows, without rendering at all.
 - **Catch-up:** a client that was paused or backgrounded can run a batch of steps to rejoin the timeline.
 
-Try **Sim speed** in the widget. At ×4 and ×16 the same loop simply gets more time per frame. *As fast as possible* drops frames from the loop entirely: the simulation runs in a tight loop for a slice of each real frame, and rendering just shows the latest state.
+Try **Sim speed** in the widget. At ×4 and ×16 the widget runs its clock faster, so more frames, and more steps, happen per second of real time. *As fast as possible* drops frames from the loop entirely: the simulation runs in a tight loop for a slice of each real frame, and rendering just shows the latest state.
 
 ```cpp
 // time_scale: 1 = real time, 8 = eight times faster, 0 = as fast as possible.
@@ -97,6 +97,8 @@ while (running) {
     render(current);  // or skip rendering entirely when headless
 }
 ```
+
+Scale `max_steps` with `time_scale` (or clamp on elapsed real time instead), or a clamp sized for ×1 will quietly cap your fast-forward and drop the rest.
 
 For this to work, the simulation must be truly separate from presentation:
 

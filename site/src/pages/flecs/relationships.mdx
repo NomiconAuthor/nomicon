@@ -25,7 +25,7 @@ Things to notice:
 
 - **Each target gets its own table.** Bob and Alice don't share `[Position, (Eats, ...)]`, even though they have the same kind of data.
 - **Both caches check every new table.** `EatsApples` keeps only tables with `(Eats, Apples)`; `EatsAnything` keeps all of them.
-- **`(Eats, *)` returns Bob twice**, once for each pair. If you want each entity once, add the wildcard as a filter and read the targets yourself, or rethink whether you need "any".
+- **`(Eats, *)` returns Bob twice**, once for each pair. If you want each entity once, query `(Eats, _)` instead: the `_` (Any) wildcard matches at most one pair per entity, and you read the targets yourself with `e.target<Eats>(i)`. Or rethink whether you need "any".
 - **Exclusive moves, it doesn't add.** `bob.add<Faction>(blue)` moves Bob from the `(Faction, Red)` table to a `(Faction, Blue)` one.
 
 ## Or: an entity id in a component

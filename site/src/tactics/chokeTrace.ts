@@ -399,7 +399,7 @@ export class ChokeTrace extends EventTrace<Ev> {
       case 'flood':
         return {
           title: `3. Watershed flood: ${Math.round((this.floodTo / this.order.length) * 100)}% of cells added.`,
-          text: `Cells join in order (the latest batch is dotted). A cell with no flooded neighbour starts a region; otherwise it joins its neighbours' region. ${this.last ? this.last.text : ''} So far: ${this.births} regions started, ${this.merges} merged away, ${this.chokes.length} ${this.chokes.length === 1 ? 'choke' : 'chokes'}. Recast partitions its walkable area into regions with the same kind of watershed.`,
+          text: `Cells join in order (the latest batch is dotted). A cell with no flooded neighbour starts a region; otherwise it joins its neighbours' region. ${this.last ? this.last.text : ''} So far: ${this.births} regions started, ${this.merges} merged away, ${this.chokes.length} ${this.chokes.length === 1 ? 'choke' : 'chokes'}. Recast's watershed partitioning floods in the same order but merges regions by size, so its regions aren't chokes.`,
         };
       case 'route':
         return {

@@ -185,8 +185,9 @@ export class FootprintChecker {
 /**
  * Cost-to-goal ignoring turning: Dijkstra from the goal over every cell where a disc
  * that fits inside the vehicle (round its reference point) is clear of walls, priced
- * with terrain. It never blocks a place the vehicle can really reach, so it's a fair
- * lower bound, and it knows about dead ends, which is what keeps Hybrid A* out of them.
+ * with terrain. It never blocks a place the vehicle can really reach, and it knows about
+ * dead ends, which is what keeps Hybrid A* out of them. It moves in 8 directions, so on open
+ * diagonals it can be up to ~8% above the true distance: not a strict lower bound.
  */
 export function holonomicField(space: GridSpace, dist: Float32Array, discRadius: number, goal: number): Float64Array {
   const { w, h } = space;

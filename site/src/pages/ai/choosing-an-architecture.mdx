@@ -86,7 +86,7 @@ Things that make this work well:
 - **Thinking is per agent and read-only** apart from the agent's own brain state, so it parallelises (`multi_threaded`) without locks. Expensive sensing (line of sight, path queries) belongs in Sense or in [async jobs with a fixed deadline](/engine/deadlines-and-async-work/), not inside considerations.
 - **Decide less often than you act.** Actions run every tick; decisions at 2–5 Hz, staggered by entity id, cost a fraction and also damp oscillation. Agents far from the player can think even less often (AI level of detail).
 - **The current action is a value**, not a tag per action, so changing your mind doesn't move the entity between tables. If systems need to query "everyone who is attacking", consider a `DontFragment` relationship to the action instead (see [choosing storage](/flecs/storage-traits/)).
-- **Share the definitions.** Behaviour sets, trees and action lists are per agent *type*: put them on a prefab and inherit them, so each agent stores only its own state.
+- **Share the definitions.** Behaviour sets, trees and action lists are per agent *type*: put them on a prefab, in components marked `(OnInstantiate, Inherit)` so instances share the prefab's copy instead of each getting their own (see [prefabs](/flecs/prefabs/)). Each agent then stores only its own state.
 - **Keep it deterministic.** Random choices from per-agent, per-tick streams (`hash(seed, entity, tick, purpose)`), no wall-clock reads, ties broken by a stable order. Then any odd decision can be replayed and inspected. The [determinism lesson](/engine/determinism/) has the details.
 
 ## Takeaways

@@ -70,7 +70,7 @@ Textures, meshes, audio buffers, shaders: anything the engine can stream out, ho
 ### Variations worth knowing
 
 - **Dense storage.** Keep the objects packed in a separate array and let the slots point into it. Erasing swaps the last object into the gap and fixes up one slot. Iteration then walks a tight array with no holes, which is what you want for anything updated every frame (see [memory and the cache](/engine/memory-and-cache/)).
-- **Sparse sets.** An index-to-position array plus a packed dense array. flecs uses one for its entity index and for `Sparse` components.
+- **Sparse sets.** A sparse index-to-position array plus a packed dense array of live ids, so you can count and iterate live entries without scanning holes. Some libraries pack the values densely too; flecs keeps them in the sparse pages instead, so their addresses stay stable. flecs uses one for its entity index and for `Sparse` components.
 - **Generation overflow.** With 16 generation bits, a slot reused 65,536 times wraps around and an ancient handle could match again. Either use more bits, or retire a slot once its generation hits the maximum.
 
 ## Allocators: memory with known lifetimes

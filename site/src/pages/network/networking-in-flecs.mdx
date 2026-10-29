@@ -27,7 +27,7 @@ flecs::entity e = world.make_alive(server_id);   // C: ecs_make_alive(world, ser
 `make_alive` guarantees that exactly that id (index and version) is alive afterwards. Two cases need care:
 
 - **The same id is already alive.** Then `make_alive` does nothing, which is what you want if it's the entity you replicated last time. It's a silent disaster if that id belongs to something the client made itself.
-- **The index is alive with a different version.** The client still has `#5000 v0` (its delete hasn't arrived, or arrived after the spawn) and the server sends `#5000 v1`. `make_alive` refuses. Delete the stale entity first, or use `set_version` if you deliberately want to move an existing entity to the new version.
+- **The index is alive with a different version.** The client still has `#5000 v0` (its delete hasn't arrived, or arrived after the spawn) and the server sends `#5000 v1`. Calling `make_alive` now is an error: a debug build asserts, and a release build skips the check and corrupts the entity index. So check first: `world.get_alive(index)` (C: `ecs_get_alive(world, index)`) returns whichever version is alive. If it isn't the one the server sent, delete the stale entity first, or use `set_version` if you deliberately want to move it to the new version. The demo below does this check before every `make_alive`.
 
 ## Try it
 
@@ -39,7 +39,7 @@ Two real flecs worlds run below, one for the server and one for the client. They
 
 Both worlds handed out the same next id, so the ship's components land on the client's spark. Then turn ranges back **on** and do the same thing.
 
-To see versions at work: with a ship already on the client, delete it on the server and spawn another, which recycles the index with a new version. Tick **lose the deletes** and send. The client still has the old version alive, `make_alive` refuses the new one, and the client has to delete the stale entity first.
+To see versions at work: with a ship already on the client, delete it on the server and spawn another, which recycles the index with a new version. Tick **lose the deletes** and send. The client finds the old version still alive, so it can't `make_alive` the new one until it deletes the stale entity.
 
 <FlecsNet />
 
@@ -52,7 +52,7 @@ auto server_range = world.range_new(5000, 99999);   // pass 0 as max for no uppe
 world.range_set(server_range);
 ```
 
-While a range is active, both new and recycled ids come from it, and each range keeps its own recycle list, so ids never leak from one range into another. Ranges can't be deleted: to stop using one, activate another. When a range runs out, creating an entity asserts, so size them generously.
+While a range is active, both new and recycled ids come from it, and each range keeps its own recycle list, so ids never leak from one range into another. Ranges can't be deleted: to stop using one, activate another. When a range runs out, a debug build asserts. A release build doesn't check: it keeps handing out ids past the end, into whatever range comes next. So size ranges generously, and watch the headroom of any range that can fill up.
 
 That makes ranges a simple ownership scheme:
 

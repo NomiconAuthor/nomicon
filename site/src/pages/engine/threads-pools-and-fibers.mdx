@@ -99,12 +99,12 @@ A helper can pick up a job that itself waits on something only the original wait
 
 Christian Gyrling's GDC 2015 talk, [*Parallelizing the Naughty Dog Engine Using Fibers*](https://www.gdcvault.com/play/1022186/Parallelizing-the-Naughty-Dog-Engine), is the reference design. Six workers, one per core, and 160 fibers: 128 with 64 KiB stacks and 32 with 512 KiB. The only way to wait is `WaitForCounter`: the fiber goes on the counter's wait list, and the worker takes a fresh fiber from the pool. *The Last of Us Remastered* ran 800 to 1,000 jobs a frame this way.
 
-The same talk lists what fibers break:
+The talk names two things fibers break:
 
 - **Thread-local storage.** A fiber can resume on a different worker, and a compiler that cached a thread-local's address across the wait reads another thread's copy. Naughty Dog moved all thread-local access into a file the optimiser couldn't see through.
 - **OS locks.** A mutex must be unlocked on the thread that locked it, and waiting on an OS primitive blocks the whole worker. Fiber code uses spin locks for short sections and job-aware mutexes, which park the fiber, for long ones.
-- **Stack size.** Every fiber needs a stack for its deepest call, times the number of fibers. Hence the two pools.
-- **Tools.** Debuggers and profilers assume a call stack belongs to a thread; a parked or thread-hopping fiber confuses them.
+
+Two more costs come with any fiber system. **Stack size**: every fiber needs a stack for its deepest call, times the number of fibers, hence Naughty Dog's two pools. **Tools**: Naughty Dog's debugger and core dumps showed fiber call stacks, but many stock debuggers and profilers assume a call stack belongs to a thread, and a parked or thread-hopping fiber confuses them.
 
 ## Coroutines
 
@@ -148,5 +148,5 @@ flecs takes the splitting route: a system runs to the end, and its queued comman
 - **OS threads are preemptive and expensive** to create and switch. Create them once.
 - **Named threads** own APIs and state and pipeline frames; the parallel work goes to a **worker pool**, one thread per core.
 - **Blocking a worker** wastes a core and deadlocks once enough jobs wait. **Helping** keeps cores busy, at the cost of nested stacks and late resumes.
-- **Fibers** park a waiting job with its whole stack; they break thread-local storage, OS locks and tools. **Coroutines** are tiny and explicit, but every function that waits has to be one.
+- **Fibers** park a waiting job with its whole stack; they break thread-local storage and OS locks, and confuse many tools. **Coroutines** are tiny and explicit, but every function that waits has to be one.
 - **Better still, don't wait in the middle**: split the job, and let the task graph run the second half.

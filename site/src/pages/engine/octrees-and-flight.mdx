@@ -64,7 +64,7 @@ A* then runs over that graph exactly as it would over grid cells, with the dista
 
 There's one catch. Paths through cell *centres* zig-zag, because a big cell's centre may be far from the straight line through it (the thin line in the widget). Two fixes are usually combined:
 
-- **String pulling**: walk the path, and from each point skip ahead to the furthest point still in direct line of sight. That's what the thick line is; it typically saves 10–30% of the length here.
+- **String pulling**: walk the path, and from each point skip ahead to the furthest point still in direct line of sight. That's what the thick line is; it typically saves 5–15% of the length here, and more with **Smallest cell 4**, whose bigger cells zig-zag further.
 - **Better waypoints**: use points on the shared faces between cells instead of their centres, which also makes the cost estimate more honest.
 
 <Tip title="Sparse voxel octrees in games">

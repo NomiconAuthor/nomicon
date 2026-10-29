@@ -223,6 +223,8 @@ export const NO_KEYS: Keys = { left: false, right: false, jump: false };
 export interface TickEvents {
   jumped?: 'normal' | 'coyote' | 'buffered';
   landed?: number;
+  /** On landing: how far the feet fell from the highest point of the air time, tiles. */
+  drop?: number;
   cornered?: boolean;
   /** A jump press that never turned into a jump. */
   eaten?: boolean;
@@ -243,6 +245,8 @@ export class Player {
   /** Whether the current airborne period started with a jump (so coyote can't double-jump). */
   jumpedThisAir = false;
   holdingJump = false;
+  /** Highest point (smallest y) since last on the ground. */
+  private peakY: number;
   private lastJumpKey = false;
   /** A press that hasn't been used yet: becomes "eaten" if it expires. */
   private pendingPress = false;
@@ -257,12 +261,14 @@ export class Player {
   ) {
     this.x = level.start.x;
     this.y = level.start.y;
+    this.peakY = this.y;
   }
 
   teleport(x: number, y: number): void {
     this.x = x;
     this.y = y;
     this.vx = this.vy = 0;
+    this.peakY = y;
     this.grounded = false;
     this.airTime = 1;
     this.jumpedThisAir = true;
@@ -297,7 +303,6 @@ export class Player {
 
     // --- Jump input: remember presses for the buffer window.
     const pressed = k.jump && !this.lastJumpKey;
-    const released = !k.jump && this.lastJumpKey;
     this.lastJumpKey = k.jump;
     if (pressed) {
       if (this.pendingPress) ev.eaten = true; // a second press replaces an unused one
@@ -322,11 +327,14 @@ export class Player {
       this.sincePress = Infinity;
       this.pendingPress = false;
     }
-    if (!k.jump) this.holdingJump = false;
-    // Variable jump: letting go early cuts the upward speed.
-    if (released && this.vy < 0 && s.jumpCut < 1) {
-      this.vy *= s.jumpCut;
-      ev.cut = true;
+    // Variable jump: once jump is no longer held while rising, cut the upward speed (once per
+    // jump). Checking "not held" rather than "just released" also cuts a buffered tap.
+    if (!k.jump && this.holdingJump) {
+      this.holdingJump = false;
+      if (this.vy < 0 && s.jumpCut < 1) {
+        this.vy *= s.jumpCut;
+        ev.cut = true;
+      }
     }
 
     // --- Gravity, heavier when falling, lighter at the apex while holding jump.
@@ -345,7 +353,10 @@ export class Player {
     const fallSpeed = this.vy;
     const hit = this.moveY(dy, ev);
     if (hit === 'floor') {
-      if (!wasGrounded) ev.landed = fallSpeed;
+      if (!wasGrounded) {
+        ev.landed = fallSpeed;
+        ev.drop = this.y - this.peakY;
+      }
       this.grounded = true;
       this.vy = 0;
     } else if (hit === 'ceiling') this.vy = 0;
@@ -356,7 +367,11 @@ export class Player {
     if (this.grounded) {
       this.airTime = 0;
       this.jumpedThisAir = false;
-    } else this.airTime += DT;
+      this.peakY = this.y;
+    } else {
+      this.airTime += DT;
+      this.peakY = Math.min(this.peakY, this.y);
+    }
 
     // Squash on landing, ease back to normal.
     if (ev.landed && s.squash) this.stretch = Math.max(0.7, 1 - ev.landed / 60);
@@ -406,8 +421,10 @@ export class Player {
     // Rising into a ceiling: if a small sideways nudge would clear it, take the nudge.
     const c = this.s.cornerCorrection;
     if (c > 0) {
-      for (const sign of [1, -1]) {
-        for (let n = 0.05; n <= c + 1e-9; n += 0.05) {
+      // Smallest nudge first, trying the direction of movement before the other.
+      const first = this.vx < 0 ? -1 : 1;
+      for (let n = 0.05; n <= c + 1e-9; n += 0.05) {
+        for (const sign of [first, -first]) {
           const tx = this.x + sign * n;
           if (!this.boxHits(tx, ny) && !this.boxHits(tx, this.y)) {
             this.x = tx;

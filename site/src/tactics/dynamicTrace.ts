@@ -243,7 +243,7 @@ export class RebuildTrace extends EventTrace<Ev> {
       case 'mark':
         return {
           title: '1. Mark dirty tiles.',
-          text: `${this.what} changed ${this.changed} cells (dashed box). The bake is stored in ${TILE} × ${TILE} m tiles; mark every tile the change overlaps, grown by a margin of how far the analysis can see. Cover only depends on direct neighbours, so the margin is 1 m: ${this.dirty.length} of ${tilesTotal} tiles. Clearance or chokes need a margin as large as the widest open space, and exposure as large as the sight range, which is why exposure is usually recomputed lazily, near units, instead.`,
+          text: `${this.what} changed ${this.changed} cells (dashed box). The bake is stored in ${TILE} × ${TILE} m tiles; mark every tile the change overlaps, grown by a margin of how far the analysis can see. This per-cell cover only depends on direct neighbours, so the margin is 1 m (a boundary-walk bake, with its rails and peek points, needs a couple of metres): ${this.dirty.length} of ${tilesTotal} tiles. Clearance or chokes need a margin as large as the widest open space, and exposure as large as the sight range, which is why exposure is usually recomputed lazily, near units, instead.`,
         };
       case 'drop':
         return {

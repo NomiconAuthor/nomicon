@@ -71,5 +71,5 @@ That makes CanToggle the cheapest choice for something that flips on and off oft
 </Tip>
 
 <Tip kind="warn" title="DontFragment limitations (current flecs)">
-`DontFragment` components don't appear in an entity's type, and monitors don't trigger on them. Some query features (`Or`, `Optional`, `AndFrom`/`NotFrom`, inheritance) aren't supported for them yet, and they aren't serialised to JSON yet. Basic operations, simple and wildcard queries, and exclusive relationships all work.
+`DontFragment` components don't appear in an entity's type, and monitors don't trigger on them. Some query features (`Or`, `Optional`, `AndFrom`/`NotFrom`, inheritance and transitivity) aren't supported for them yet, and neither is `target_for`. Basic operations, simple and wildcard queries, and exclusive relationships all work.
 </Tip>

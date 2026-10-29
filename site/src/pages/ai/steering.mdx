@@ -79,7 +79,7 @@ The motion model changes what sensing has to cope with. Whiskers suit the car, w
 | Carrot on the path | 28.2 s | 0 |
 | Straight at the goal | 97.4 s | 12 |
 
-Without a path, every agent on the dead-end map walks into the cup and stays there. Escaping means going *away* from the goal for a while, which only a planner knows to do; no local method can.
+Without a path, every agent on the dead-end map walks into the cup and stays there, and on the corridor map they press into the first wall. Getting round either means going *away* from the goal for a while, which only a planner knows to do; no local method can.
 
 Production systems go one step further. Detour (Recast's runtime) keeps a **path corridor**, the list of navmesh polygons the path runs through, and every frame steers towards the furthest corner it can see along it. That's string pulling done on the fly, so the path stays valid as the agent is pushed off it.
 

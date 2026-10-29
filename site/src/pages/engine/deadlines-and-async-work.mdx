@@ -96,7 +96,7 @@ The details that make it work:
 - **Measure stalls.** Track how often jobs are late and by how much. If stalls are common, increase *K*, split the work, or make it cheaper; don't quietly switch to applying when ready.
 
 <Tip kind="warn" title="Faster than real time, again">
-Fixed-latency jobs interact with [headless and fast-forward runs](/engine/game-loops/): at ×16, the simulation reaches *T + K* sixteen times sooner in wall time, so jobs are late far more often and the simulation stalls on them. That's correct (the result is identical) but it caps your fast-forward speed at how fast the workers go. For replay scrubbing and AI training, run with `help_until` from the start, or with more workers.
+Fixed-latency jobs interact with [headless and fast-forward runs](/engine/game-loops/): at ×16, the simulation reaches *T + K* sixteen times sooner in wall time, so jobs are late far more often and the simulation stalls on them. That's correct (the result is identical) but it caps your fast-forward speed at how fast the workers go. For replay scrubbing, give the pool more workers. For AI training, where many headless instances share the machine a core each, run the job inline on the simulation thread when it's requested and hold the result until *T + K*: same result, no hand-off and no stall.
 </Tip>
 
 ## Takeaways

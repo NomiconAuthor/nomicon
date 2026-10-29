@@ -182,7 +182,9 @@ export function describe(ev: TraceEvent, s: Session, types: (table: number) => s
       };
     }
     case 'write':
-      return { title: `Writes ${ev.id} of ${n(ev.entity)} = ${fmtValue(ev.value)}`, tone: 'callback', why: 'Writing a field through the iterator changes the column directly. No command, no move.' };
+      return ev.inPlaceSet
+        ? { title: `Writes ${ev.id} of ${n(ev.entity)} = ${fmtValue(ev.value)} (in place)`, tone: 'callback', why: `${n(ev.entity)} already has ${ev.id}, so the deferred set writes the value into the column now. Only the OnSet is queued, for the sync point.` }
+        : { title: `Writes ${ev.id} of ${n(ev.entity)} = ${fmtValue(ev.value)}`, tone: 'callback', why: 'Writing a field through the iterator changes the column directly. No command, no move.' };
     case 'frameBegin':
       return { title: `Frame ${ev.frame + 1} begins (ecs_progress)`, fn: 'ecs_progress', tone: 'frame' };
     case 'frameEnd':

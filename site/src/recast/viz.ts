@@ -24,7 +24,7 @@ export const STAGES: StageInfo[] = [
   {
     id: 'filter',
     name: '3. Filtering',
-    what: "Three filters fix the walkable flags. Low obstacles you can step onto (the kerb) become walkable. Ledges, where the drop to a neighbour is more than the climb height, become unwalkable at the edge (the platform's sides). Spans without enough headroom above them become unwalkable (the floor under the table, and inside the hollow platform: see the cross-section). Orange: a top surface a filter changed. The edge of the world counts as a drop, so the border is a ledge too.",
+    what: "Three filters fix the walkable flags. Low obstacles you can step onto become walkable (here the kerb already is: rasterising merged its sides and top into one walkable span, so this filter has nothing to do). Ledges, where the drop to a neighbour is more than the climb height, become unwalkable at the edge (the platform's sides). Spans without enough headroom above them become unwalkable (the floor under the table, and inside the hollow platform: see the cross-section). Orange: a top surface a filter changed. The edge of the world counts as a drop, so the border is a ledge too.",
     stop: 'Stop here for a walkability classification per column and level: a 2.5D walkable grid with heights. That\'s exactly the input the tactics lab\'s clearance, chokes and cover analysis need.',
   },
   {

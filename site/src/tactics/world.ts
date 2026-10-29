@@ -111,7 +111,9 @@ export function los(w: TWorld, ax: number, ay: number, bx: number, by: number, e
     if (cx === bx && cy === by) return { clear: true, steps };
     if (t >= 1) return { clear: true, steps };
     steps++;
-    const z = eyeZ + (targetZ - eyeZ) * t;
+    // Compare against the line's lowest point in this cell: the lower of its entry and exit
+    // heights (after the step, min(tx, ty) is where it leaves the cell). Exact for this model.
+    const z = Math.min(eyeZ + (targetZ - eyeZ) * t, eyeZ + (targetZ - eyeZ) * Math.min(tx, ty, 1));
     const ci = cy * w.w + cx;
     if (Math.max(KINDS[w.kind[ci]].height, w.dyn[ci]) > z) return { clear: false, steps };
   }

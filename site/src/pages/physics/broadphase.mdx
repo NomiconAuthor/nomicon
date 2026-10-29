@@ -22,11 +22,11 @@ Switch between **Every pair** and **Sort and sweep**. Over two seconds of this b
 
 **Sort and sweep** (also called sweep and prune) sorts the boxes by their left edge. Walking the sorted list, each box only needs comparing with the boxes after it whose left edge comes before its right edge; the first box that starts past its right edge ends the scan. The trick that makes it cheap in a physics engine is **coherence**: bodies barely move between steps, so last step's order is almost sorted, and an insertion sort fixes it in close to linear time. This page keeps the order between steps for exactly that reason.
 
-It degrades when many boxes share the same stretch of the sort axis (a tall stack of crates all overlap in x), which is why real engines prefer trees.
+It degrades when many boxes share the same stretch of the sort axis (a tall stack of crates all overlap in x), which is why most engines (Box2D, Jolt, Bullet by default) use trees instead. PhysX keeps sort and sweep but splits the world into regions (*box pruning*) so each sorted list stays short.
 
 ## Trees and fattened boxes
 
-Real engines keep their bounding boxes in **trees** instead (bounding volume hierarchies updated as bodies move), with static and moving bodies in separate trees so the level geometry, usually the largest set, never changes and is never tested against itself.
+Tree-based engines keep their bounding boxes in **trees** (bounding volume hierarchies updated as bodies move), with static and moving bodies in separate trees so the level geometry, usually the largest set, never changes and is never tested against itself.
 
 Trees store **fattened** boxes: each leaf is the shape's AABB grown by a margin, often extended along the body's velocity. A body only needs re-inserting when it leaves its fat box, so most steps change nothing in the tree. The cost is a few extra candidate pairs that the narrowphase rejects.
 
@@ -55,5 +55,5 @@ A contact listener that rejects a pair runs after the narrowphase has already do
 ## Takeaways
 
 - The broadphase turns **n² pairs into the few that might touch**, using bounding boxes.
-- **Sort and sweep** exploits coherence; **trees** with **fattened boxes** are what engines ship, with static and moving bodies kept apart.
+- **Sort and sweep** exploits coherence; **trees** with **fattened boxes** are what most engines ship (PhysX uses region-split sort and sweep), with static and moving bodies kept apart.
 - **Filter in the broadphase**, with categories and masks or layers.

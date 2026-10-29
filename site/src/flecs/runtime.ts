@@ -104,8 +104,8 @@ export type TraceEvent =
   | { k: 'refTake'; label: string; entity: number; comp: string; addr: number; table: number; row: number; code?: string }
   | { k: 'refRead'; label: string; comp: string; value: Record<string, number>; owner: { entity: number; table: number; row: number } | null; flecsRef?: boolean }
   | { k: 'refWrite'; label: string; comp: string; value: Record<string, number>; owner: { entity: number; table: number; row: number } | null }
-  /** A callback writing a value straight into a column. */
-  | { k: 'write'; entity: number; id: string; value: unknown };
+  /** A callback writing a value straight into a column (inPlaceSet: a deferred set of a component the entity already has). */
+  | { k: 'write'; entity: number; id: string; value: unknown; inPlaceSet?: boolean };
 
 /** The default build (flecs master). Other builds (e.g. a PR branch) sit next to it. */
 export const WASM_URL = '/flecs.wasm';
@@ -433,6 +433,24 @@ export class FlecsWorld {
     });
   }
 
+  /**
+   * A deferred set of a component the entity already has writes the value into
+   * the column right away and only queues the OnSet (flecs_defer_set). The trace
+   * has no event for that write, so read storage back and record one if the new
+   * value really is there (it isn't when a queued remove sends the value to the queue).
+   */
+  private noteInPlaceSet(e: number, id: string, value: unknown): void {
+    if (!value || typeof value !== 'object') return;
+    const want = value as Record<string, unknown>;
+    if (!Object.values(want).every((v) => typeof v === 'number')) return;
+    const addr = this.refAddress(e, id);
+    if (!addr) return;
+    const live = this.readFloats(addr, id);
+    const keys = Object.keys(want);
+    if (!keys.length || !keys.every((k) => k in live && Math.abs(live[k] - Math.fround(want[k] as number)) < 1e-3)) return;
+    this.traceSink?.push({ k: 'write', entity: e, id, value: live, inPlaceSet: true });
+  }
+
   /** Which live row (or sparse value) owns this address now, or null for freed/unused memory. */
   whose(addr: number, comp: string): { entity: number; table: number; row: number } | null {
     return JSON.parse(this.withStrings([comp], ([c]) => this.take(this.x.fw_whose(addr, c))));
@@ -644,7 +662,12 @@ export class FlecsWorld {
       },
       setComponent: (e: number, id: string, value: unknown) => {
         this.opNote(`set ${id} on ${this.name(e)}`, `ecs_set(${this.dst()}, ${this.name(e)}, ${id}, ${JSON.stringify(value)})`);
+        const deferred = this.inCallback > 0 && !this.opsOnWorld;
+        const had = deferred && this.traceSink != null && this.refAddress(e, id) !== 0;
+        const mark = this.traceSink?.length ?? 0;
         this.withStrings([id, JSON.stringify(value)], ([i, j]) => x.fw_it_set(it, e, i, j));
+        // Nothing ran now (no move, no OnSet): the set was queued, and may have written in place.
+        if (had && !this.traceSink!.slice(mark).some((ev) => ev.k === 'append' || ev.k === 'observer' || ev.k === 'hook')) this.noteInPlaceSet(e, id, value);
       },
       delete: (e: number) => {
         this.opNote(`delete ${this.name(e)}`, `ecs_delete(${this.dst()}, ${this.name(e)})`);

@@ -36,7 +36,7 @@ Relationships are cleaned up automatically, but an entity id you stored *inside 
 </Tip>
 
 <Tip title="Panic is a debugging tool">
-`(OnDelete, Panic)` or `(OnDeleteTarget, Panic)` makes flecs assert if the entity is deleted while still in use. It's handy on things that should never be deleted mid-game, such as component definitions or level roots, to catch the bug at its source.
+`(OnDelete, Panic)` makes flecs assert when that entity is deleted. Put it on things that should never be deleted mid-game, such as component definitions or level roots, to catch the bug at its source. `(OnDeleteTarget, Panic)` goes on a relationship instead, and asserts when an entity that is still a target of that relationship is deleted. Both are debug-build checks: release builds compile them out.
 </Tip>
 
 <Tip kind="note" title="Deferred deletes">

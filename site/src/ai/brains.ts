@@ -52,7 +52,7 @@ export const FACTOR_INFO: Record<keyof Factors, { label: string; min: number; ma
 
 const con = (name: string, factor: keyof Factors, min: number, max: number, cv: Curve): Consideration => ({ name, factor, min, max, curve: cv });
 
-/** The default behaviour set, deliberately small: six actions, two to four considerations each. */
+/** The default behaviour set, deliberately small: seven actions, one to five considerations each. */
 export function defaultBehaviours(): Behaviour[] {
   return [
     {
