@@ -73,7 +73,7 @@ for (int c : cells_widest_first) {
 }
 ```
 
-Each pair of regions keeps only its first meeting cell (the saddle), and chokes within a few metres of each other are merged, since a doorway's cells all meet at almost the same moment.
+A doorway's cells all meet at almost the same moment, so meeting cells within a few metres of a choke already found count as the same opening, and only the first, the saddle, is kept. Separate openings between the same two regions, like two doors into one room, stay separate chokes.
 
 Recast's default **watershed** partitioning floods its distance field in the same order, but it skips step 3: it merges regions by size, never by how narrow the opening between them is. So its region borders cross open rooms as well as doorways, a small room can be merged straight through its doorway, and in a tiled build every tile edge is a border too. Its other two modes, monotone and layers, don't use the distance field at all. Recast's regions aren't chokes. What Recast does give you is the distance field itself ([stage 6](/ai/navmesh-inside-recast/)): run this flood over its spans and you get chokes whichever partitioning the navmesh uses.
 

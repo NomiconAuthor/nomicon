@@ -52,7 +52,7 @@ That's why the tools games use most combine them: zones for the frame's structur
 - **Total** (inclusive) time is the function and everything it calls. **Self** (exclusive) time is the function's own code only. A function with a big total and a small self is a manager: look at its callees. A function with a big self time is where the instructions actually are.
 - **The call tree** follows totals from the root downwards. **Expand hot path** opens the most expensive child at each level, which is usually the first thing to read.
 - **Functions by self time** flattens the tree. It finds leaf hotspots that are spread across many callers, like a maths routine or an allocator called from everywhere, which in the tree are split into small pieces.
-- **The flame graph** draws the call tree as nested bars, each as wide as its total time. Wide bars at the bottom are where the time is; wide plateaus at the top are where the work happens.
+- **The flame graph** draws the call tree as nested bars, each as wide as its total time. Here the root is at the top and callees hang below it (many tools draw it the other way up). Follow the wide bars down from the root to find where the time goes; a wide bar with nothing under it is self time, where the work actually happens.
 - **Calls** turn a total into a story. `Physics::Raycast` at 0.96 ms isn't slow code, it's 800 calls of 1.2 µs: the fix is fewer calls (batch them, skip what can't have changed), not a faster raycast.
 
 <Tip title="Amdahl, at the level of one frame">

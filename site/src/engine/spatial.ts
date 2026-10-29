@@ -16,7 +16,7 @@ type Layout = 'uniform' | 'clustered' | 'sizes' | 'line';
 const WW = 1000;
 const WH = 625;
 
-class Objs {
+export class Objs {
   n = 0;
   x = new Float32Array(0);
   y = new Float32Array(0);
@@ -378,7 +378,7 @@ interface BNode extends Box {
   items: number[] | null;
   depth: number;
 }
-class Bvh implements Index {
+export class Bvh implements Index {
   root: BNode | null = null;
   age = 0;
   constructor(

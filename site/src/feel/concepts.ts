@@ -148,7 +148,7 @@ export const CONCEPTS: FConcept[] = [
     body: [
       'A camera locked to the player shows every bump and every jump as the whole world lurching. Three settings fix most of it. **Smoothing** follows the player with a little lag: a lerp (closing a fraction of the gap each second) is simple; a critically damped spring also starts and stops smoothly, with no overshoot. A **dead zone** lets the player move a little without the camera moving at all. **Look-ahead** leads the view in the direction of travel, so players see what they’re running into.',
       'Vertically, platformers often follow the height only when the player lands, or when they fall well below the last floor. A jump then doesn’t move the view up and down, and the camera settles to the new height after each landing.',
-      'Smooth with time, not frames: closing a fixed fraction of the gap each frame makes the camera slower at 30 fps than at 144. Use 1 − e^(−rate × dt), or a spring stepped at a fixed rate.',
+      'Smooth with time, not frames: closing a fixed fraction of the gap each frame makes the camera slower at 30 fps than at 144. Use 1 − e^(−rate × dt), or step a spring with its exact critically damped update: a stiff spring stepped with plain Euler overshoots, and past a point blows up, even at a fixed rate.',
     ],
     look: 'tick “Show the camera’s target and dead zone” to see the box the player can move in.',
     tries: [

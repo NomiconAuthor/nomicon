@@ -29,6 +29,7 @@ import { makeScene, threatMap, route, influence as spreadInfluence, INFLUENCE_RA
 import { BossFight, BOSS, BOSS_DEFAULTS, SETUPS, SPELLS, summarise, TANK_THREAT, HEAL_THREAT, TAUNT_COOLDOWN, HOLD_AT, RANGED_MARGIN, MELEE_MARGIN, RATE_FLOOR, ROLE_WEIGHT, LOW_MANA, CLERIC_DISTANCE, RANGED_DISTANCE, RANGED_SPREAD, STEER_DIRECTIONS, type Summary as BossSummary } from '../src/party/sim';
 import { runStages, DEFAULT_OPTIONS as RECAST_DEFAULTS } from '../src/recast/stages';
 import { ReloadSim, type Scenario, type Strategy } from '../src/engine/hotreload';
+import { Objs, Bvh } from '../src/engine/spatial';
 import { pyramid as phPyramid, tower as phTower, crowd as phCrowd, bin as phBin, bridge as phBridge, tunnel as phTunnel } from '../src/physics/scenes';
 import { level as phLevel } from '../src/physics/charViz';
 import { KinematicMover, DynamicCharacter } from '../src/physics/character';
@@ -565,6 +566,29 @@ function jobs(): void {
   }
 }
 
+function spatial(): void {
+  const L = 'engine/spatial-partitioning.mdx';
+  // Refit decay: 1,000 even objects (seed 7, as the widget), refit chosen on load, 3 s at 60 Hz.
+  // Three seconds stays inside the widget's 600-frame rebuild even on a 144 Hz display.
+  const o = new Objs();
+  o.init(1000, 'uniform', 7);
+  const b = new Bvh(true);
+  const frame = () => {
+    const w = { build: 0, visited: 0, tests: 0, found: 0, swaps: 0 };
+    b.update(o, w);
+    b.pairs(o, w);
+    return w.tests;
+  };
+  const t0 = frame();
+  const a0 = b.area();
+  let t = 0;
+  for (let f = 0; f < 180; f++) {
+    o.step(1 / 60);
+    t = frame();
+  }
+  claim(L, `total box area went from ${Math.round(a0)}× the world to ${Math.round(b.area())}× in three seconds, and pair tests went up ${Math.round(t / t0)}×`);
+}
+
 function waiting(): void {
   const L = 'engine/threads-pools-and-fibers.mdx';
   const flat = frameWorkload(false);
@@ -915,7 +939,7 @@ function network(): void {
   const hits = far.results.filter((r) => r.hit).length;
   claim(C, `${far.results.filter((r) => r.hit && r.inCover).length} of ${hits} hits are on a target`);
   fact(C, rate(lag(150, true, 250)) === 0, 'a 250 ms cap at 150 ms latency: every shot misses');
-  fact(C, rate(lag(75, true, 250)) === 100 && rate(lag(75, true, 100)) === 0, 'at 75 ms, a 250 ms cap compensates fully and 100 ms does not');
+  fact(C, rate(lag(75, true, 250)) === 100 && rate(lag(75, true, 100)) === 0, 'at 75 ms, every shot lands with a 250 ms cap and none with 100 ms');
 
   // 5. Lockstep and rollback
   const L = 'network/lockstep-and-rollback.mdx';
@@ -1000,8 +1024,8 @@ function feel(): void {
   fact(F, corner(FEEL_TIGHT) && !corner({ ...FEEL_TIGHT, cornerCorrection: 0 }), 'corner correction gets you onto the low ledge; without it the jump dies');
 }
 
-const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
-const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
+const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
+const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'spatial', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
 const args = process.argv.slice(2);
 const chosen = args.includes('--all') ? Object.keys(GROUPS) : args.filter((a) => !a.startsWith('-')).length ? args.filter((a) => !a.startsWith('-')) : FAST;
 for (const name of chosen) {

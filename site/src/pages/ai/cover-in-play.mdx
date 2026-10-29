@@ -27,6 +27,7 @@ In code, the change handler is short. The work is in making `bake_cover` take a 
 void on_world_changed(Box changed) {
     Box grown = expand(changed, COVER_MARGIN);               // 1 m: how far cover looks
     for (TileId t : tiles_overlapping(grown)) {
+        drop_destroyed_in(t, changed);                       // points the change removed
         invalidate_claims_in(t);                             // units there re-query
         jobs.push([t, gen = ++tile_gen[t]] {
             TileCover fresh = bake_cover(t);                 // reads only static data + this tile

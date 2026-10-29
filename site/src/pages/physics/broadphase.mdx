@@ -22,7 +22,7 @@ Switch between **Every pair** and **Sort and sweep**. Over two seconds of this b
 
 **Sort and sweep** (also called sweep and prune) sorts the boxes by their left edge. Walking the sorted list, each box only needs comparing with the boxes after it whose left edge comes before its right edge; the first box that starts past its right edge ends the scan. The trick that makes it cheap in a physics engine is **coherence**: bodies barely move between steps, so last step's order is almost sorted, and an insertion sort fixes it in close to linear time. This page keeps the order between steps for exactly that reason.
 
-It degrades when many boxes line up along the sort axis (a long row of crates on the x axis all overlap in x), which is why real engines prefer trees.
+It degrades when many boxes share the same stretch of the sort axis (a tall stack of crates all overlap in x), which is why real engines prefer trees.
 
 ## Trees and fattened boxes
 

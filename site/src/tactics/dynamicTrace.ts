@@ -198,12 +198,14 @@ export class RebuildTrace extends EventTrace<Ev> {
     const t = this.t;
     const col = this.col;
     const dirty = new Set(this.dirty);
-    // Which cover to show per cell: old cover outside dirty tiles, nothing in dirty tiles
-    // after the drop, new cover once a tile is rebuilt.
+    // Which cover to show per cell: old cover outside dirty tiles, and the surviving old
+    // cover inside them until each is rebuilt; new cover once a tile is rebuilt.
+    const gone = new Set(this.removed);
     const show = new Map<number, { c: CoverCell; fresh: boolean }>();
     for (const [i, c] of this.before) {
       const tl = this.tileOf(i);
-      if (!dirty.has(tl) || this.phase === 'mark') show.set(i, { c, fresh: false });
+      if (!dirty.has(tl) || this.phase === 'mark' || (!gone.has(i) && !this.rebuilt.has(tl) && this.phase !== 'swap'))
+        show.set(i, { c, fresh: false });
     }
     for (const [i, c] of this.after) {
       const tl = this.tileOf(i);
@@ -245,8 +247,8 @@ export class RebuildTrace extends EventTrace<Ev> {
         };
       case 'drop':
         return {
-          title: '2. Drop the old cover in those tiles.',
-          text: `Invalidate the dirty tiles' cover (red: positions that are about to disappear). Any unit that had claimed one of them must re-query. Everything outside the dirty tiles stays valid and usable throughout.`,
+          title: '2. Invalidate what the change destroyed.',
+          text: `Drop the cover positions the change destroyed (red) at once; any unit that had claimed a position in these tiles must re-query. The rest of the old cover stays in use, and everything outside the dirty tiles stays valid throughout.`,
         };
       case 'tile':
         return {

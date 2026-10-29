@@ -6,6 +6,7 @@ import type { Term } from '../lab/learn/concepts';
 export interface TScenario {
   preset: string;
   seed?: number;
+  /** Map size; omitted means the lab's default (small). */
   size?: string;
   layer: Layer;
   chokeMode?: 'move' | 'sight';
@@ -157,13 +158,13 @@ export const CONCEPTS: TConcept[] = [
     body: [
       "When you can't afford an exhaustive pass (huge streamed worlds, dynamic geometry, a query around one unit right now), sample. Drop points, and at each one feel around for something solid. Unreal's Environment Query System works like this: generate candidate points, then filter and score them.",
       'Uniform random points are the simplest and the worst: they clump by chance, leave holes, and find a narrow feature with probability equal to its share of the area. Poisson-disk sampling keeps points a minimum distance apart, so coverage is even and there are no big holes. Edge-biased sampling puts the points where cover can actually be, on the boundary between obstacles and walkable ground, so almost every sample is useful.',
-      'Thin gaps (a one-metre gap between two buildings: good cover, easy to miss) show the difference starkly. On the Thin gaps map with 300 samples, random and Poisson sampling each find about a third of the positions inside the gaps; edge-biased sampling finds nearly nine in ten, because a gap\'s walls are edges like any other.',
+      'Thin gaps (a one-metre gap between two buildings: good cover, easy to miss) show the difference starkly. On the medium Thin gaps map with 300 samples, random and Poisson sampling each find about a third of the positions inside the gaps; edge-biased sampling finds nearly nine in ten, because a gap\'s walls are edges like any other.',
     ],
     look: 'the faint red edges are cover the method missed. Compare the "thin-gap positions found" stat across methods at the same sample count.',
     tries: [
-      { label: 'Random, 300 samples', scenario: { preset: 'thin', layer: 'cover', coverMethod: 'random', budget: 300 } },
-      { label: 'Poisson, 300', scenario: { preset: 'thin', layer: 'cover', coverMethod: 'poisson', budget: 300 } },
-      { label: 'Edge-biased, 300', scenario: { preset: 'thin', layer: 'cover', coverMethod: 'biased', budget: 300 } },
+      { label: 'Random, 300 samples', scenario: { preset: 'thin', size: 'medium', layer: 'cover', coverMethod: 'random', budget: 300 } },
+      { label: 'Poisson, 300', scenario: { preset: 'thin', size: 'medium', layer: 'cover', coverMethod: 'poisson', budget: 300 } },
+      { label: 'Edge-biased, 300', scenario: { preset: 'thin', size: 'medium', layer: 'cover', coverMethod: 'biased', budget: 300 } },
     ],
   },
   {

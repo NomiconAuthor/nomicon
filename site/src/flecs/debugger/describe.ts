@@ -58,7 +58,7 @@ export function describe(ev: TraceEvent, s: Session, types: (table: number) => s
             title: `Enqueue: ${ev.call}`,
             tone: 'command',
             fn: 'flecs_defer_*',
-            why: 'Inside a system, operations go through the stage (it->stage in C; the entity handles C++ gives you already point at it). They are not applied now: they are appended to the command queue and applied at the next sync point, so the table the system is iterating stays still.',
+            why: 'Inside a system, operations go through the stage (it->stage in C; the entity handles C++ gives you already point at it). Structural changes are not applied now: they are appended to the command queue and applied at the next sync point, so the table the system is iterating stays still. A set of a component the entity already has is the exception: the value is written into the column now, and only its OnSet is queued.',
           }
         : ev.call.includes('it->world')
           ? {

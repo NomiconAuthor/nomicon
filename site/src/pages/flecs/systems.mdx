@@ -16,7 +16,7 @@ Systems are grouped by **phase**, and phases run in a fixed order each frame:
 
 `OnLoad` → `PostLoad` → `PreUpdate` → `OnUpdate` → `OnValidate` → `PostUpdate` → `PreStore` → `OnStore`
 
-In C++ a system without a phase goes in `OnUpdate` (in C, a system without a phase isn't part of the pipeline, and only runs when you call `ecs_run`). Within a phase, systems run in the order they were created. That's the whole rule: it doesn't matter which file a system lives in, only its phase and, within the phase, when the system entity was created. Module import order matters only because importing a module is what creates its systems. (You can add your own phases with `DependsOn`, to slot them between the built-in ones.)
+In C++ a system without a phase goes in `OnUpdate` (in C, a system without a phase isn't part of the pipeline, and only runs when you call `ecs_run`). Within a phase, systems run in the order they were created. That's the whole rule: it doesn't matter which file a system lives in, only its phase and, within the phase, when the system entity was created. Module import order matters only because importing a module is what creates its systems. (You can add your own phases with `DependsOn`, but they don't get a slot of their own. Phases are sorted by how many `DependsOn` steps they are from the start, and each built-in phase is one step further than the one before it. So a phase that depends on `OnUpdate` runs after `OnUpdate` but lands on the same step as `OnValidate`, and the two phases' systems interleave in creation order. If you need a strict order, use a custom pipeline.)
 
 ## Watch a frame
 

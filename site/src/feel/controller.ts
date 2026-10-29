@@ -475,18 +475,23 @@ export class Camera {
       this.x += (t.x - this.x) * a;
       this.y += (t.y - this.y) * a;
     } else {
-      // A critically damped spring: smooth starts and stops, no overshoot.
+      // A critically damped spring, stepped with its exact solution (target held for the tick):
+      // smooth starts and stops, no overshoot, and stable at any stiffness.
       const w = 2 * Math.PI * s.cameraRate;
+      const k = Math.exp(-w * DT);
       for (const ax of ['x', 'y'] as const) {
         const v = ax === 'x' ? 'vx' : 'vy';
-        const acc = w * w * (t[ax] - this[ax]) - 2 * w * this[v];
-        this[v] += acc * DT;
-        this[ax] += this[v] * DT;
+        const e = this[ax] - t[ax];
+        const j = this[v] + w * e;
+        this[ax] = t[ax] + (e + j * DT) * k;
+        this[v] = (this[v] - w * j * DT) * k;
       }
     }
-    // Keep the view inside the level.
-    this.x = Math.min(Math.max(this.x, this.viewW / 2), level.w - this.viewW / 2);
-    this.y = Math.min(Math.max(this.y, this.viewH / 2), level.h - this.viewH / 2);
+    // Keep the view inside the level; drop stored speed when clamped so it doesn't press on the edge.
+    const cx = Math.min(Math.max(this.x, this.viewW / 2), level.w - this.viewW / 2);
+    if (cx !== this.x) { this.x = cx; this.vx = 0; }
+    const cy = Math.min(Math.max(this.y, this.viewH / 2), level.h - this.viewH / 2);
+    if (cy !== this.y) { this.y = cy; this.vy = 0; }
     this.trauma = Math.max(0, this.trauma - DT * 1.6);
   }
 

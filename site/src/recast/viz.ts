@@ -30,7 +30,7 @@ export const STAGES: StageInfo[] = [
   {
     id: 'compact',
     name: '4. Compact heightfield',
-    what: "Recast flips the representation: instead of solid spans it keeps the open space above every walkable span (the floor of each 'room' a unit could stand in), and links each one to its neighbours if the step between them is climbable. Multi-level places, like the table top above the floor, become separate spans in one column. Shading: how many levels a column has.",
+    what: "Recast flips the representation: instead of solid spans it keeps the open space above every walkable span (the floor of each 'room' a unit could stand in), and links each one to its neighbours if the step between them is climbable. Multi-level places become separate spans in one column (here only the hollow boxes, whose tops sit above the floor sealed inside; the floor under the table was already filtered out). Shading: how many levels a column has.",
     stop: 'Stop here for a navigation graph you can search yourself: every span is a node, every link an edge, on any number of levels. Flow fields, voxel A*, reachability from a point and clearance all run directly on it.',
   },
   {
@@ -49,7 +49,7 @@ export const STAGES: StageInfo[] = [
     id: 'regions',
     name: '7. Regions',
     what: 'Walkable spans are grouped into regions with no holes and no overlaps, each of which can become a set of polygons. Watershed grows regions from the distance field\'s peaks (the best polygons, the slowest); monotone sweeps rows (fast, but long thin regions); layers partition so that no region overlaps itself in height (used for tile caches). Small regions are merged into neighbours.',
-    stop: 'Stop here for an area graph: which parts of the level connect to which, through which openings. It\'s a ready-made level of a hierarchical pathfinder, and a source of choke points.',
+    stop: 'Stop here for an area graph: which parts of the level connect to which, through which openings. It\'s a ready-made level of a hierarchical pathfinder. Region borders follow Recast\'s size rules, not narrow openings, so don\'t read them as chokes.',
   },
   {
     id: 'contours',

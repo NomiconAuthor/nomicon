@@ -18,7 +18,7 @@ You're at the top, firing twice a second at the target exactly where your screen
 
 Untick **Server rewinds to what you saw**. Every shot misses: **0%** of perfectly aimed shots hit, at 25 ms latency as much as at 150. The target runs at 5 m/s and is 0.8 m across; the 100 ms interpolation delay alone puts it half a metre behind where it is on the server, more than its radius, before latency adds anything.
 
-Without compensation, players have to **lead** their targets by how far in the past they see them (their latency plus the interpolation delay), which changes with every connection and every target's speed. That's tolerable for slow projectiles, where leading is part of the game anyway, and hopeless for hitscan weapons.
+Without compensation, players have to **lead** their targets by how far in the past the server will judge them (a full round trip plus the interpolation delay), which changes with every connection and every target's speed. That's tolerable for slow projectiles, where leading is part of the game anyway, and hopeless for hitscan weapons.
 
 ## Rewinding the world
 
@@ -44,7 +44,7 @@ Tick it again: **100%** of shots hit, at every latency. What you see is what you
 
 Rewinding is fair to the shooter and unfair to the target. Set latency to **150 ms** and watch the target run behind the cover: some shots land after it's already behind the wall on the server. With a 1 s rewind limit, **30** of 88 hits are on a target that, from its own point of view, had already reached cover. It's the classic complaint, "I was shot round a corner", and it's lag compensation working as designed: the shooter saw you in the open and fired.
 
-That's why servers **cap the rewind**. Set **Rewind at most** to **250 ms**, and at 150 ms latency every shot misses again: the shooter's view is about 270 ms old (150 ms of latency, the 100 ms interpolation delay, and a tick or so), so it's more than the server will go back. At 75 ms latency, the 250 ms cap still compensates fully; a 100 ms cap doesn't. The cap decides who carries the cost of a bad connection: under it, the people being shot; over it, the person with the bad connection, who has to lead their targets again.
+That's why servers **cap the rewind**. Set **Rewind at most** to **250 ms**, and at 150 ms latency every shot misses again: by the time a shot reaches the server, the moment it was aimed at is about 430 ms old (150 ms for the snapshot to reach the shooter, the 100 ms interpolation delay, 150 ms for the shot to reach the server, and a tick or two), far more than the server will go back. At 75 ms latency it's about 270 ms: the 250 ms cap falls a few centimetres short, well inside the target, so every shot still lands; a 100 ms cap doesn't. The cap decides who carries the cost of a bad connection: under it, the people being shot; over it, the person with the bad connection, who has to lead their targets again.
 
 <Tip title="Favour the shooter, within reason">
 Most shooters favour the shooter, because missing a shot you clearly landed feels worse than being hit just behind cover. They limit the damage: a rewind cap, sometimes a stricter one for players with very high ping, and short interpolation delays so the rewind is small to begin with. Fast-paced competitive games also tend to run high tick and snapshot rates, which shrink everyone's view of the past.

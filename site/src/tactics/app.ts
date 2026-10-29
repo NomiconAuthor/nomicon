@@ -1274,7 +1274,7 @@ export class TacticsApp {
   apply(s: TScenario): void {
     this.preset = s.preset;
     this.seed = s.seed ?? 3;
-    if (s.size) this.size = s.size;
+    this.size = s.size ?? 'small';
     if (s.chokeMode) this.chokeMode = s.chokeMode;
     if (s.ratio) this.ratio = s.ratio;
     if (s.coverMethod) this.coverMethod = s.coverMethod;
