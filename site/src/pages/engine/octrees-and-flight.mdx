@@ -22,7 +22,7 @@ Things to look at:
 
 - **Free space leaves** shows the octree itself: large cubes high above the city, small ones packed around walls and the bridge. **Solid leaves** shows the inside of buildings, which is also subdivided wherever a building's edge doesn't line up with the octree's cells.
 - **Cells A\* expanded** shows the search. In open air it takes big steps; only near buildings does it have to work through small cells.
-- The two stat rows run **the same search on a uniform voxel grid** at the octree's smallest cell size. On a typical trip at cell size 2, the grid has six times as many cells as the octree has leaves and A* expands about three times as many of them. At cell size 1, it's over ten times as many cells and about seven times as many expansions. The grid's cost grows with the cube of its resolution; the octree's grows roughly with the area of the surfaces.
+- The two stat rows run **the same search on a uniform voxel grid** at the octree's smallest cell size. On a typical trip at cell size 2, the grid has six times as many cells as the octree has leaves and A* expands about three times as many of them. At cell size 1, it's over ten times as many cells and around ten times as many expansions, though that varies a lot from trip to trip. The grid's cost grows with the cube of its resolution; the octree's grows roughly with the area of the surfaces.
 - **New trip** and **New city** change the problem. **Smallest cell 4** builds a coarse octree quickly, but narrow gaps (under the bridge, between close buildings) disappear.
 
 ## Building it

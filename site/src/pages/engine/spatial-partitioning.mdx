@@ -27,7 +27,7 @@ Divide the world into equal cells, and put each object in every cell its boundin
 - **Building is a counting sort**: count objects per cell, prefix-sum the counts, then fill one flat array. No allocation per object, no pointers, cache-friendly. It's cheap enough to rebuild from scratch every frame, which is what this widget does.
 - **Cell size is everything.** Try **10** and **160**. Too small and every object spans many cells (more build work, duplicates to skip); too big and each cell holds many objects that are tested pointlessly. A good rule of thumb is about the size of a typical object, or of a typical query.
 - **It assumes even density.** With **Clustered** or **All in a column**, most cells are empty and a few are packed, and the packed ones dominate the cost.
-- **Big objects are expensive.** Under **A few big ones**, each giant spans dozens of cells.
+- **Big objects are expensive.** Under **A few big ones**, each giant spans many cells (dozens with 200 objects, or with a smaller cell size).
 - **Memory follows the world's area, not the object count.** For a big or unbounded world, hash the cell coordinates into a fixed-size table instead (a *spatial hash*), so empty space costs nothing.
 
 For lots of similar-sized things in a bounded area (units in an RTS, particles, projectiles, crowds), a grid is very hard to beat. In this widget, with 5,000 objects spread evenly, finding every overlapping pair takes about 2 ms with a grid against roughly 60 ms by brute force (timings from one desktop browser; yours will differ, but the ratio holds).
@@ -58,8 +58,8 @@ BVHs are the standard structure for ray casting (every GPU ray tracer uses one) 
 
 Sort objects by the left edge of their box. Walk the sorted list keeping the objects whose right edge you haven't passed yet; only those can overlap on x, and only those are checked on y and then exactly.
 
-- **Keeping the list sorted is nearly free when things move a little.** Insertion sort on an almost-sorted list costs about one step per object plus one per swap. In the widget, a frame of 5,000 moving objects needs a few thousand swaps.
-- **It finds pairs well** (under 1% of brute force with even spreading) and has almost no build cost.
+- **Keeping the list sorted is nearly free when things move a little.** Insertion sort on an almost-sorted list costs about one step per object plus one per swap. In the widget, a frame of 5,000 moving objects needs several thousand swaps.
+- **It finds pairs well** (about 2% of brute force at 1,000 evenly spread objects, under 1% at 5,000) and has almost no build cost.
 - **It falls over when objects line up on the sorting axis.** Choose **All in a column**: the objects all share a narrow band of x, so far more pairs survive the first cut. With 5,000 objects it starts out testing about a quarter of all pairs (falling as they drift apart), against under 1% for the BVH. Engines sort on the axis of greatest spread, or use one list per region (*multi sweep and prune*).
 - It's a poor fit for one-off queries, since it only orders on one axis.
 

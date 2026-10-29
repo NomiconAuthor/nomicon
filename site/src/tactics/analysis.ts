@@ -81,7 +81,7 @@ export function distanceField(w: number, h: number, solid: (i: number) => boolea
 export interface Choke {
   x: number;
   y: number;
-  /** Width of the opening in cells (twice the clearance at its narrowest point). */
+  /** Width of the opening in cells, measured straight across at the choke cell. */
   width: number;
   a: number;
   b: number;
@@ -102,7 +102,7 @@ export interface Regions {
  * point is nearly as wide as the regions themselves; if it's much narrower (below
  * `ratio` × the smaller region's widest point), the meeting point is a choke and the
  * regions stay apart. The first meeting point of a pair is the saddle: the widest
- * point of the narrowest crossing, so its clearance is the choke's half-width.
+ * point of the narrowest crossing, so its clearance is roughly the choke's half-width.
  */
 export function regions(w: number, h: number, free: (i: number) => boolean, clear: Float32Array, ratio: number, minPeak = 2): Regions {
   const n = w * h;

@@ -83,7 +83,7 @@ std::vector<const Action*> plan(Facts start, Facts goal_mask, Facts goal_value, 
 With a few dozen facts in a bitset and a dozen actions, a plan takes microseconds. Orkin's planner searched *backwards* from the goal, looking for actions whose effects satisfy unmet goal facts; that tends to explore fewer states when there are many actions. The forward version is easier to follow and debug, and fine at this size.
 
 <Tip kind="warn" title="This heuristic isn't quite admissible">
-"Goal facts still false" can overestimate when one action makes several goal facts true at once, so A* isn't guaranteed to find the cheapest plan. In practice plans are short and it rarely matters; if it does, use a smaller heuristic (the count divided by the most goal facts any one action can set) or zero, which makes it Dijkstra.
+"Goal facts still false" can overestimate when one action makes several goal facts true at once, or when actions cost less than 1, so A* isn't guaranteed to find the cheapest plan. In practice plans are short and it rarely matters; if it does, scale it down (the count × the cheapest action's cost ÷ the most goal facts any one action can set) or use zero, which makes it Dijkstra.
 </Tip>
 
 ## Executing a plan

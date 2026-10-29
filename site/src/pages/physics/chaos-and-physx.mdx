@@ -18,7 +18,7 @@ Unreal Engine 4 used NVIDIA's PhysX. Epic showed its own engine, **Chaos**, at G
 
 ### What's in it
 
-Chaos is a family of systems rather than one solver: rigid bodies, **Destruction** (geometry collections fractured offline, held together by connection graphs, breaking under strain at runtime, with optional caching), **Fields** (volumes that apply forces, strain or state changes to whatever's inside them), vehicles, cloth, ragdolls and physical animation, hair, fluids, and **Chaos Flesh** for deformable bodies. The **Chaos Visual Debugger** records simulation frames for playback and inspection. That's similar in purpose to Box3D's recording, but it records state, whereas Box3D records the inputs and replays them deterministically.
+Chaos is a family of systems rather than one solver: rigid bodies, **Destruction** (geometry collections fractured offline, held together by connection graphs, breaking under strain at runtime, with optional caching), **Fields** (volumes that apply forces, strain or state changes to whatever's inside them), vehicles, cloth, ragdolls and physical animation, hair and fluids (run through Niagara), and **Chaos Flesh** for deformable bodies. The **Chaos Visual Debugger** records simulation frames for playback and inspection. That's similar in purpose to Box3D's recording, but it records state, whereas Box3D records the inputs and replays them deterministically.
 
 Destruction is the headline feature, and it's the clearest reason for Epic to own its engine: fracture, clustering and connection graphs have to be built into the solver's notion of a body, not bolted on.
 
@@ -58,7 +58,7 @@ Unreal's `CharacterMovementComponent` doesn't use rigid-body simulation: it's th
 PhysX is the engine half the industry grew up on, and it's still very much alive:
 
 - **Unity**'s built-in 3D physics uses PhysX (version 4.1 since Unity 2019.3); Unity has described PhysX 5 as a possible future backend. Unity also dropped its first-party Havok integration from Unity 6.3.
-- In April 2025 NVIDIA open-sourced the last closed part, the **GPU simulation kernels** (over 500 CUDA kernels), with PhysX 5.6, under the BSD-3 licence. The public SDK has moved on to 5.9 and 5.10 since.
+- In April 2025 NVIDIA open-sourced the last closed part, the **GPU simulation kernels** (over 500 CUDA kernels), with PhysX 5.6, under the BSD-3 licence. The public SDK has moved on several versions since (5.12 at the time of writing).
 - The same year, RTX 50-series GPUs dropped **32-bit CUDA**. That broke *GPU* PhysX in old 32-bit games, which fell back to the CPU and ran badly; 64-bit PhysX and CPU PhysX were unaffected. NVIDIA later restored it for a list of classic games in a December 2025 driver. That episode revived an older "PhysX is dead" impression, which had grown as GPU PhysX effects faded from games in the 2010s and Unreal moved to Chaos.
 
 ### Two solvers

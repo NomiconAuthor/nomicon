@@ -38,7 +38,7 @@ Every step runs the same pipeline. Play the bin, then pause and **Step** one phy
 3. **Integrate velocities.** Add gravity and any forces to each awake body's velocity. Positions don't move yet.
 4. **Solve.** Adjust velocities so that contacts stop approaching and joints stay together, while respecting friction. This is where most of the time and all of the subtlety go. ([Solving contacts](/physics/solving-contacts/).)
 5. **Integrate positions.** Move and rotate each body by its corrected velocity.
-6. **Islands and sleep.** Group bodies that touch into islands, and put islands that have stopped moving to sleep so they cost nothing until something disturbs them. ([Sleeping and fast bodies](/physics/sleeping-and-fast-bodies/).)
+6. **Islands and sleep.** Group bodies that touch into islands, and put islands that have stopped moving to sleep so they cost nothing until something disturbs them. This page groups islands at the end for simplicity; real engines link them as contacts appear and use them to split the solve, and only the sleep check waits for the end. ([Sleeping and fast bodies](/physics/sleeping-and-fast-bodies/).)
 
 With substeps (below), steps 3 to 5 repeat several times inside one step, reusing the contacts from steps 1 and 2.
 

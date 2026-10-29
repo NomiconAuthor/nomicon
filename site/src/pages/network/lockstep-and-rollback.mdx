@@ -68,9 +68,9 @@ Re-simulating 5 frames in one tick means running the game 6 times in 16.7 ms. Th
 
 ## Desyncs
 
-Tick **Peer B does the movement maths in a different order**. Peer B now computes each step as (position × 60 + velocity) / 60, which is the same as position + velocity × (1/60) in arithmetic but not always in floating point. The peers still exchange the same inputs, and for a while both screens look identical. The difference is a trillionth of a metre. But it's there, and the peers' checksums of the same frame differ at the first check, **frame 30**.
+Tick **Peer B does the movement maths in a different order**. Peer B now computes each step as (position × 60 + velocity) / 60, which is the same as position + velocity × (1/60) in arithmetic but not always in floating point. The peers still exchange the same inputs, and for a while both screens look identical. The difference is about a tenth of a trillionth of a metre. But it's there, and the peers' checksums of the same frame differ at the first check, **frame 30**.
 
-Lockstep and rollback games both exchange checksums of confirmed frames for exactly this reason. Here the error stays tiny, because the arena's walls keep resetting positions. In a real game it grows: a unit that survives on one machine dies on the other, and from then on the two are playing different games. Desyncs come from anything that isn't the same everywhere: compiler flags, a different maths library, iterating an unordered container, uninitialised memory, a random number drawn outside the simulation. The [determinism lesson](/engine/determinism/) lists the usual suspects.
+Lockstep and rollback games both exchange checksums of confirmed frames for exactly this reason (GGPO leaves sending them to the game). Here the error stays tiny, because the arena's walls keep resetting positions. In a real game it grows: a unit that survives on one machine dies on the other, and from then on the two are playing different games. Desyncs come from anything that isn't the same everywhere: compiler flags, a different maths library, iterating an unordered container, uninitialised memory, a random number drawn outside the simulation. The [determinism lesson](/engine/determinism/) lists the usual suspects.
 
 ## Takeaways
 

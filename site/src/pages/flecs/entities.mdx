@@ -31,7 +31,7 @@ Things to notice:
 
 ## Components are entities too
 
-`Position` is itself an entity. It has a name, it lives in a table (with the `Component` component that records its size), and you can add things to it. That's how traits work: `world.component<Position>().add(flecs::Sparse)` adds the `Sparse` tag to the `Position` entity. Tags, relationships, prefabs, systems, queries and observers are all entities as well.
+`Position` is itself an entity. It has a name, it lives in a table (with the `Component` component that records its size), and you can add things to it. That's how traits work: `world.component<Position>().add(flecs::Sparse)` adds the `Sparse` tag to the `Position` entity. Tags, relationships, prefabs, systems and observers are all entities as well, and so are named or cached queries.
 
 This is why flecs feels uniform once it clicks. Almost every question ("which components are networked?", "which systems are in this phase?") can be answered by adding something to an entity and querying for it.
 

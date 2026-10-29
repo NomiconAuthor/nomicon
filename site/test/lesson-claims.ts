@@ -771,7 +771,7 @@ function party(): void {
   claim(L, `Over the same ${N} fights`);
   // The warchief's rules and the party's constants, as the lesson states them.
   claim(L, `a cone in front of it, telegraphed for ${BOSS.cleaveWarn} s`);
-  claim(L, `a circle under a random party member, telegraphed for ${BOSS.slamWarn} s`);
+  claim(L, `a circle under a random party member other than the tank, telegraphed for ${BOSS.slamWarn} s`);
   claim(L, `1 for most, ${TANK_THREAT} for the tank`);
   fact(L, HEAL_THREAT === 0.5, 'healing adds half a point of threat per point healed');
   fact(L, MELEE_MARGIN === 1.1 && RANGED_MARGIN === 1.3, 'the pull rule is 110% in melee range, 130% at range');

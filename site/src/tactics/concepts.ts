@@ -66,7 +66,7 @@ export const CONCEPTS: TConcept[] = [
     layer: 'chokes',
     body: [
       'A choke is a narrow opening between two wider areas. That definition has two halves, and both matter: narrow alone describes every alley; it is narrow relative to what it joins that makes a doorway between two halls a choke.',
-      'The lab finds them with a watershed over the clearance field. Sort every free cell from widest to narrowest and flood: each local maximum starts a region, and regions grow as narrower cells join them. When two regions meet, look at the meeting cell. If it is nearly as wide as the regions, they are really one space and merge. If it is much narrower (the slider sets how much), the meeting cell is a choke and the regions stay apart. The first meeting cell of a pair is the saddle point, the widest point of the narrowest crossing, so its clearance is the choke\'s half-width. Recast\'s watershed partitioning floods its distance field in the same order, but merges regions by size rather than by how narrow the opening is, so its region borders aren\'t chokes.',
+      'The lab finds them with a watershed over the clearance field. Sort every free cell from widest to narrowest and flood: each local maximum starts a region, and regions grow as narrower cells join them. When two regions meet, look at the meeting cell. If it is nearly as wide as the regions, they are really one space and merge. If it is much narrower (the slider sets how much), the meeting cell is a choke and the regions stay apart. The first meeting cell of a pair is the saddle point, the widest point of the narrowest crossing, so its clearance is roughly the choke\'s half-width. Recast\'s watershed partitioning floods its distance field in the same order, but merges regions by size rather than by how narrow the opening is, so its region borders aren\'t chokes.',
       "Width isn't the whole story. A narrow gap that no route uses doesn't matter. The circle on each choke is sized by traffic: the share of sampled shortest routes that pass through it.",
     ],
     look: 'doorways and gaps between buildings get chokes; long open streets do not, because the street is no narrower than the regions on either side.',
@@ -96,7 +96,7 @@ export const CONCEPTS: TConcept[] = [
     title: 'Traffic: which places matter',
     layer: 'traffic',
     body: [
-      'Run shortest paths between many random pairs of points and count how often each cell is used. The result is a sampled estimate of betweenness centrality, a graph-theory measure of how much a node lies "between" everything else. Here: 40 Dijkstra searches, 12 routes from each.',
+      'Run shortest paths between many random pairs of points and count how often each cell is used. The result is a rough sampled betweenness centrality, a graph-theory measure of how much a node lies "between" everything else (true betweenness shares each route among all equally short paths; at chokes every path is forced through, so it makes no difference there). Here: 40 Dijkstra searches, 12 routes from each.',
       'High traffic plus low clearance is the real choke: a place that is both narrow and on the way to everywhere. High traffic and wide is a main street. Low traffic and narrow is a dead-end alley, which might be good cover precisely because nobody passes through.',
       'It depends only on the static map, so it is a natural bake: it parallelises (each source is independent), and coarse results are useful long before it finishes. The same region-and-choke map is what StarCraft bots use to decide where to wall off and where to expand.',
     ],
@@ -280,7 +280,7 @@ export const GLOSSARY: Record<string, Term> = {
   saddle: {
     term: 'Saddle',
     aliases: ['saddle', 'saddle point'],
-    def: 'Where two regions first meet in the flood: the widest point of the narrowest crossing between them. Its clearance is the opening\'s half-width.',
+    def: 'Where two regions first meet in the flood: the widest point of the narrowest crossing between them. Its clearance is roughly the opening\'s half-width.',
     concept: 'chokes',
   },
   betweenness: {

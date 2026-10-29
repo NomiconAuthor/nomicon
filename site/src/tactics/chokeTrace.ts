@@ -404,7 +404,7 @@ export class ChokeTrace extends EventTrace<Ev> {
       case 'route':
         return {
           title: `4. Traffic: ${this.routeCount} routes sampled.`,
-          text: `A choke matters if routes have to use it. Sample shortest routes (40 Dijkstra searches, up to 12 random destinations each; the latest search's routes are drawn) and count how many pass each cell: a sampled betweenness centrality. At the end, each choke's circle is sized by the share of routes through it, and chokes almost nothing uses are drawn faintly.`,
+          text: `A choke matters if routes have to use it. Sample shortest routes (40 Dijkstra searches, up to 12 random destinations each; the latest search's routes are drawn) and count how many pass each cell: a rough sampled betweenness centrality. At the end, each choke's circle is sized by the share of routes through it, and chokes almost nothing uses are drawn faintly.`,
         };
     }
   }

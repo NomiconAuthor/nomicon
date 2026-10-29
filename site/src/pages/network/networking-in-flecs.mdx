@@ -61,7 +61,7 @@ That makes ranges a simple ownership scheme:
 - **Several authorities** (a server plus clients that spawn their own projectiles, or peers in a peer-to-peer game) each get their own range, and the owner of an entity is visible from its id alone.
 
 <Tip kind="warn" title="Register first, then activate">
-Components, tags and other entities your startup code creates take ids like anything else. Do all registration *before* activating a range, in the same order on both sides, so those ids don't depend on which range happens to be active. If you send component ids over the wire rather than names, both sides must agree on them exactly.
+Components, tags and other entities your startup code creates take ids too (components come from a small pool of low ids first). Do all registration *before* activating a range, in the same order on both sides, so those ids don't depend on which range happens to be active. If you send component ids over the wire rather than names, both sides must agree on them exactly.
 </Tip>
 
 ## Choosing what to send: a Replicated tag

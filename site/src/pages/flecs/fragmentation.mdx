@@ -14,7 +14,7 @@ Every distinct type gets its own table. With plain components that's fine: games
 Fragmentation isn't wrong. Matching `(Faction, Red)` is then a whole-table match, as fast as matching a component. But it costs in three places:
 
 - **Iteration:** a system that doesn't care about factions still gets one callback per table, each with only a few rows.
-- **Table creation:** every new target means a new table, and every cached query is notified.
+- **Table creation:** every new target means a new table, and every cached query that could match it is notified.
 - **Memory:** each table has its own columns and bookkeeping.
 
 ## Relationships: fragmenting vs DontFragment

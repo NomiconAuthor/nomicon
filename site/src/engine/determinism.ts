@@ -56,7 +56,7 @@ export class FloatOrder {
     this.out = h('div', { class: 'det-sums' });
     this.root.append(
       h('div', { class: 'll-h' }, 'The same 10,000 floats, added up in different orders (32-bit float arithmetic)'),
-      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn primary', onclick: () => this.shuffle() }, 'Threads finish in a random order'), h('span', { class: 'll-muted' }, 'Each click sums in a new random order, like workers finishing in whatever order the OS schedules them.')),
+      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn primary', onclick: () => this.shuffle() }, 'Threads finish in a random order'), h('span', { class: 'll-muted' }, 'Each click sums in a new random order, like work handed out dynamically to threads that finish in whatever order the OS schedules them.')),
       this.out,
     );
     this.render();

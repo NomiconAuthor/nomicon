@@ -75,7 +75,7 @@ world.system<const Factors, Brain, CurrentAction>("Think")
         act.id = b.decide(f, act);                               // utility, tree or planner
     });
 
-// Act: every tick. One system per action reads CurrentAction and does the work.
+// Act: every tick. Reads CurrentAction and runs that action (or split it into one system per action).
 world.system<const CurrentAction, Position, Staff>("Act")
     .kind(flecs::OnUpdate)
     .each([](flecs::entity e, const CurrentAction& a, Position& p, Staff& st) { run(a.id, e, p, st); });

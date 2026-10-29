@@ -46,7 +46,7 @@ What needs a merge, once `T` may have been queued:
 
 Some things don't matter, and it's worth knowing which:
 
-- **Writing a field never causes a merge.** It's a store into the column, not a command (see [systems and the pipeline](/flecs/systems/)). `[out]` or `[inout]` on a term matched on the system's own entities says nothing about commands.
+- **Writing a field never causes a merge.** It's a store into the column, not a command (see [systems and the pipeline](/flecs/systems/)). `[out]` or `[inout]` on a term matched on the system's own entities says nothing about commands. (On a fixed source, such as a singleton, it does: that counts as a command write and costs a merge.)
 - **`const` / `[in]` on your own matched terms doesn't move merges.** It feeds change detection (flecs marks the columns a system can write as changed) and documents the system. Worth doing, for other reasons.
 - **Inactive writers are ignored.** A system that matches no tables isn't scheduled and doesn't count as a writer. An inactive *reader* still gets its merge, because the merge may give it something to match; if it does, the schedule is rebuilt and the reader runs. In the third setup above, the end-of-frame merge does the same for `Burn`.
 - **One merge serves many writers.** Several systems can queue commands before a single merge, and after it every component counts as clean again.
@@ -99,9 +99,9 @@ In an ordinary system the world is readonly, and every change goes through the s
 ## In practice
 
 - **Annotate when a later system in the same frame has to see the change.** If `Ignite` and `Burn` are in the same frame and you want burning to start this frame, `.write<Burning>()` is the whole fix.
-- **Annotate exactly.** Each annotation can add a merge, and with threads, every merge is a barrier. `.write<T>()` on a component the system never touches costs a merge for nothing. A wildcard write (`[out] *()`) puts a merge before the next system, whatever it matches.
+- **Annotate exactly.** Each annotation can add a merge, and with threads, every merge is a barrier. `.write<T>()` on a component the system never touches costs a merge for nothing. A wildcard write (`[out] *()`) marks every component as queued, so the merge goes before the next system that matches or reads anything at all.
 - **Or read it next frame.** Put the reader before the writer (or in an earlier phase) and leave the write unannotated. The reader sees the change one frame later, after the end-of-frame merge, and you avoid a merge in the middle of the frame. The delay is always exactly one frame, so it's deterministic. [Reading a frame later](/engine/jobs-and-task-graphs/#reading-a-frame-later) is the same idea for job systems.
-- **In a `multi_threaded` system, write only the rows you were given.** Each thread owns its slice of the columns and its own queue. Singletons, parents, globals and other entities are shared: writing them from a multi-threaded system is a data race, and an atomic counter makes the result depend on timing.
+- **In a `multi_threaded` system, write only the rows you were given.** Each thread owns its slice of the columns and its own queue. Singletons, parents, globals and other entities are shared: writing them from a multi-threaded system is a data race. An atomic makes it safe, but anything that depends on order, like the IDs a counter hands out or a float sum, still changes from run to run.
 - **Mind the missing barrier.** Within a run, one thread can be on the next system while another is still on the previous one. Reading another entity's data that an earlier system in the same run writes (a parent's transform through `up`, a `get` on a target) can see either value. If you need it settled, put a merge between them.
 - **Don't flip between kinds.** Alternating single-threaded and multi-threaded systems puts a merge and a barrier at every switch. Group the multi-threaded ones together.
 

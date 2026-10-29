@@ -514,7 +514,7 @@ export const CONCEPTS: Concept[] = [
     title: 'Reachability before search',
     body: [
       'An unreachable goal is A*\'s worst case: it must expand everything it can reach before it can say no. Label the connected areas once per unit size (a flood fill, updated when the map changes) and "can I get there?" becomes one lookup. If the answer is no, send the unit to the nearest reachable point instead.',
-      'This also answers the question of what to do when A* fails on a complete map: the goal really is unreachable, and a second search (RRT, say) only spends time proving it again.',
+      'This also answers the question of what to do when A* fails on a complete map: the goal really is unreachable (at the grid’s resolution), and a second search such as RRT would just burn its whole budget failing to find a path.',
     ],
     look: 'With the check off, A* floods every reachable cell. Tick "Check reachability first" in the sidebar and it answers instantly.',
     tries: [
@@ -750,7 +750,7 @@ export const CONCEPTS: Concept[] = [
     title: 'Hybrid A* and analytic expansion',
     body: [
       'Hybrid A* searches (cell, heading) bins, but each node keeps the exact continuous pose it was reached with, and children come from driving short arcs at a few steering angles, forwards and in reverse. The bins only stop the search exploding; the path is made of the arcs, so it is drivable.',
-      'Its heuristic is the larger of two lower bounds: the cost ignoring turning (a Dijkstra field that knows about walls and dead ends, the faint purple bands) and the Reeds–Shepp length ignoring walls (which knows about turning). Every few expansions it tries a Reeds–Shepp curve straight to the goal; on open ground that analytic shot often finishes the search almost at once.',
+      'Its heuristic is the larger of two estimates: the cost ignoring turning (a Dijkstra field that knows about walls and dead ends, the faint purple bands) and, near the goal, the Reeds–Shepp length ignoring walls (which knows about turning). Every few expansions it tries a Reeds–Shepp curve straight to the goal; on open ground that analytic shot often finishes the search almost at once.',
     ],
     look: 'With the analytic shot off, the search has to land on the goal cell and heading by itself, and the expansions climb.',
     tries: [

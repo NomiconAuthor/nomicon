@@ -30,7 +30,7 @@ On a typical run with the defaults (20,000 entities, 32×32 cells, 2,000 moving 
 
 | Layout | Move entities | Cell lookups | Iterate everything | Tables |
 | --- | --- | --- | --- | --- |
-| Scan everything | 0.23 ms | 22 ms | 0.027 ms | 1 |
+| Scan everything | 0.22 ms | 22 ms | 0.014 ms | 1 |
 | `(InCell, cell)` pair | 0.76 ms | 0.07 ms | 0.021 ms | 1,024 |
 | `(InCell, cell)` DontFragment | 0.96 ms | 0.05 ms | 0.019 ms | 1 |
 | Grid next to the ECS | 0.17 ms | 0.03 ms | 0.014 ms | 1 |
@@ -38,7 +38,7 @@ On a typical run with the defaults (20,000 entities, 32×32 cells, 2,000 moving 
 
 With a 64×64 grid (about 4,000 occupied cells), iterating everything rose to about 0.09 ms for both pair layouts against 0.013 ms for the single-table ones, and the variable lookups rose to about 24 ms.
 
-Small timings like these are noisy, so run it a couple of times before reading much into a single number. What to take from it:
+Small timings like these are noisy, and the first run after the page loads is slower while the WebAssembly warms up, so run it a couple of times before reading much into a single number. What to take from it:
 
 - **Any index beats scanning** once you do more than a handful of lookups. That is the whole point.
 - **The fragmenting pair** has very fast lookups, but every system that iterates `Position` now visits one table per occupied cell instead of one. A table is created the first time a cell is occupied and isn't freed when the cell empties: it stays in the world, and in every cached query that matched it, until the cell entity is deleted or you call `ecs_delete_empty_tables()`. At 1,024 cells the iteration cost barely shows. At 4,000 it's several times slower, and a real game iterates Position in many systems, with more components per table.

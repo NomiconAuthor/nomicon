@@ -21,12 +21,12 @@ Click the picture and drive with the arrow keys. The dashed ring is where the ne
 - **Wait for the server.** The dumb terminal: correct, and a round trip late. At 100 ms latency a turn takes 234 ms to show.
 - **Predict.** Apply each input locally as well as sending it. Turns show at once. But the client only knows its own inputs: when you walk into another player, or the pusher shoves you, the server moves you and the client never hears about it. Its copy of you drifts away from the server's, by 2.60 m on average over a minute, and never comes back.
 - **Predict and reconcile.** Keep every input the server hasn't confirmed yet. Each server state says which of your inputs it has applied (the **acknowledgement**). When one arrives, throw away the confirmed inputs, start from the server's position, and replay the unconfirmed ones on top. The result is where the server *will* say you are, once it has applied the inputs still on their way.
-- **Reconcile, smoothed.** The same, but when the replayed position differs from what's on screen, don't jump: keep drawing at the old position and close the gap over a few frames.
+- **Reconcile, smoothed.** The same, but when the replayed position differs from what's on screen, don't jump: keep drawing at the old position and close the gap over a fraction of a second.
 
 ```cpp
 void on_server_state(const ServerState& s) {
     // Inputs up to s.ack have been applied by the server: they're in s.my_position already.
-    pending.erase_if([&](const InputCmd& c) { return c.seq <= s.ack; });
+    std::erase_if(pending, [&](const InputCmd& c) { return c.seq <= s.ack; });
     Vec2 corrected = s.my_position;
     for (const InputCmd& c : pending) corrected = move(corrected, c.input);   // same code as the server
     Vec2 error = predicted - corrected;

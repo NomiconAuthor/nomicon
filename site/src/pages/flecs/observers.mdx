@@ -12,7 +12,7 @@ import TryIt from '../../components/lesson/TryIt.astro';
 flecs has two ways to react to a component being added, set or removed:
 
 - **Hooks** (`on_add`, `on_set`, `on_remove`) are part of a component's definition, like a constructor. There is at most one of each per component, they can change the component, and they're cheap. Each can be set only once in C++ (setting it again asserts), and in C the set of hooks can't change once the component is in use.
-- **Observers** are subscribers. Any part of the game can register as many as it likes, for any events, with a full query, including several terms. They're more flexible, and they cost a query evaluation per event.
+- **Observers** are subscribers. Any part of the game can register as many as it likes, for any events, with a full query, including several terms. They're more flexible, and they cost more per event: an observer with several terms also evaluates its query against the entity.
 
 The order matters, because it decides what the callback can see. Rather than memorise it, step through it:
 

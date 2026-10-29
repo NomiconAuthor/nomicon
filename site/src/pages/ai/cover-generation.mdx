@@ -24,7 +24,7 @@ This is how cover is usually generated from a navmesh, and it works the same fro
 4. **Merge samples into rails**: runs of the same kind along one edge, split wherever the outline turns a convex corner, because the cover ends there.
 5. **Find peek points** just past each end of each rail: if the cover has stopped and the ground is walkable, a unit at the end of the rail can lean or step out to attack.
 
-Step 3 is the only one that touches geometry, and it's a handful of short rays per metre of wall:
+Step 3 does nearly all the geometry queries, a handful of short rays per metre of wall:
 
 ```cpp
 enum class Cover { None, Low, Full };
@@ -62,7 +62,7 @@ When nothing was baked (a procedurally generated level, dynamic geometry, a quer
 With 300 samples on this map, random and Poisson sampling find 40 and 44 of the 128 cover positions inside the gaps, about a third; edge-biased finds 112, nearly nine in ten. Unreal's Environment Query System is a production example of the sampling style: generate candidate points, then filter and score them.
 
 <Tip title="Which to use">
-Bake with the **boundary walk** for anything static: it's exhaustive, its cost follows the length of the outlines rather than the area of the map, and it produces rails and peek points. Use **edge-biased sampling** at run time for things that weren't baked. Use **Poisson-disk** sampling for open terrain where cover could be anywhere and there are no edges to bias towards.
+Bake with the **boundary walk** for anything static: it's exhaustive, its probing cost follows the length of the outlines rather than the area of the map, and it produces rails and peek points. Use **edge-biased sampling** at run time for things that weren't baked. Use **Poisson-disk** sampling for open terrain where cover could be anywhere and there are no edges to bias towards.
 </Tip>
 
 ## Takeaways

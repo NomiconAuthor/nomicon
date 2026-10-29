@@ -54,7 +54,7 @@ A choke is a narrow opening between two wider areas. Both halves of that matter:
 
 1. Sort every free cell from widest to narrowest.
 2. Add them in that order. A cell with no flooded neighbour is a local maximum and starts a new region; otherwise it joins its neighbours' region. Regions grow outwards from the middles of open spaces.
-3. When two regions meet, look at the meeting cell. If it's nearly as wide as the regions are, they're really one space and merge. If it's much narrower (below a ratio of the smaller region's widest point, 60% by default), they stay apart and the meeting cell is a choke. The first meeting cell of a pair is the *saddle*: the widest point of the narrowest crossing, which is exactly the opening's half-width.
+3. When two regions meet, look at the meeting cell. If it's nearly as wide as the regions are, they're really one space and merge. If it's much narrower (below a ratio of the smaller region's widest point, 60% by default), they stay apart and the meeting cell is a choke. The first meeting cell of an opening is the *saddle*: the widest point of the narrowest crossing, so its clearance is about half the opening's width (the lab measures the width straight across).
 
 As code, with a union-find over regions:
 
@@ -79,7 +79,7 @@ Recast's default **watershed** partitioning floods its distance field in the sam
 
 ## Which chokes matter: traffic
 
-Narrowness isn't importance. A narrow gap that nothing passes through is a dead-end alley, which might even be good cover. The last stage samples shortest routes between random points (40 Dijkstra searches, 12 destinations each) and counts how many cross each cell: a sampled estimate of *betweenness centrality*. Each choke's circle is sized by the share of routes through it, and chokes almost nothing uses are drawn faintly.
+Narrowness isn't importance. A narrow gap that nothing passes through is a dead-end alley, which might even be good cover. The last stage samples shortest routes between random points (40 Dijkstra searches, 12 destinations each) and counts how many cross each cell: a rough sampled *betweenness centrality*. Each choke's circle is sized by the share of routes through it, and chokes almost nothing uses are drawn faintly.
 
 ## Movement chokes and sight chokes
 

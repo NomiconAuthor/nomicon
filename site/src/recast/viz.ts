@@ -48,7 +48,7 @@ export const STAGES: StageInfo[] = [
   {
     id: 'regions',
     name: '7. Regions',
-    what: 'Walkable spans are grouped into regions with no holes and no overlaps, each of which can become a set of polygons. Watershed grows regions from the distance field\'s peaks (the best polygons, the slowest); monotone sweeps rows (fast, but long thin regions); layers partition so that no region overlaps itself in height (used for tile caches). Small regions are merged into neighbours.',
+    what: 'Walkable spans are grouped into regions, each of which can become a set of polygons. Watershed grows regions from the distance field\'s peaks (the best polygons, the slowest); monotone sweeps rows (fast, but long thin regions); layers partition so that no region overlaps itself in height (the idea behind tile caches). Small regions are merged into neighbours.',
     stop: 'Stop here for an area graph: which parts of the level connect to which, through which openings. It\'s a ready-made level of a hierarchical pathfinder. Region borders follow Recast\'s size rules, not narrow openings, so don\'t read them as chokes.',
   },
   {

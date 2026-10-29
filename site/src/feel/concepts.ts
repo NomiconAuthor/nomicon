@@ -59,7 +59,7 @@ export const CONCEPTS: FConcept[] = [
     body: [
       'Designers think in "how high" and "how long", not in gravity. Choose the jump height h and the time to the top t, and the physics follows: gravity g = 2h ÷ t² and take-off speed v = 2h ÷ t. Change the height and the jump still takes the same time; change the time and it still reaches the same height. Tuning raw gravity and jump speed instead changes both at once.',
       'Real jumps in games are rarely symmetrical. Heavier gravity on the way down (1.5 to 3 times) makes the jump feel snappy instead of floaty, and shortens the time spent drifting. A fall-speed cap keeps long drops readable. Lighter gravity right at the top while jump is held (apex hang) gives the player a moment to line up a landing.',
-      'Integrate it carefully: with a fixed time step and the average of the old and new velocity for the position, a jump reaches exactly the height you set. The simplest update (add gravity to the velocity, then move by the velocity) undershoots by a little every jump.',
+      'Integrate it carefully: with a fixed time step and the average of the old and new velocity for the position, a jump with constant gravity reaches exactly the height you set (apex hang, on purpose, takes it a little higher). The simplest update (add gravity to the velocity, then move by the velocity) undershoots by a little every jump.',
     ],
     look: 'the dashed path of the last jump: symmetrical with fall gravity at ×1, a steeper drop as it rises.',
     tries: [

@@ -118,7 +118,7 @@ Task update_party(Party& p) {
 }
 ```
 
-A suspended coroutine holds only the locals live across the suspension, often tens or hundreds of bytes, so a hundred thousand waiting jobs are affordable. Every pause is a visible `co_await`, so thread-local storage and locks are safe everywhere else. The price is **colouring**: only a coroutine can suspend, so if the wait is three calls deep, every function on the way must become a coroutine too. Fibers suspend from anywhere, which makes them easier to retrofit.
+A suspended coroutine holds only its frame: the parameters, the promise and the locals live across the suspension, typically a few hundred bytes to a kilobyte, so a hundred thousand waiting jobs are affordable. Every pause is a visible `co_await`, so thread-local storage and locks are safe everywhere else. The price is **colouring**: only a coroutine can suspend, so if the wait is three calls deep, every function on the way must become a coroutine too. Fibers suspend from anywhere, which makes them easier to retrofit.
 
 <Tip kind="note" title="What the compiler does, and what it leaves to you">
 A function containing `co_await` is compiled into a state machine. Its locals live in a heap-allocated frame (which the compiler can sometimes place in the caller's frame instead), and `co_await` saves the resume point and returns to whoever resumed it. The language supplies only that mechanism: the task type, the awaitable counter and the hand-off to the worker pool are yours to write, or to take from a library.

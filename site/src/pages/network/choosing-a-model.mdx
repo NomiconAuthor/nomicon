@@ -11,9 +11,9 @@ The previous lessons each fixed one problem. Real games pick a combination, and 
 
 ## Start here
 
-1. **How many things does the simulation have?** If it's thousands of units, as in a strategy game, sending their state is out of the question: send inputs, with **lockstep**. If it's dozens of players and a few hundred objects, state is affordable.
+1. **How many things does the simulation have?** If it's thousands of units, as in a strategy game, sending all their state is expensive, so most strategy games send inputs instead, with **lockstep**. If it's dozens of players and a few hundred objects, state is affordable.
 2. **How much does input delay hurt?** In a strategy game, a few hundred milliseconds between a click and a response is acceptable, and lockstep's delay costs nothing. In a fighting game every frame matters: **rollback**. In a shooter your own movement must respond at once: **prediction**.
-3. **Who must you not trust?** Peer-to-peer models trust every machine with the whole game state, which makes cheating easy (a modified client can see through fog of war, or reveal the other player's hand). An **authoritative server** keeps the truth to itself and only tells each client what it needs.
+3. **Who must you not trust?** Peer-to-peer models trust every machine with the whole game state, which makes cheating easy (a modified client can see through fog of war, or reveal the other player's hand). An **authoritative server** keeps the truth to itself and can choose what each client is told.
 4. **How many players, and how far apart?** Lockstep and rollback get harder with each extra player and each extra millisecond: everyone waits for, or rolls back to, the slowest connection. A server-based game copes with one player on a bad connection without hurting the others.
 
 ## The usual combinations

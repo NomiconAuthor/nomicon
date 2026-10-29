@@ -883,7 +883,7 @@ export class TacticsApp {
         this.heat(this.over, (i) => Math.sqrt(tr[i] / mx), '--walker');
         this.over.draw(ctx, cs);
         stats.push(['480', 'sampled routes'], ['40', 'Dijkstra searches'], [`${Math.round(tr[t.unit.y * t.w + t.unit.x] * 100)}%`, 'of routes pass the unit']);
-        info = 'Shortest routes between 480 random pairs of walkable points, overlaid. Bright cells are on many of them. A narrow place that lots of routes use is a real choke; a narrow alley that nothing passes through is just an alley. This is a sampled estimate of betweenness centrality from graph theory.';
+        info = 'Shortest routes between 480 random pairs of walkable points, overlaid. Bright cells are on many of them. A narrow place that lots of routes use is a real choke; a narrow alley that nothing passes through is just an alley. This is a rough sampled betweenness centrality from graph theory.';
         legend.push(this.key('--walker', 'on many shortest routes'));
         break;
       }

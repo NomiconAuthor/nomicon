@@ -32,7 +32,7 @@ Floating-point addition isn't associative. `(a + b) + c` and `a + (b + c)` round
 
 <EngineWidget kind="floatorder" />
 
-Every row adds exactly the same 10,000 numbers. Only the order differs, and with values spanning many magnitudes, small ones get rounded away differently each time. The random-order button is what a parallel reduction looks like when partial sums are combined in whatever order threads finish: a different answer on most runs.
+Every row adds exactly the same 10,000 numbers. Only the order differs, and with values spanning many magnitudes, small ones get rounded away differently each time. The random-order button is what a parallel reduction looks like when work is handed out dynamically and partial sums are combined in whatever order threads finish: a different answer on most runs.
 
 Order is the big one, but not the only one:
 
@@ -85,7 +85,7 @@ inline uint32_t sim_range(uint64_t r, uint32_t n) { return (uint32_t)(((r >> 32)
 uint32_t loot = sim_range(sim_rand(world.seed, e.id, tick, Purpose::Loot), 100);
 ```
 
-So "per thread or per process?" is the wrong axis. Streams should be **per question**: keyed by what is being decided, not by who is running the code. Where a stateful generator is more convenient (a system that draws many numbers in sequence), give it its own generator seeded from `sim_rand(seed, system_id, tick, 0)` at the start of the tick and only use it from that system, in a fixed order.
+So "per thread or per process?" is the wrong axis. Streams should be **per question**: keyed by what is being decided, not by who is running the code. Where a stateful generator is more convenient (a system that draws many numbers in sequence), give it its own generator seeded from `sim_rand(seed, system_id, tick, Purpose::SystemStream)` (a purpose no per-entity draw uses) at the start of the tick and only use it from that system, in a fixed order.
 
 <Tip kind="warn" title="The standard library will betray you">
 `std::mt19937` itself is fully specified, but `std::uniform_int_distribution`, `std::uniform_real_distribution` and `std::normal_distribution` are not: libstdc++, libc++ and MSVC produce different numbers from the same engine. Do the range reduction yourself. `rand()` differs between platforms entirely.

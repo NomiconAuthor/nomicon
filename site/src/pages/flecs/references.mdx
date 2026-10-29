@@ -16,7 +16,7 @@ From the [archetypes lesson](/flecs/archetypes/) you already know the three thin
 2. **Another entity leaves its table.** Deleting or moving a neighbour swaps the table's last row into the hole. If that last row was yours, your entity's row index changed.
 3. **The table grows.** Tables allocate room for a number of rows. When one more entity arrives than fits, every column is reallocated to a bigger block, and **every** reference into that table dangles, even for entities nobody touched.
 
-The third one is the nasty one. Your code holds `Position& p` for Ship, some unrelated system spawns a few entities with the same components, and `p` now points at freed memory.
+The third one is the nasty one. Your code holds `Position& p` for Ship, some unrelated system spawns a few entities with the same components, and `p` now (usually) points at freed memory.
 
 ## Watch a reference go bad
 

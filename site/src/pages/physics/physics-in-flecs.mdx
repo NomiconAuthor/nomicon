@@ -88,7 +88,7 @@ world.system<PhysicsWorld>("PhysicsStep")
 world.system<Position, Rotation, const BodyHandle>("ReadTransforms")
     .kind(flecs::PostUpdate)
     .each([&](Position& p, Rotation& r, const BodyHandle& h) {
-        if (!physics.is_awake(h.id)) return;       // a sleeping body hasn't moved
+        if (!physics.is_awake(h.id)) return;       // asleep: nothing new (but see fellAsleep below)
         physics.get_transform(h.id, p, r);
     });
 ```
@@ -97,7 +97,7 @@ world.system<Position, Rotation, const BodyHandle>("ReadTransforms")
 
 Watch **transforms copied to flecs last frame** as the bodies settle: once everything is asleep it drops to zero, and the integration costs almost nothing. Real engines make this cheaper still by telling you what moved instead of making you ask each body:
 
-- **Box3D** returns **body move events** from `b3World_GetBodyEvents`: the body, its new transform, its user data (put the entity id there), and whether it fell asleep this step.
+- **Box3D** returns **body move events** from `b3World_GetBodyEvents`: the body, its new transform, its user data (put the entity id there), and whether it fell asleep this step, so you still get the final transform of a body that stopped this step, which the `is_awake` check above skips.
 - **Jolt** gives you the list of active bodies with `GetActiveBodies`.
 
 Either way, the post-step system walks a list of moved bodies and writes into the entities they belong to, instead of iterating every entity with a body.

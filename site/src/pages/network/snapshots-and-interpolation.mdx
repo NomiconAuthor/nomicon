@@ -8,7 +8,7 @@ summary: 'Drawing other players from a server that sends the world a few times a
 import NetWidget from '../../components/NetWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
-The server owns the world: it's **authoritative**. Clients send inputs; the server simulates and sends back **snapshots** of the state. Sending one every tick is wasteful (and [jitter](/network/the-problem/) scrambles them anyway), so servers send fewer, typically 10 to 60 a second, and each client has to draw something smooth for every frame in between.
+The server owns the world: it's **authoritative**. Clients send inputs; the server simulates and sends back **snapshots** of the state. Sending one every tick is wasteful (and [jitter](/network/the-problem/) scrambles them anyway), so servers send fewer, typically 10 to 60 a second (competitive shooters go to 64 or even 128), and each client has to draw something smooth for every frame in between.
 
 This lesson is about other players: things you see but don't control. Your own player is the [next lesson](/network/prediction-and-reconciliation/).
 

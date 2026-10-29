@@ -22,7 +22,7 @@ There are three basic questions:
 
 Drag the ends. As a **Ray**, the cast slips between shapes; as a **Circle** it stops at the first gap too narrow for it. A shape cast against a polygon is a ray cast against the polygon grown by the circle's radius: each edge pushed out, and a circle at every corner. That's the idea behind every capsule sweep, and it's why sweeps cost more than rays.
 
-Queries take the same filters as contacts, so a sight-line ray can ignore glass and foliage while a bullet ray hits it. Some engines add per-hit callbacks that mark a hit as "touch" (record it and keep going) or "block" (stop here), which is how a single ray returns every window it passed through and the wall that stopped it.
+Queries are filtered by the same layers or categories as contacts, with a mask chosen per query, so a sight-line ray can ignore glass and foliage while a bullet ray hits it. (PhysX gives each shape separate filter data for queries and for simulation.) Some engines add per-hit callbacks that mark a hit as "touch" (record it and keep going) or "block" (stop here), which is how a single ray returns every window it passed through and the wall that stopped it.
 
 ## Two kinds of character
 
@@ -50,7 +50,7 @@ A mover does exactly what the code says, which is what a player character needs:
 
 ## Takeaways
 
-- **Ray casts, shape casts and overlaps** answer questions without changing the world; they share the contact filters.
+- **Ray casts, shape casts and overlaps** answer questions without changing the world; they filter by the same layers as contacts.
 - A **shape cast** is a ray against shapes grown by the cast shape: it finds gaps a body can actually fit through.
 - A **kinematic mover** collides and slides with queries, **steps up**, enforces a **slope limit**, **snaps** to the ground and pushes with a **capped** impulse.
 - A **rigid-body character** reacts to everything, including what you didn't want.

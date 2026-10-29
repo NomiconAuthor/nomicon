@@ -31,7 +31,7 @@ Many games don't recompute influence from scratch. Each update, every cell takes
 
 ## Threat: where can they hit me?
 
-Influence answers "whose area is this"; it doesn't say where an arrow can reach. For that, the **threat map**: for each enemy, every walkable cell within bow range (here 36 m) that it can see a standing body in, weighted to fall off with distance. It's the [exposure layer](/tactics-lab/) from the cover lessons, computed for every known enemy at once and kept up to date. Show **Threat to the knights**: the goblins' fans are sightlines down the streets, and the gaps between them are where the knights can move unseen.
+Influence answers "whose area is this"; it doesn't say where an arrow can reach. For that, the **threat map**: for each enemy, every walkable cell within bow range (here 36 m) that it can see a standing body in, weighted to fall off with distance. It's the [tactics lab's exposure layer](/tactics-lab/), computed for every known enemy at once and kept up to date. Show **Threat to the knights**: the goblins' fans are sightlines down the streets, and the gaps between them are where the knights can move unseen.
 
 Then add what we don't know. Two goblins are in sight now; four were last seen a while ago. Where are they now? Anywhere they could have walked since: a ring of radius *speed × age* (here 1.5 m/s), measured by walking distance. The map spreads each one's threat over a dozen possible positions inside that ring, and scales it by how sure we still are, falling off as *e*<sup>−age/30 s</sup>. Change **Unseen enemies last seen**:
 

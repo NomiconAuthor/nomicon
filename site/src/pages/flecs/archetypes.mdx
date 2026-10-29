@@ -38,7 +38,7 @@ Row indices are an implementation detail that changes whenever any entity in the
 
 ## What this means for your code
 
-**New tables are a one-off cost, moves are the running cost.** A table is created once per unique type and then reused, but every cached query and system is told about it (you'll see that in [the caching lesson](/flecs/query-caching/)). Games settle into a fixed set of tables quickly. What keeps costing time is moving entities between them.
+**New tables are a one-off cost, moves are the running cost.** A table is created once per unique type and then reused, but every cached query and system that could match it is told about it (you'll see that in [the caching lesson](/flecs/query-caching/)). Games settle into a fixed set of tables quickly. What keeps costing time is moving entities between them.
 
 **Don't flip a tag every frame to mean "this frame".** Each add or remove of a tag moves the entity, copying all of its components. For state that changes constantly, a field inside a component (or a `DontFragment` or `CanToggle` component, see [choosing storage](/flecs/storage-traits/)) avoids the moves. Tags work well for state that changes rarely and that you query for often, because queries then skip whole tables.
 

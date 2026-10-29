@@ -46,7 +46,7 @@ With 5% loss, about 5% of frames have nothing new. With 20%, it's **18.5%**, and
 Games don't resend lost state, because by the time a resend could arrive there's a newer state anyway. They send **redundantly** instead: each input packet also carries the last few inputs, so one lost packet costs nothing. The [prediction lesson](/network/prediction-and-reconciliation/) does exactly that.
 
 <Tip title="Measure in round trips and ticks">
-Most networking choices come down to comparing a few times: the round trip, the tick, how often state is sent, and how much jitter there is. Write them down for the connections you care about, say a 30 ms round trip across a country and 150 ms across an ocean, before choosing a model. A design that's fine at one is often hopeless at the other.
+Most networking choices come down to comparing a few times: the round trip, the tick, how often state is sent, and how much jitter there is. Write them down for the connections you care about, say a 30 ms round trip within a region and 150 ms across the Pacific, before choosing a model. A design that's fine at one is often hopeless at the other.
 </Tip>
 
 ## Bandwidth

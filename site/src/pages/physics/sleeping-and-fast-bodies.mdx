@@ -45,7 +45,7 @@ There are two ways to fix it, and engines use both.
 
 ## Speculative contacts
 
-A **speculative contact** is a contact point between bodies that aren't touching yet but might touch this step. This page's engine keeps contacts out to a margin that grows with the bodies' relative speed (the idea as Erin Catto first described it), and the solver allows the bodies to approach by exactly the gap and no more: the constraint is "don't close more than the separation this step", which only bites if they'd otherwise pass through each other.
+A **speculative contact** is a contact point between bodies that aren't touching yet but might touch this step. This page's engine keeps contacts out to a margin that grows with the bodies' relative speed (the idea in its original form), and the solver allows the bodies to approach by exactly the gap and no more: the constraint is "don't close more than the separation this step", which only bites if they'd otherwise pass through each other.
 
 It's cheap, it works for every pair (dynamic against dynamic too), and it fits into the normal solver. Its weakness is that the contact normal is guessed from the bodies' current positions, so a fast body passing close to a corner can be stopped or deflected by a contact that, in the true continuous motion, it would have missed. Real engines mostly use speculative contacts with a small *fixed* margin (a couple of centimetres), so resting contacts don't flicker on and off. A margin that small doesn't stop tunnelling, which is why they also have sweeps.
 

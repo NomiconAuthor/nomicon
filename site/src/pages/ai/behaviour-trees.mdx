@@ -8,7 +8,7 @@ summary: 'Why state machines tangle as they grow, and the behaviour tree that re
 import AiWidget from '../../components/AiWidget.astro';
 import Tip from '../../components/lesson/Tip.astro';
 
-Utility AI answers "what's the best thing to do?" by scoring everything. A **behaviour tree** answers "what should I do?" by walking a structure a designer wrote, in priority order. It's the most widely used decision structure in games, and the reason is visible below: you can read it.
+Utility AI answers "what's the best thing to do?" by scoring everything. A **behaviour tree** answers "what should I do?" by walking a structure a designer wrote, in priority order. It's the most widely used structure for character AI in larger games, and the reason is visible below: you can read it.
 
 ## Before trees: state machines
 
@@ -124,7 +124,7 @@ The tree's structure is the same for every agent of a type, so build it once. Pe
 
 That's why hybrids are common: a **utility selector** node that scores its children instead of trying them in order, keeping the tree for structure and sequences and the curves for choosing between options. [Choosing an architecture](/ai/choosing-an-architecture/), after the two planning lessons, comes back to this.
 
-Trees came to wide attention through *Halo 2*'s AI and are now built into Unreal and most other engines. They suit anything with prioritised, step-by-step behaviour, not only combat: a shopkeeper's daily routine, a boss's attack phases, a companion keeping up with the player.
+Trees came to wide attention through *Halo 2*'s AI and are now built into Unreal and available as packages or plugins for most other engines. They suit anything with prioritised, step-by-step behaviour, not only combat: a shopkeeper's daily routine, a boss's attack phases, a companion keeping up with the player.
 
 ## Takeaways
 

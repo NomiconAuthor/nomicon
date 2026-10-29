@@ -43,7 +43,7 @@ apply(a, b, p.rA, p.rB, (new_t - p.tangent_impulse) * tangent);
 p.tangent_impulse = new_t;
 ```
 
-**Friction** uses the same machinery along the contact's tangent, but its limit depends on the normal impulse: Coulomb friction can resist up to *μ* times the push. That couples them. This engine, like Box2D v3, solves the normal first and then friction against the current normal impulse, every pass; some engines (Jolt, Box2D v2) solve friction first, so that non-penetration, solved last, wins.
+**Friction** uses the same machinery along the contact's tangent, but its limit depends on the normal impulse: Coulomb friction can resist up to *μ* times the push. That couples them. This engine, like Box2D 3.0, solves the normal first and then friction against the current normal impulse, every pass; some engines (Jolt, Box2D v2) solve friction first, so that non-penetration, solved last, wins. (Box2D 3.2 and Box3D leave friction out of the soft pass and solve it only in the relax pass.)
 
 ## Warm starting
 
@@ -70,7 +70,7 @@ Engines have found three ways round that:
    3. **Solve** contacts and joints once, with **soft** constraints: overlap is pushed out by the damped spring, capped at a maximum push-out speed.
    4. Integrate positions. Each contact's separation is updated from how far its two anchors have moved, without re-running collision.
    5. **Relax**: solve once more *without* the bias, which removes the velocity the spring added.
-3. Apply **restitution** once at the end, from the approach speed measured before solving, so bounces don't depend on the substep count.
+3. Apply **restitution** at the end (Box2D 3.2 makes two passes), from the approach speed measured before solving, so bounces don't depend on the substep count.
 
 Substeps beat iterations because each one also moves the bodies, so the solver sees the stack respond to its pushes. The relax pass is what keeps the soft spring from adding energy. The engine on this page follows those steps.
 

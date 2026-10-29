@@ -15,7 +15,7 @@ Role-playing games split a party into three jobs. The **tank** keeps the enemy's
 Five heroes against an **orc warchief**. The tank is a shield knight. The cleric heals. A knight, a crossbow knight and a battle-mage deal the damage. The warchief swings at whoever it's targeting, and every few seconds it does something bigger:
 
 - **Cleave**: a cone in front of it, telegraphed for 1.5 s.
-- **Ground slam**: a circle under a random party member, telegraphed for 2 s.
+- **Ground slam**: a circle under a random party member other than the tank, telegraphed for 2 s.
 - **War cry**: a little damage to everyone. Nothing to dodge; it keeps the cleric busy.
 - **Shove**: knocks its target back and halves that member's threat.
 - At half health it calls **two goblin archers**.
@@ -80,7 +80,7 @@ float efficiency = sq(effective / spell.heal);              // 1 = no overheal
 return need * danger * role_weight * efficiency * spell_cost_weight;
 ```
 
-- **Incoming damage** is a three-second moving average per member. It has a floor of 80 damage per second, because war cries and arrows come in bursts that a moving average doesn't see coming.
+- **Incoming damage** is an exponential moving average per member, with a three-second time constant. It has a floor of 80 damage per second, because war cries and arrows come in bursts that a moving average doesn't see coming.
 - **The role weight** puts the tank first (×1.3) and the cleric itself next (×1.15).
 - **Cast time against time to death** picks the spell: if the big heal might land too late, the quick one scores higher, even though it costs nearly twice the mana per point.
 - **Efficiency** squared punishes overheal, so the cleric waits for a heal's worth of damage rather than topping people up.
@@ -124,7 +124,7 @@ An ordered list where the first match wins is a [behaviour tree](/ai/behaviour-t
 ## In an ECS
 
 - **The threat table** is a component on the boss: a short array of (member entity, threat) pairs. Every enemy gets one, and party members never write it directly.
-- **A relationship** `(Threat, member)` with a value would let you ask "who has me on their table?" with one query. But every member is a new [pair](/flecs/relationships/), so every boss's set of targets is its own table, and threat changes every tick. An entity id inside a component does the job here; prefer it.
+- **A relationship** `(Threat, member)` with a value would let you ask "who has me on their table?" with one query. But every member is a new [pair](/flecs/relationships/), so every boss's set of targets is its own table, and each member that joins the fight, dies or is wiped from the table moves the boss to another one. An entity id inside a component does the job here; prefer it.
 - **Damage and healing are events.** One system applies them to health, and a threat system adds them to the tables (healing spread over every enemy in the fight). Taunt is an event too.
 - **Target selection** is a system over enemies with a threat table, at the decision rate rather than every frame.
 - **Role brains** are systems over `Tank`, `Healer` and `Damage` tags. The healer's system reads health, a smoothed `IncomingDamage` and mana, and writes a `Cast`.

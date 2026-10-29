@@ -10,7 +10,7 @@ import Tip from '../../components/lesson/Tip.astro';
 
 GOAP gives the planner a pile of actions and a goal, and lets a search find any sequence that works. That's powerful, and it's also why designers find it hard to direct: you can't tell a GOAP agent *how* to do something, only what the actions do. A **hierarchical task network** (HTN) planner turns that around. Designers write the *how* as recipes, and the planner's job is only to pick a recipe that will actually work from here, looking ahead before committing to it.
 
-HTN planning dates from 1970s planning research. Games copied the total-order, forward-decomposition style of Nau's SHOP planners (SHOP in 1999, SHOP2 in 2003), because it plans like GOAP but keeps the authoring control of a behaviour tree. *Killzone 2*'s bots, *Transformers: Fall of Cybertron* and *Horizon Zero Dawn* all shipped with HTN planners.
+HTN planning dates from 1970s planning research. Games copied the forward-decomposition style of Nau's SHOP planners (SHOP in 1999, SHOP2 in 2003), usually in its simplest, totally ordered form, because it plans like GOAP but keeps the authoring control of a behaviour tree. *Killzone 2*'s bots, *Transformers: Fall of Cybertron* and *Horizon Zero Dawn* all shipped with HTN planners.
 
 ## Tasks, methods and the domain
 
@@ -87,7 +87,7 @@ In a shipping planner you'd avoid copying the task list on every method (keep a 
 
 ## Priorities and interruptions
 
-The planner records which method it took at each compound task: the **method traversal record** (MTR). The default plan's is *BeABattleMage: Fight (2) › Fight: Recharge in cover (2) › CloseIn: Walk up (2)*, or just 2, 2, 2.
+The planner records which method it took at each compound task: the **method traversal record** (MTR). The default plan's is *BeABattleMage: Fight (2) › Fight: Recharge in cover (2) › CloseIn: Walk up (2)*, or just 2, 2, 2 (counting from 1; the code above stores 0-based indices, so 1, 1, 1).
 
 Because methods are in priority order, MTRs compare like version numbers: a plan with a smaller MTR came from higher-priority methods. That gives an HTN agent a cheap way to change its mind without a separate goal picker:
 

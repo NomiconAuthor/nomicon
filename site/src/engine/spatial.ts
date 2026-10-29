@@ -681,7 +681,7 @@ export class SpatialLab {
           'Each frame',
           [
             ['rebuild', 'Rebuild'],
-            ['refit', 'Refit (rebuild every 10 s)'],
+            ['refit', 'Refit (rebuild every 600 frames)'],
           ],
           this.refit ? 'refit' : 'rebuild',
           (v) => ((this.refit = v === 'refit'), this.rebuild()),
@@ -814,7 +814,7 @@ export class SpatialLab {
     this.stats.replaceChildren(...kids);
     this.note.textContent =
       this.task === 'query'
-        ? 'Move the pointer over the field, or drag on a touch screen (scroll to resize the circle). Shaded boxes: what the structure visited. Yellow: objects it had to test. Green: actually in range. Ringed in red: tested even though they\'re nowhere near, because the structure keeps them in a big node the query overlaps (in a quadtree, objects stuck on a split line, held by the root or another large node).'
+        ? 'Move the pointer over the field, or drag on a touch screen (scroll to resize the circle). Shaded boxes: what the structure visited. Yellow: objects it had to test. Green: actually in range. Ringed in red: tested even though they\'re nowhere near, because the structure lumped them in with the query\'s area (in a quadtree, objects stuck on a split line and held by a large node; in sweep and prune, everything in the query\'s vertical strip).'
         : 'Red: objects that overlap something. Yellow: objects that were tested but overlap nothing. The fewer yellow, the less wasted work.';
   }
 }

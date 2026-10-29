@@ -53,7 +53,7 @@ The textbook says plain VO oscillates and RVO fixes it, but in this widget VO is
 
 ## In engines
 
-Detour's crowd (part of Recast) samples velocities adaptively: a coarse ring of candidates, then finer rings round the best one, with the navmesh's nearby boundary edges as obstacles alongside the agents. RVO2 implements ORCA, including static obstacles as extra half-planes. Unreal offers both an RVO-style avoidance on character movement and a Detour-based crowd manager; Unity's navmesh agents also use a velocity-obstacle style of avoidance.
+Detour's crowd (part of Recast) samples velocities adaptively, scoring each with RVO's reciprocal test: a coarse ring of candidates, then finer rings round the best one, with the navmesh's nearby boundary edges as obstacles alongside the agents. RVO2 implements ORCA, including static obstacles as extra half-planes. Unreal offers both an RVO-style avoidance on character movement and a Detour-based crowd manager; Unity's navmesh agents also use a velocity-obstacle style of avoidance.
 
 <Tip kind="warn" title="Avoidance doesn't replace pathfinding">
 Local avoidance only looks a second or two ahead and only knows about nearby agents. It can't get anyone out of a dead end or round a long wall; it keeps agents from colliding while they follow paths. Crowds also need a little randomness to break symmetry: in a perfectly symmetric head-on meeting, both agents can choose to sidestep the same way forever. Every method here adds a tiny random turn to the preferred velocity, as RVO2's own examples do.

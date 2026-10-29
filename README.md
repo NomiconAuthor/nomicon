@@ -100,7 +100,7 @@ The site is static files only; the server has no Node.
 | `components/EngineWidget.astro`, `AiWidget.astro`, `TacticsWidget.astro` | Custom elements that lazy-load a widget by `kind` (`data-kind`, plus `data-preset` JSON for options such as `scenario="simple"`). AI pages also load `engine.css` and `ai.css`. |
 | `components/Flecs*.astro` | `FlecsDebugger` (step-through storage debugger), `FlecsQuery` (query playground), `FlecsBench` (benchmarks in a Web Worker), `FlecsScript` (script playground), `FlecsNet` (two worlds as server and client). |
 | `components/lesson/Tip.astro`, `TryIt.astro` | Callouts; "Try it in the sandbox" links (`/flecs/sandbox/?preset=...`). |
-| `pages/search-index.json.ts`, `components/Search.astro` | Search index: every lesson split at `##` headings plus both labs' concept cards (anchors via github-slugger, like Astro's heading ids). |
+| `pages/search-index.json.ts`, `components/Search.astro` | Search index: every lesson split at `##` headings plus the three labs' concept cards (anchors via github-slugger, like Astro's heading ids). |
 | `pages/sitemap.xml.ts`, `pages/robots.txt.ts` | Built from the lesson files and `site:` in the config; redirect pages are left out. |
 | `lab/ui/share.ts` | Shareable lab links: state → JSON → deflate-raw → base64url in `#s=`. |
 | `engine/dom.ts` | `h()` and `seg()` helpers and the shared `.ll*` widget styles used across sections. |
@@ -129,7 +129,7 @@ Widget kinds and what they model:
 - Variants may replace `systems` (the `syncPoints` scenario adds `[out] Burning()`); `debugger-check.ts` asserts where its merge lands in each variant.
 - `sandbox/sandbox.ts`: define components (column, Sparse, DontFragment), create entities, add observers and systems, run frames; shows tables with FLIP-animated row moves, sparse sets, observer counters and a per-action log. Presets via `?preset=basics|fragmentation|traits|empty`. **Share** records the preset plus every action since (an `Op` list), packs it into `#s=` with `lab/ui/share.ts`, and replays it quietly on load, so the tables, rows and observer counts come back exactly.
 
-Lessons in order: entities, archetypes, references, relationships, prefabs, query-language, query-caching, systems, commands, sync-points-and-threads, command-merging, observers, deleting, fragmentation, storage-traits, spatial-data, reflection-and-scripts, networking, thinking-in-flecs. "Where to learn more" is a section of the flecs index (`components/lesson/FlecsLearnMore.mdx`); `/flecs/learn-more/` redirects there.
+Lessons in order: entities, archetypes, references, relationships, prefabs, query-language, query-caching, systems, commands, sync-points-and-threads, command-merging, observers, deleting, fragmentation, storage-traits, spatial-data, reflection-and-scripts, thinking-in-flecs. "Where to learn more" is a section of the flecs index (`components/lesson/FlecsLearnMore.mdx`); `/flecs/learn-more/` redirects there.
 
 #### Building flecs.wasm (`flecs-wasm/`)
 - Source: flecs **master**, amalgamated `distr/flecs.c/.h` (currently commit 75fa09f, 23 Oct 2026, built without `FLECS_DEBUG`, so asserts are compiled out). The commit is also set in `src/flecs/version.ts`, which every flecs lesson shows at the bottom; update both together. When upgrading, rebuild, run `npm test`, and diff every debugger scenario's trace between the old and new builds: that's what shows whether a lesson's description of what happens has changed.

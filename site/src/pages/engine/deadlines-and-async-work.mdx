@@ -27,7 +27,7 @@ The last two combine well, and that's the pattern most deterministic engines end
 
 ## Budgets: work, not milliseconds
 
-A work budget doesn't need a worker thread at all. The simulation can **time-slice** a long job itself: keep the search state (an open list, a partial plan) in the simulation, expand exactly N nodes per tick, and finish when it finishes. No threads, no stalls, fully deterministic, at the cost of using the simulation thread's time. Incremental pathfinders like the ones in the [pathing lab](/pathing-lab/) are a natural fit, because their state is already a resumable open list.
+A work budget doesn't need a worker thread at all. The simulation can **time-slice** a long job itself: keep the search state (an open list, a partial plan) in the simulation, expand exactly N nodes per tick, and finish when it finishes. No threads, no stalls, fully deterministic, at the cost of using the simulation thread's time. Searches like the A* in the [pathing lab](/pathing-lab/), which you can watch one expansion at a time, are a natural fit, because their state is already a resumable open list.
 
 Work units should track cost roughly, so a budget of N means about the same time on every request: nodes expanded rather than requests completed. A request that is ten times bigger then takes ten times as many ticks, on every machine.
 
