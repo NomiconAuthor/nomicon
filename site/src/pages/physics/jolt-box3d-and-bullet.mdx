@@ -102,7 +102,7 @@ All three run single-threaded on this page.
 ## Determinism and replay
 
 - **Jolt** is deterministic on one platform if you make the same API calls in the same order. Cross-platform determinism is a build option, `CROSS_PLATFORM_DETERMINISTIC`, off by default and about 8% slower. `SaveState` and `RestoreState` snapshot what the step changes, which is enough for rollback networking as long as the game handles bodies added or removed between snapshots.
-- **Box3D** lists cross-platform determinism as a feature, along with **recording and replay**: record every API call into a buffer, then play it back frame by frame or seek to a frame, and validate that a replay reproduces the recording. Like Box2D, though, it doesn't offer rollback determinism: there's no public way to restore a past world state and resume with identical results (the snapshot that seeds a recording is internal for now). Its determinism suits lockstep networking and reproducing bugs.
+- **Box3D** lists cross-platform determinism as a feature, along with **recording and replay**: record every API call into a buffer, then play it back frame by frame or seek to a frame, and validate that a replay reproduces the recording. It doesn't offer rollback determinism yet, though: there's no public way to restore a past world state and resume with identical results (the snapshot that seeds a recording is internal for now; Box2D 3.2 made its own public, as an experimental API). Its determinism suits lockstep networking and reproducing bugs.
 - **Bullet** makes no cross-platform promise. It's repeatable on one machine for the same calls in the same order, which is what most tools and robotics uses needed.
 
 ## Characters

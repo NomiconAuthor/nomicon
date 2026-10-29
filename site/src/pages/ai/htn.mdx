@@ -87,7 +87,7 @@ In a shipping planner you'd avoid copying the task list on every method (keep a 
 
 ## Priorities and interruptions
 
-The planner records which method it took at each compound task: the **method traversal record** (MTR). The default plan's is *BeABattleMage: Fight (2) › Fight: Recharge in cover (2) › CloseIn: Walk up (2)*, or just 2, 2, 2 (counting from 1; the code above stores 0-based indices, so 1, 1, 1).
+The planner records which method it took at each compound task: the **method traversal record** (MTR). The default plan's is *BeABattleMage: Fight (2) › Fight: Recharge in cover (2) › CloseIn: Walk up (2)*, or just 2, 2, 2 (stored 0-based by the code above, as 1, 1, 1).
 
 Because methods are in priority order, MTRs compare like version numbers: a plan with a smaller MTR came from higher-priority methods. That gives an HTN agent a cheap way to change its mind without a separate goal picker:
 

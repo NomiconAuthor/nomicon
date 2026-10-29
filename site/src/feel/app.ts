@@ -347,8 +347,9 @@ export class FeelApp {
     if (ev.eaten) this.counts.eaten++;
     if (ev.cornered) this.counts.corner++;
     if (ev.cut) this.counts.cut++;
-    // Shake scales with how far the player fell: nothing for an ordinary jump, a lot for the shaft.
-    if (ev.drop !== undefined && this.s.shake && ev.drop > 4) this.cam.trauma = Math.min(1, this.cam.trauma + (ev.drop - 4) / 8);
+    // Shake scales with how far the player fell beyond a normal jump: nothing for an ordinary jump, a lot for the shaft.
+    const fell = ev.drop === undefined ? 0 : ev.drop - this.s.jumpHeight - 1;
+    if (this.s.shake && fell > 0) this.cam.trauma = Math.min(1, this.cam.trauma + fell / 8);
     if (!p.grounded || ev.landed) {
       this.trail.push({ x: p.x, y: p.y });
       if (this.trail.length > 240) this.trail.shift();

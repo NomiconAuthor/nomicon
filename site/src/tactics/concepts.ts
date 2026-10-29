@@ -138,7 +138,7 @@ export const CONCEPTS: TConcept[] = [
     layer: 'cover',
     body: [
       'This is how cover is usually generated from a navmesh, and it works the same way from building footprints. Five steps, each visible in playback:',
-      '1. Trace the outline where walkable space meets obstacles, as chains of edges with the walkable side always on the same side. Recast already does this, and step 2 too, when it builds a navmesh: its contours are these outlines, already simplified, so with Recast you start from step 3 (keep only contour edges that face a wall, and remember they sit one agent radius out from it).',
+      '1. Trace the outline where walkable space meets obstacles, as chains of edges with the walkable side always on the same side. A Recast navmesh’s contours are these outlines, already simplified, so with Recast you skip to step 3: keep only the contour edges that face a wall, and remember they sit one agent radius out from it.',
       '2. Simplify the outlines with Douglas-Peucker, so a staircase of grid edges becomes one straight wall. The tolerance trades accuracy for fewer, longer edges: too loose and the simplified line cuts corners, which shows up later as probes that miss.',
       '3. Walk each edge at a fixed spacing (here 1 m), half a metre out on the walkable side, and cast short probes back towards the wall at crouch height and at standing height. Which ones hit decides full cover, low cover, or none (where the simplification cut a corner; from a navmesh, also edges that border a drop or water rather than a wall).',
       '4. Merge consecutive samples of the same kind into rails. A rail is what the AI reasons about: "slide along this wall to stay hidden".',

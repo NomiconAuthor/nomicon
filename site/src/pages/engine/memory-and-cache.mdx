@@ -61,7 +61,7 @@ This is why a linked list, or an array of pointers to objects scattered across t
 
 <EngineWidget kind="bench-stride" />
 
-Every run does the same four million reads; only the gap between them grows. At stride 1, sixteen consecutive reads share each cache line, so most of them are hits, and the cost per read climbs as fewer reads share a line. Past 64 bytes every read needs a line of its own, and the cost keeps rising more slowly for a while: many CPUs fetch lines in adjacent pairs, and prefetchers stop at 4 KB page boundaries, so very wide strides lose that help too. The cost tracks how many lines you touch, not how many bytes you asked for. (The reads wrap around the array, so the widest strides revisit fewer lines, and on CPUs with a very large L3 the last bars can dip.)
+Every run does the same four million reads; only the gap between them grows. At stride 1, sixteen consecutive reads share each cache line, so most of them are hits, and the cost per read climbs as fewer reads share a line. Past 64 bytes every read needs a line of its own, and the cost keeps rising more slowly for a while: many CPUs fetch lines in adjacent pairs, and prefetchers stop at 4 KB page boundaries, so very wide strides lose that help too. The cost tracks how many lines you touch, not how many bytes you asked for. (The reads wrap around the 64 MB array, so the widest strides keep revisiting a smaller set of lines, and on CPUs with a very large L3 the last bars can dip.)
 
 ## False sharing
 

@@ -546,9 +546,10 @@ function jobs(): void {
   claim(L, `With 8 workers, a perfect split would take ${int(total / 8)} µs`);
   for (const chunk of [1, 8, 64, 256]) claim(L, `| ${chunk} | ${int(pf(8, 'static', chunk))} µs | ${int(pf(8, 'queue', chunk))} µs | ${int(pf(8, 'steal', chunk))} µs |`);
   claim(L, `(${int(pf(16, 'steal', 1))} µs against the queue's ${int(pf(16, 'queue', 1))})`);
-  claim(L, `(${int(pf(8, 'queue', 64))} µs with the queue and ${int(pf(8, 'steal', 64))} µs with stealing`);
+  claim(L, `finishes at ${int(pf(8, 'queue', 64))} µs`);
+  claim(L, `the frame takes ${int(pf(8, 'steal', 64))} µs`);
   claim(L, `${pct(((total / 8) / pf(8, 'static', 64)) * 100)} efficiency, whatever the job size`);
-  claim(L, `at 64 items per job there are only ${costs.length / 64} jobs`);
+  claim(L, `At 64 items per job there are only ${costs.length / 64} jobs`);
   const serial = (() => {
     const { jobs } = frameJobs(FRAME, 'serial', 1);
     return simulate(jobs, { workers: 1, policy: 'steal' }).makespan;

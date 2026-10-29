@@ -51,7 +51,7 @@ if (a && b) {
 }
 ```
 
-The client also needs to know which server time the newest snapshot it could have received belongs to. The widget subtracts the smallest delay it has seen recently between a snapshot being sent and it arriving: jitter only ever adds delay, so the smallest is the best guess at the latency.
+The client also needs `estimated_latency()`: how old a snapshot is by the time it arrives. The widget subtracts the smallest delay it has seen recently between a snapshot being sent and it arriving: jitter only ever adds delay, so the smallest is the best guess at the latency.
 
 ## Making snapshots smaller
 

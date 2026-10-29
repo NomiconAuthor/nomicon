@@ -18,7 +18,7 @@ This is how cover is usually generated from a navmesh, and it works the same fro
 
 <TacticsWidget preset="town" layer="cover" method="walk" />
 
-1. **Trace the outline** where walkable space meets obstacles, as chains of edges with the walkable side always on the left. Recast already does steps 1 and 2 when it builds a navmesh (its *contours*, traced and then simplified), so with Recast you start at step 3. Two catches: keep only the wall edges (those with no neighbouring region), and remember that Recast shrinks the walkable area by the agent radius first, so its contours sit that far out from the wall. Place the samples on the contour and make the probes long enough to reach the wall.
+1. **Trace the outline** where walkable space meets obstacles, as chains of edges with the walkable side always on the left. Recast already does steps 1 and 2 when it builds a navmesh (its *contours*, traced and simplified), so with Recast you start at step 3. Keep only the wall edges (those with no neighbouring region), and remember that Recast's contours sit an agent radius out from the wall, so lengthen the probes to match.
 2. **Simplify** each outline with Douglas-Peucker, so staircases of grid edges become straight walls. Raise the tolerance and the lines start cutting corners, which shows up in the next step as probes that miss.
 3. **Walk each edge** at a fixed spacing, half a metre out on the walkable side, and cast two short probes back towards the wall: at crouch height and at standing height. Which ones hit decides full cover, low cover or none.
 4. **Merge samples into rails**: runs of the same kind along one edge, split wherever the outline turns a convex corner, because the cover ends there.

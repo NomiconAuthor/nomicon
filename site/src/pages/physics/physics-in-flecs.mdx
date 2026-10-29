@@ -153,7 +153,7 @@ Rendering then interpolates between the last two physics transforms, which means
 
 - **Writing `Position` for a dynamic body.** The next `ReadTransforms` overwrites it. Teleports go through the engine, then the component.
 - **Pointers in components.** A `JPH::Body*` or a `b3Body*` in a component is wrong as soon as the engine moves or frees the body. Store the id.
-- **Touching the engine from multithreaded systems.** Jolt's locking `BodyInterface` makes that safe at a cost, and its `NoLock` interface makes it fast but your problem. Box3D isn't thread-safe at all: queries can run on several threads outside the step, but anything that writes (creating, moving or waking a body) must come from one thread, and nothing may touch the world during `b3World_Step`. Keep engine calls in single-threaded systems, or batch them into the sync systems.
+- **Touching the engine from multithreaded systems.** Jolt's locking `BodyInterface` makes that safe at a cost, and its `NoLock` interface makes it fast but your problem. Box3D isn't thread-safe for writes: queries can run on several threads outside the step, but anything that writes (creating, moving or waking a body) must come from one thread, and nothing may touch the world during `b3World_Step`. Keep engine calls in single-threaded systems, or batch them into the sync systems.
 - **Handling contact callbacks immediately.** Jolt's listener runs on worker threads in the middle of the step. Buffer, then handle after the step.
 - **One table per body type.** Tags like `Dynamic` and `Static` are fine (a handful of archetypes). A tag per material, per layer and per state soon multiplies; keep rarely-queried state in the engine, not in the ECS type.
 

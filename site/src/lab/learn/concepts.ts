@@ -462,7 +462,7 @@ export const CONCEPTS: Concept[] = [
     title: 'Any-angle paths and smoothing',
     body: [
       'Grid paths zig-zag because the grid allows only 8 directions. Two fixes: smooth afterwards (skip any waypoint the unit can see past, then re-check), or search with any-angle moves directly. Theta* lets a node take its predecessor’s parent as its own whenever it can see it, so parent links stretch across open space and paths come out as a few long segments; Lazy Theta* defers the line-of-sight checks until a node is expanded and does far fewer of them.',
-      'Neither is truly shortest (that needs a visibility graph; a navmesh plus funnel is taut, but its corridor is picked with approximate costs, so it is only close too), but both are very close.',
+      'Neither is truly shortest (that needs a visibility graph; even a navmesh plus funnel is only near-shortest, because its corridor is chosen with approximate costs), but both are very close.',
     ],
     look: 'Turn on "Search tree" in the sidebar: Theta*\'s parent links stretch across open space.',
     tries: [

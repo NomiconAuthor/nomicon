@@ -637,8 +637,9 @@ export function latticeAStar(pr: VehicleProblem, table: LatticeTable, limit: num
   const heap = new MinHeap();
   const centre = (cell: number): Pose => ({ x: (cell % w) + 0.5, y: Math.floor(cell / w) + 0.5, theta: 0 });
   // The field is an 8-direction grid cost, up to OCTILE_OVER_EUCLID times the straight-line
-  // distance on open diagonals. Shrink it by that much so the heuristic never overestimates and
-  // A* stays optimal over the primitives (the shared field stays as it is for Hybrid A*).
+  // distance on open diagonals. Shrink it by that much so that, at uniform cost, the heuristic never
+  // overestimates and A* stays optimal over the primitives (with terrain it can still overestimate
+  // slightly). The shared field stays as it is for Hybrid A*.
   const hOf = (cell: number) => {
     const f = pr.field[cell];
     if (!Number.isFinite(f)) return Infinity;

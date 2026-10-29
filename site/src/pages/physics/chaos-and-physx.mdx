@@ -37,7 +37,7 @@ On the game thread, an input read at the start of a frame is simulated in that f
 | 30 Hz | 30 ms | 61 ms | 95 ms |
 | 60 Hz | 22 ms | 44 ms | 60 ms |
 
-This is a model rather than a measurement of Unreal (it ignores render latency, and real ticks overlap with frames differently), and the game-thread column uses the same fixed tick for comparison; Unreal's default, a step every frame with a variable delta, shows an input in about 18 ms in this model whatever the tick rate. But the shape holds: a decoupled fixed tick buys determinism, stable networking and a game thread free of physics work, and pays for it in input latency. Unreal's character movement, below, runs on the game thread rather than in the physics tick.
+This is a model rather than a measurement of Unreal: it ignores render latency, and real ticks overlap with frames differently. The game-thread column uses the same fixed tick for comparison; Unreal's default, one variable-length step every frame, would show an input in under 20 ms at 90 fps whatever the tick rate. But the shape holds: a decoupled fixed tick buys determinism, stable networking and a game thread free of physics work, and pays for it in input latency. Unreal's character movement, below, runs on the game thread rather than in the physics tick.
 
 ### Networked physics
 

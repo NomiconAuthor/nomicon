@@ -30,7 +30,7 @@ export const STAGES: StageInfo[] = [
   {
     id: 'compact',
     name: '4. Compact heightfield',
-    what: "Recast flips the representation: instead of solid spans it keeps the open space above every walkable span (the floor of each 'room' a unit could stand in), and links each one to its neighbours if the step between them is climbable. Multi-level places become separate spans in one column (here only the hollow boxes, whose tops sit above the floor sealed inside; the floor under the table was already filtered out). Shading: how many levels a column has.",
+    what: "Recast flips the representation: instead of solid spans it keeps the open space above every walkable span (the floor of each 'room' a unit could stand in), and links each one to its neighbours if the step between them is climbable. Multi-level places become separate spans in one column (here only the tall blocks by the gap and the two pillars, whose sealed-in floor still has headroom; the floors under the table and inside the platform were already filtered out). Shading: how many levels a column has.",
     stop: 'Stop here for a navigation graph you can search yourself: every span is a node, every link an edge, on any number of levels. Flow fields, voxel A*, reachability from a point and clearance all run directly on it.',
   },
   {

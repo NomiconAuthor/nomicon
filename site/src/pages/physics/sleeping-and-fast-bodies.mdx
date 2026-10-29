@@ -62,4 +62,4 @@ The engine on this page sweeps only circles flagged as bullets, against static s
 - **Islands** are groups of touching dynamic bodies: solved independently, put to **sleep** together.
 - Sleep makes bodies at rest **free** and **exactly still**; touching, joints or code wake them.
 - **Tunnelling** happens when a body moves further than an obstacle's thickness in one step.
-- **Speculative contacts** are cheap and general but can snag on corners; **sweeps** are exact but cost a cast, so engines save them for flagged bodies, or for sweeps against static geometry only.
+- **Speculative contacts** are cheap and general but can snag on corners; **sweeps** are exact but cost a cast, so engines limit them: to bodies you flag, or to static geometry only.

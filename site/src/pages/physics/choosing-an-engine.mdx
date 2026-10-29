@@ -26,7 +26,7 @@ That's the whole decision for most projects. The rest of this lesson is for when
 | If you need… | Look at | Notes |
 |---|---|---|
 | A ready-made player controller | Jolt, PhysX, Unreal | Jolt's `CharacterVirtual` walks stairs and sticks to floors. Box3D gives you the casts and a plane solver and leaves the controller to you. |
-| Rollback networking | Jolt, Havok | Jolt: state save and restore; cross-platform determinism is a build option. Box3D is deterministic across platforms (good for lockstep) and can replay, but it can't restore a past state, so no rollback yet. Chaos can resimulate, but only with its async fixed tick. |
+| Rollback networking | Jolt, Havok | Jolt: state save and restore; cross-platform determinism is a build option. Box3D is deterministic across platforms (good for lockstep) and can replay, but it can't restore a past state yet, so no rollback (Box2D 3.2 added that, as an experimental snapshot API). Chaos can resimulate, but only with its async fixed tick. |
 | Very large worlds | Jolt, Box3D, Chaos | All three support large worlds (double-precision positions in Jolt and Box3D, Unreal's large world coordinates in Chaos), so physics doesn't get jittery kilometres from the origin. |
 | Destruction | Chaos | The only one with fracture built into the engine itself; PhysX pairs with NVIDIA's Blast, a separate library, and Havok no longer sells a separate destruction product, though games build it on Havok Physics. Otherwise, swap an object for pre-broken pieces when it breaks. |
 | Vehicles, ragdolls, soft bodies | Jolt, PhysX | Jolt has all three built in and on the CPU; PhysX has a vehicle SDK, articulations and deformable bodies. |
