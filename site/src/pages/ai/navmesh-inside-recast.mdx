@@ -60,7 +60,8 @@ Each stage's output is a general-purpose structure, and many games use Recast's 
 | A walkable grid with heights, for clearance, cover or openness analysis | 3. Filters (or 4) | Run your own grid passes: the [tactics lab](/tactics-lab/) is one level of this |
 | A multi-level navigation graph for flow fields or voxel A* | 4. Compact heightfield | Search spans and their links |
 | Clearance for several agent sizes at once | 6. Distance field, skipping erosion | Look up "does radius *r* fit here?" per span |
-| An area graph for hierarchical planning, or choke points | 7. Regions | Find where regions meet |
+| Choke points | 6. Distance field | Run a watershed with a narrowness test over it ([terrain analysis](/ai/terrain-chokes/)); region borders aren't chokes |
+| An area graph for hierarchical planning | 7. Regions | Find where regions meet |
 | Wall outlines for cover rails | 8. Contours | The [boundary walk](/ai/cover-generation/) starts here |
 | A navmesh with your own search | 9. Polygon mesh | [Write your own planner](/ai/navmesh-detour-or-your-own/) |
 | A standard navmesh | 10. Detail mesh | Detour |
@@ -74,5 +75,5 @@ Nothing stops a bake from taking more than one thing out of the same run: the po
 - **Recast is ten stages**, from triangles through voxels to convex polygons, and each stage's output is useful on its own.
 - **The heightfield and compact heightfield** are a voxel model and a multi-level walkability graph: often all a custom analysis needs.
 - **Erosion bakes in one agent size**; the distance field keeps every size available.
-- **Regions, contours and polygons** are where clearance, chokes and cover rails come from.
+- **The distance field, contours and polygons** are where clearance, chokes and cover rails come from. Regions are for building polygons, not for finding chokes.
 - **Tiles** make it incremental: a change rebuilds only the tiles it touches.

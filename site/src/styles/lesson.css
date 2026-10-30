@@ -21,6 +21,8 @@
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 .ln-mobile {
   display: none;
@@ -108,6 +110,7 @@
   font-size: clamp(1.7rem, 3vw, 2.3rem);
   margin: 4px 0 8px;
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 .lesson .lede {
   font-size: 1.1rem;

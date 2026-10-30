@@ -119,6 +119,11 @@ html[data-theme='nomicon'] .intro h1 {
   color: #f6eeff;
   line-height: 1.2;
 }
+/* Cinzel is an all-caps face, so long lesson titles are set a step smaller than the
+   body-face themes use. */
+html[data-theme='nomicon'] .lesson h1 {
+  font-size: clamp(1.5rem, 2.6vw, 2rem);
+}
 html[data-theme='nomicon'] .lesson h1::after,
 html[data-theme='nomicon'] .intro h1::after {
   content: '';
@@ -132,14 +137,6 @@ html[data-theme='nomicon'] .intro h1::after {
 }
 html[data-theme='nomicon'] .lesson h2 {
   color: #f1e8ff;
-}
-html[data-theme='nomicon'] .lesson h2::before {
-  content: '✦';
-  color: var(--gold);
-  font-size: 0.6em;
-  vertical-align: 0.3em;
-  margin-right: 0.55em;
-  opacity: 0.85;
 }
 html[data-theme='nomicon'] .lesson .kicker,
 html[data-theme='nomicon'] .kicker,

@@ -7,6 +7,7 @@
   font-size: clamp(1.8rem, 4vw, 2.6rem);
   margin: 0 0 12px;
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 .intro p {
   color: var(--body);

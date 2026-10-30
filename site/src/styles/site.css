@@ -137,6 +137,16 @@ a {
   .site-nav .links a {
     padding: 6px 8px;
   }
+  /* Phones: search and the theme menu share the brand's row and the section links
+     take the next one, two rows instead of three. Labs put their own buttons in the
+     slot, so they keep the three-row layout where everything fits. */
+  .site-nav:not(:has(.slot > *)) nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .site-nav:not(:has(.slot > *)) .nav-end {
+    order: 2;
+  }
 }
 /* Chrome that only some themes draw: in Dusk the frame is transparent to layout. */
 .frame,
