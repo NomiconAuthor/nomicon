@@ -61,6 +61,8 @@ export interface FrameVariant {
   /** Hooks for this variant instead of the scenario's. */
   hooks?: FrameScenario['hooks'];
   setupCodeExtra?: string;
+  /** Replace this text in the setup C++ (hooks must be set before a component is in use). */
+  setupCodeEdit?: [string, string];
 }
 
 export interface FrameScenario {
@@ -132,6 +134,7 @@ struct Player {}; struct InLava {}; struct Smoke {}; struct Dead {};
 world.set_threads(3);
 auto cleanup = world.entity("Cleanup")
   .add(flecs::Phase).depends_on(flecs::PostUpdate);
+world.component<Burning>().on_add(...).on_set(...);   // traced hooks
 
 world.entity("Hero").set(Position{}).set(Velocity{}).set(Health{100}).add<Player>();
 // 10 goblins: [Position, Velocity, Health]
@@ -139,7 +142,6 @@ world.entity("Hero").set(Position{}).set(Velocity{}).set(Health{100}).add<Player
 world.entity("Orc").set(Position{9, 9}).set(Velocity{}).set(Health{3})
   .set(Burning{5}).add<InLava>().add<Smoke>();
 
-world.component<Burning>().on_add(...).on_set(...);   // traced hooks
 world.observer<Burning>("Smolder").event(flecs::OnAdd)
   .each([](flecs::entity e, Burning&) { e.add<Smoke>(); });
 world.observer<Smoke>("SmokeFx").event(flecs::OnAdd).each(...);
@@ -368,14 +370,14 @@ Camp {
   setupCode: `struct Health { float hp; };  struct Burning { float dps; };
 struct Alert { float level; };  struct Struck {}; struct Smoke {};
 
-// A, B and C: [Health, Struck]. Camp: [Alert].
 world.component<Burning>().on_add(...).on_set(...);
 world.component<Health>().on_add(...).on_set(...).on_remove(...);
+// a, b, c: entities A, B, C with [Health, Struck]. camp: Camp, with [Alert].
 
 world.observer<Burning>("Smolder").event(flecs::OnAdd)
   .each([](flecs::entity e, Burning&) { e.add<Smoke>(); });
 world.observer("Alarm").with<Smoke>().event(flecs::OnAdd)
-  .each([&](flecs::entity) { camp.set<Alert>({1}); });
+  .each([&](flecs::iter& it, size_t) { camp.stage(it).set<Alert>({1}); });
 world.observer<Health>("WatchHealth").event(flecs::OnSet).each(...);
 world.observer<Health>("Mourn").event(flecs::OnRemove).each(...);`,
   stages: 1,
@@ -413,7 +415,7 @@ world.observer<Health>("Mourn").event(flecs::OnRemove).each(...);`,
       cppHead: 'world.system("Hit")',
       cppWith: ['.with<Struck>()'],
       cppBody:
-        '.run([&](flecs::iter& it) {\n    a.set<Burning>({5});    // A has no Burning: queued with its value\n    b.set<Health>({20});    // B has Health: written now, OnSet queued\n    a.set<Health>({1});     // same for A\n    c.destruct();           // queued\n  });',
+        '.run([&](flecs::iter& it) {\n    a.stage(it).set<Burning>({5});    // A has no Burning: queued with its value\n    b.stage(it).set<Health>({20});    // B has Health: written now, OnSet queued\n    a.stage(it).set<Health>({1});     // same for A\n    c.stage(it).destruct();           // queued\n  });',
       fn: (it) => {
         if (!it.entities.includes(IDS.A)) return;
         it.setComponent(IDS.A, 'Burning', { dps: 5 });
@@ -432,7 +434,7 @@ world.observer<Health>("Mourn").event(flecs::OnRemove).each(...);`,
         { comp: 'Burning', mask: 3, code: '' },
         { comp: 'Health', mask: 7 | 16, min: 5, code: '' },
       ],
-      setupCodeExtra: 'world.component<Health>().on_validate([](flecs::entity, const Health& h) {\n  return h.hp >= 5;   // reject\n});',
+      setupCodeEdit: ['.on_remove(...);', '.on_remove(...)\n  .on_validate([](flecs::entity, const Health& h) {\n    return h.hp >= 5;   // reject\n  });'],
       note: 'Health now has an on_validate hook that rejects hp below 5.',
     },
     {
@@ -441,7 +443,7 @@ world.observer<Health>("Mourn").event(flecs::OnRemove).each(...);`,
         { comp: 'Burning', mask: 3, code: '' },
         { comp: 'Health', mask: 7 | 8, code: '' },
       ],
-      setupCodeExtra: 'world.component<Health>().on_replace(...);',
+      setupCodeEdit: ['.on_remove(...);', '.on_remove(...).on_replace(...);'],
       note: 'Health now has an on_replace hook, which runs when a value is about to be replaced.',
     },
     {
@@ -468,7 +470,7 @@ struct PhysicsSystem {}; struct Bounced {};
 world.set_threads(2);
 // Ball0…Ball3: [Position, Velocity], falling.
 
-// A pipeline of its own: every system tagged PhysicsSystem, in creation order.
+// A pipeline of its own: every system with .kind<PhysicsSystem>(), in creation order.
 auto physics = world.pipeline()
   .with(flecs::System)
   .with<PhysicsSystem>()
@@ -489,7 +491,7 @@ world.progress();`,
       pipeline: 'Physics',
       kind: 'multi',
       cppHead: 'world.system<Position, const Velocity>("Integrate")',
-      cppWith: ['.with<PhysicsSystem>()'],
+      cppWith: ['.kind<PhysicsSystem>()'],
       cppBody: '.each([](Position& p, const Velocity& v) { p.y += v.y; });',
       fn: (it) => {
         const p = it.field<V2>(0);
@@ -505,7 +507,7 @@ world.progress();`,
       declares: [{ term: '[out] Bounced()', cpp: '.write<Bounced>()' }],
       declared: [false],
       cppHead: 'world.system<const Position>("Collide")',
-      cppWith: ['.with<PhysicsSystem>()', '.without<Bounced>()'],
+      cppWith: ['.kind<PhysicsSystem>()', '.without<Bounced>()'],
       cppBody: '.each([](flecs::entity e, const Position& p) {\n    if (p.y <= 0) e.add<Bounced>();   // queued\n  });',
       fn: (it) => {
         const p = it.field<V2>(0);

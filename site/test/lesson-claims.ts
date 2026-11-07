@@ -1758,7 +1758,7 @@ async function frame(): Promise<void> {
   const watchA = idx((e) => e.k === 'observer' && e.name === 'WatchHealth' && e.entity === A);
   fact(L, alarm > 0 && alarm < watchB && watchB < watchA, "the chain runs before B's command, and WatchHealth sees B before A");
   const smolder = ce.find((e) => e.k === 'locals' && e.name === 'Smolder') as { fields: Array<{ values: unknown[] | null }> } | undefined;
-  fact(L, JSON.stringify(smolder?.fields[0]?.values) === JSON.stringify([{ dps: 5 }]), 'in a merge, the OnAdd observer already sees the queued value');
+  fact(L, JSON.stringify(smolder?.fields[0]?.values) === JSON.stringify([{ dps: 5 }]), 'A has two queued commands, so the merge batches them and the OnAdd observer already sees the queued value');
   const val = run('frameChains', 1);
   const ve = val.steps[0].events;
   fact(L, ve.some((e) => e.k === 'validate' && e.entity === A && !e.ok) && !ve.some((e) => e.k === 'observer' && e.name === 'WatchHealth' && e.entity === A), "on_validate rejects A's 1: no WatchHealth for A");
@@ -1769,8 +1769,9 @@ async function frame(): Promise<void> {
   const hitRun = tr.runs.find((r) => r.systems.some((s) => nm(rep, s) === 'Hit'))!;
   const inHit = rep.steps[0].events.slice(hitRun.ev, hitRun.merge!.ev).filter((e) => e.k === 'replaceHook').length;
   fact(L, inHit === 2, 'on_replace runs for B and A while Hit runs (when the set is queued)');
-  const locked = run('frameChains', 3).steps[0].events.filter((e) => e.k === 'locked').length;
-  claim(L, `the timeline marks the ${locked} places a debug build would stop with \`ECS_LOCKED_STORAGE\``);
+  const locked = run('frameChains', 3).steps[0].events.filter((e) => e.k === 'locked') as Array<{ table: number; op: string }>;
+  fact(L, locked.length === 2 && locked[0].op === 'move' && locked[1].op === 'table delete' && locked[0].table === locked[1].table, 'world write in Smolder: the first locked op is the move, then its row delete in the same table');
+  claim(L, "the move out of A's locked table (the second marker is the same move's row delete)");
 
   // Two pipelines.
   const pp = run('framePipelines');

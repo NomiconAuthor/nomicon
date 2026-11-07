@@ -30,7 +30,7 @@ What the trace shows on current flecs:
 
 Some details worth knowing:
 
-- **`OnAdd` can't see the value from `set`.** It runs before the value is written. If you need the value, observe `OnSet`.
+- **`OnAdd` can't rely on the value from `set`.** It runs before the value is written, except when a merge batches several commands for the entity. If you need the value, observe `OnSet`.
 - **`OnAdd` fires once, when the component actually arrives.** Setting a component the entity already has only produces `OnSet`.
 - **Multi-term observers check their whole query.** `StartsMoving` listens for `Position, Velocity`. It is invoked whenever either is added, but only calls back once both are present. The first time, Ship has no `Velocity` yet, and the log shows it being checked and not called.
 - **Custom events work like any other.** `Collided` isn't a component change at all. `world.event<Collided>()...emit()` delivers it to observers listening for that event on the entity's `Position`.

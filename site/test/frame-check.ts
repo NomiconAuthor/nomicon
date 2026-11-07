@@ -125,7 +125,32 @@ export function checkRecording(rec: Recording, label: string, w: FlecsWorld) {
   });
 }
 
+// The C++ shown to readers, checked against flecs 4.2 rules the widget doesn't exercise
+// (it runs Flecs Script and JS callbacks, not this code).
+function checkCpp(sc: FrameScenario) {
+  const setups = [sc.setupCode, ...(sc.variants ?? []).map((v) => (v.setupCodeEdit ? sc.setupCode.replace(...v.setupCodeEdit) : sc.setupCode))];
+  (sc.variants ?? []).forEach((v) => {
+    if (v.setupCodeEdit) check(`${sc.id}/${v.label}: setupCodeEdit target found once`, sc.setupCode.split(v.setupCodeEdit[0]).length === 2);
+  });
+  for (const code of setups) {
+    // Hooks can't change while a component is in use (ECS_ALREADY_IN_USE): set them before any entity.
+    const firstEntity = code.search(/world\.entity\("(?!Cleanup)|^\/\/ .*\[/m);
+    const lastHook = Math.max(...[...code.matchAll(/world\.component<\w+>\(\)\s*\.on_/g)].map((m) => m.index!), -1);
+    check(`${sc.id}: hooks are set before entities use the component`, firstEntity < 0 || lastHook < firstEntity);
+  }
+  for (const s of sc.systems) {
+    // Captured handles are world-bound, and flecs 4.2 doesn't queue operations on the world:
+    // a system or observer that writes a captured entity must rebind it with .stage(it).
+    if (/\[&\]/.test(s.cppBody)) check(`${sc.id}/${s.name}: captured handles go through .stage(it)`, !/\b[a-z]\w*\.(set|add|remove|destruct)\b/.test(s.cppBody.replace(/\.stage\(it\)\./g, '#')));
+    // A system joins a custom pipeline through its kind, not a query term.
+    if (s.pipeline) check(`${sc.id}/${s.name}: in pipeline ${s.pipeline} via .kind<>()`, (s.cppWith ?? []).some((x) => x.startsWith('.kind<')));
+  }
+  const capt = sc.setupCode.match(/\[&\][^\n]*/g) ?? [];
+  for (const line of capt) check(`${sc.id}: captured handle in setup goes through .stage(it)`, /\.stage\(it\)\./.test(line), line);
+}
+
 async function main() {
+  for (const sc of Object.values(FRAME_SCENARIOS) as FrameScenario[]) checkCpp(sc);
   const w = await FlecsWorld.create();
   for (const sc of Object.values(FRAME_SCENARIOS) as FrameScenario[]) {
     const variants = sc.variants?.length ?? 1;

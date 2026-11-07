@@ -49,7 +49,7 @@ Now switch the setup to **Position is Sparse** and run it again. Sparse values l
 **Make the component Sparse** when stable addresses are part of its design: things that hold pointers to each other, or that other systems cache pointers into.
 
 <Tip kind="warn" title="No debug check will catch this">
-flecs can't know that your code still holds an old pointer, so there is no debug flag that detects stale references. The one guard it has is a storage lock, in debug builds: while a system iterates a table, or `on_add`/`on_remove` hooks or `OnAdd`/`OnRemove`/`OnSet` observers run on it, adding or removing rows in that table asserts. Everything else is down to discipline, code review, and keeping reference lifetimes visibly short.
+flecs can't know that your code still holds an old pointer, so there is no debug flag that detects stale references. The one guard it has is a storage lock, in debug builds: while `on_add`/`on_remove` hooks or `OnAdd`/`OnRemove`/`OnSet` observers run on a table (or an immediate system with a C callback iterates it), adding or removing rows in that table asserts. C++ `.each()` and `.run()` systems aren't covered. Everything else is down to discipline, code review, and keeping reference lifetimes visibly short.
 </Tip>
 
 <Tip title="A quick rule for reviews">

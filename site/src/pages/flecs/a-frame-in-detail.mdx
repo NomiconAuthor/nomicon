@@ -16,26 +16,26 @@ Ten goblins walk about. Four imps stand in lava. An orc, nearly dead, is already
 
 <FlecsFrame scenario="frameTour" />
 
-Each column is a **run**: systems that flecs runs back to back without merging. The striped bar after each run is its **sync point**, with the number of commands it merged. The rows are the threads: `main` is stage 0, and `worker 1` and `worker 2` are the other two stages of `world.set_threads(3)`. Step through it, or press play. Click any system or sync bar to see what it did.
+Each **run** (a column; on a phone, a band down the page) is systems that flecs runs back to back without merging. The striped bar after it is its **sync point**, with the number of commands it merged. Each thread has its own lane: `main` is stage 0, and `worker 1` and `worker 2` are the other two stages of `world.set_threads(3)`. Step through it, or press play. Click any system or sync bar to see what it did.
 
 What to look for:
 
-- **The first run is flecs' own.** `flecs.script.ProgressTasks` is an immediate system in PreUpdate that the script add-on adds to every world. Because it's immediate, it always gets a run of its own, so there's a sync point here in every frame of every app built with that add-on.
-- **Runs, not phases.** Six runs: the built-in one, `Input`, `Move` and `Ignite` together, `Burn`, `Reap`, `Render`. `Move` and `Ignite` share a run because they're the same kind and nothing either of them reads has been queued.
+- **The first run is flecs' own.** `flecs.script.ProgressTasks` is an immediate system in PreUpdate, added by the script add-on (part of a default build). Because it's immediate, it always gets a run of its own, so every frame has a sync point there.
+- **Runs, not phases.** Six runs: the built-in one, `Input`, `Move` and `Ignite` together, `Burn`, `Reap`, `Render`. `Move` and `Ignite` share a run because they're the same kind and neither matches anything an earlier system in the run declared it may queue (`.write<T>()`).
 - **Workers only work in multi-threaded runs.** During `Input`, `Reap` and `Render` the workers are idle.
 - **Every table is split.** `Move` gets rows 0–3 of the goblins' table on `main`, 4–6 on `worker 1` and 7–9 on `worker 2`. The hero's table has one row, so only `main` gets it.
 - **Each stage queues on its own.** `Ignite` queues `set<Burning>` for the four imps: 2 · 1 · 1 commands on the three stages. The merge flushes `main`'s queue, then `worker 1`'s, then `worker 2`'s.
-- **Chains run before the next command.** Inside the merge, an imp moves to a table with `Burning`, the `on_add` hook runs, then `Smolder`. `Smolder` queues `add<Smoke>`, and that's flushed straight away, as a nested flush, before the next imp's command. Each imp moves twice.
+- **Chains run before the next command.** A chain is what a hook or observer queues during a merge. Here, an imp moves to a table with `Burning`, the `on_add` hook runs, then `Smolder`. `Smolder` queues `add<Smoke>`, and that's flushed straight away, as a nested flush, before the next imp's command. Each imp moves twice.
 - **The merge changed what `Burn` sees.** The imps moved into the orc's table, so `Burn` now finds 5 rows and splits them 2 · 2 · 1.
 - **Immediate systems apply on the spot.** `Reap`'s `it.world().entity().set<Loot>()` runs right there: `ShowLoot` fires *inside* `Reap`'s block. Its `destruct()` goes through the entity handle, so it's queued and flushed as soon as `Reap` returns.
 
 ## Why is there a sync here?
 
-Click a sync bar. The reasons come from flecs' pipeline builder itself (it records why it decided each one), not from rules written for this page. There are only a few:
+Click a sync bar. The reasons are traced from flecs' pipeline builder (`flecs_pipeline_build`), at the line where it decides each merge, not from rules written for this page. There are only a few:
 
 | Reason | Example in this frame |
 |---|---|
-| A system matches something on its own entities that an earlier system declared it may queue | `Burn` matches `Burning`, and `Ignite` declared `.write<Burning>()` |
+| An earlier system in the run declared it may queue a component this system matches on its own entities (`.write<T>()`) | `Burn` matches `Burning`, and `Ignite` declared `.write<Burning>()` |
 | A system reads something from elsewhere (a singleton, `.read<T>()`) that may be queued | (none here) |
 | The threading kind changes | `Input` → `Move`, `Burn` → `Reap` |
 | An immediate system starts or ends | before `Reap`, before `Render` |
@@ -47,7 +47,7 @@ Click a sync bar. The reasons come from flecs' pipeline builder itself (it recor
 - Set the threads to **1**. The schedule doesn't change: the same six runs and the same sync points. A run's kind comes from the systems, not from the thread count, so a `multi_threaded` system still starts a new run with one thread.
 - Click `Input`, make it `multi_threaded`, and the sync between it and `Move` disappears.
 
-`Reap` never needs `.write<Dead>()`: it's immediate, so there's a merge before it anyway, and the orc's `add<Dead>` lands there.
+`Burn` doesn't need `.write<Dead>()`: `Reap` is immediate, so there's a merge before it anyway, and the orc's `add<Dead>` lands there.
 
 <Tip kind="note" title="Rebuilt mid-frame">
 Choose **Reap idle**. With no `Corpse`, nothing is `Dead` when the frame starts, so `Reap` matches nothing and isn't in the schedule. After `Burn`, the merge creates the orc's new table. That makes `Reap`'s query match its first table, flecs queues the removal of the system's `Empty` tag, and it's flushed inside the same merge. The pipeline notices and rebuilds the schedule (the ↻ on the sync bar), and `Reap` still runs this frame.
@@ -69,7 +69,7 @@ Stage order has a visible consequence. All 14 `a` and `b` entities end up in `[H
 
 ## Inside a merge
 
-This one has no threads. `Hit` queues four things in this order: `set<Burning>` on A (which doesn't have it), `set<Health>` on B and then on A (both have it, so the value is written straight away and only the `OnSet` is queued), and `destruct()` on C.
+This one has no threads. `Hit` queues four things in this order: `set<Burning>` on A (which doesn't have it), `set<Health>` on B and then on A (both have it, so the value is written straight away and only the `OnSet` is queued), and `destruct()` on C. `a`, `b` and `c` are handles captured from setup, so they belong to the world, and flecs 4.2 doesn't queue operations on the world. `.stage(it)` rebinds them to the system's stage. `Alarm` does the same with `camp`.
 
 <FlecsFrame scenario="frameChains" />
 
@@ -81,8 +81,8 @@ This one has no threads. `Hit` queues four things in this order: `set<Burning>` 
 Three more setups:
 
 - **With on_validate.** `Health` gets an `on_validate` hook that rejects values below 5. A's `set<Health>({1})` is rejected: no `on_set` hook, no `WatchHealth`. The value is still in the column, though. `on_validate` decides whether anyone is told, not whether the write happened.
-- **With on_replace.** `on_replace` is the one hook that runs while the system is still running: B's and A's `set<Health>` call it as they're made, inside `Hit`'s block, because the old value is about to be overwritten in place. Everything else waits for the merge.
-- **Observer writes through the world.** `Smolder` uses `it.world()` instead of the entity it was given, so the move happens inside the observer, while flecs 4.2 has A's table locked. This page runs a release build, so the move goes ahead, but the timeline marks the 2 places a debug build would stop with `ECS_LOCKED_STORAGE`. Use the entity handle (which goes through the stage) and the same work runs as a chain instead.
+- **With on_replace.** `on_replace` is the one event hook that runs while the system is still running: B's and A's `set<Health>` call it as they're made, inside `Hit`'s block, because the old value is about to be overwritten in place. The other event hooks wait for the merge.
+- **Observer writes through the world.** `Smolder` uses `it.world()` instead of the entity it was given, so the move happens inside the observer, while flecs 4.2 has A's table locked. This page runs a release build, so the move goes ahead, but the timeline marks where a debug build would stop with `ECS_LOCKED_STORAGE`: the move out of A's locked table (the second marker is the same move's row delete). Use the entity handle (which goes through the stage) and the same work runs as a chain instead.
 
 ## Immediate systems in the timeline
 
@@ -93,7 +93,7 @@ Back in the first frame, `Reap` shows everything special about immediate systems
 - its own queue flushed when it returns, before the next run;
 - no workers. An immediate system always runs on the main thread.
 
-In flecs 4.2 an immediate system also locks the table it's iterating (in debug builds). Changing other entities through the world is fine. Anything that would move the rows you're iterating has to go through the stage.
+A debug build won't always stop you from moving the rows you're iterating: flecs locks the iterated table only for systems with a C callback (`.callback` in `ecs_system_desc_t`), not for C++ `.each()` and `.run()` systems. Either way, adding or removing rows in a table you're iterating, for any entity, has to go through the stage. Other changes can go through the world.
 
 ## Two pipelines
 
@@ -101,10 +101,10 @@ In flecs 4.2 an immediate system also locks the table it's iterating (in debug b
 
 <FlecsFrame scenario="framePipelines" />
 
-Use the tabs to step through the two physics passes and then the frame. `Integrate` and `Collide` belong to the `physics` pipeline (they're tagged `PhysicsSystem` and have no phase), so `progress()` never runs them, and the physics pipeline never runs `PlaySound` or `Render`.
+Use the tabs to step through the two physics passes and then the frame. `Integrate` and `Collide` belong to the `physics` pipeline (they're created with `.kind<PhysicsSystem>()`, which tags them with `PhysicsSystem` instead of a phase), so `progress()` never runs them, and the physics pipeline never runs `PlaySound` or `Render`.
 
 - A custom pipeline orders systems by creation, not by phase. `Integrate` is multi-threaded and `Collide` isn't, so that's two runs.
-- `Collide` queues `add<Bounced>` for `Ball1` in the first pass. The pass ends with a merge, like a frame does, so by the second pass `Ball1` is in its own table (1 row, so only `main` moves it).
+- `Collide` queues `add<Bounced>` for `Ball1` in the first pass. The pass ends with a merge, like a frame does, so by the second pass `Ball1` is in its own table (1 row, so only `main` integrates it).
 - Nothing waits for the next `progress()`: every pipeline run ends with everything merged.
 
 ## Where this build differs from yours
@@ -112,15 +112,15 @@ Use the tabs to step through the two physics passes and then the frame. `Integra
 <Tip kind="warn" title="What's real and what's drawn">
 **Real**, from flecs v4.2.0 compiled to WebAssembly and traced: the runs and their kinds, why each sync point is there, every system call and the exact rows each stage got, every queued command and which stage queued it, the merge order, batches, table moves, hooks, observers, their nesting, schedule rebuilds, and where a debug build would assert.
 
-**Drawn:** WebAssembly here has no threads. The world really has 3 stages with their own queues, and flecs splits the rows itself, but the workers' slices run one after another, after `main`'s, instead of at the same time. That's one order real threads could produce, but on real threads two stages in the same run can see each other's writes in any order. Block widths are rows, not time, and there are no timings.
+**Drawn:** WebAssembly here has no threads. The world really has 3 stages with their own queues, and flecs splits the rows itself, but the workers' slices run one after another, after `main`'s, instead of at the same time. That's one order real threads could produce, but on real threads two stages in the same run can see each other's writes in any order. On a wide screen, block widths are rows, not time. There are no timings.
 
-The only change to how flecs behaves is in `flecs_run_pipeline`: where it would wake the workers and wait for them, this build runs each worker stage's part of the run in turn.
+Besides trace points (the sync reasons come from ones added to `flecs_pipeline_build`), this build patches flecs in two places. Where `flecs_run_pipeline` would wake the workers and `flecs_wait_for_workers` would wait for them, it runs each worker stage's part of the run in turn (the stages come from `ecs_set_stage_count`, so there are no threads). And it counts table locks as a debug build does, so it can mark where a debug build would assert. Neither changes what flecs does to the world.
 </Tip>
 
 ## Takeaways
 
 - A frame is a list of **runs**. Each run ends with a merge, and that merge is also where the threads wait for each other.
-- A new run starts when a system needs something queued earlier, when the threading kind changes, and around every immediate system. Phases don't add any.
+- A new run starts when a system matches or reads something an earlier system in the run declared it may queue, when the threading kind changes, and around every immediate system. Phases don't add any.
 - A multi-threaded system splits every table it matches into contiguous slices, one per stage. Each stage has its own queue, and merges go stage by stage.
-- Hooks and observers run during merges and inside immediate systems. In an ordinary run only `on_replace` can run, when a `set` overwrites a value. What hooks and observers queue is flushed straight away, depth-first, before the next command.
+- Hooks and observers run during merges and inside immediate systems. In an ordinary run only `on_replace` (and the copy that writes the value) can run, when a `set` overwrites a value. What hooks and observers queue is flushed straight away, depth-first, before the next command.
 - Custom pipelines work the same way and end merged.

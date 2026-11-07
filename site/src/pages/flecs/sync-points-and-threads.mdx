@@ -51,7 +51,7 @@ Some things don't matter, and it's worth knowing which:
 - **Inactive writers are ignored.** A system that matches no tables isn't scheduled and doesn't count as a writer. An inactive *reader* still gets its merge, because the merge may give it something to match; if it does, the schedule is rebuilt and the reader runs. In the third setup above, the end-of-frame merge does the same for `Burn`.
 - **One merge serves many writers.** Several systems can queue commands before a single merge, and after it every component counts as clean again.
 
-A merge is also inserted where the system kind changes: between a single-threaded system and a `multi_threaded` one, and before and after every `immediate` system. Phases don't add merges on their own. Without annotations, and with only one kind of system, all your systems share one run, and its merge comes after the last of them.
+A merge is also inserted where the system kind changes: between a single-threaded system and a `multi_threaded` one, and before and after every `immediate` system. Phases don't add merges on their own. Without annotations, and with only one kind of system, all your systems share one run, and its merge comes after the last of them. One exception you can't turn off: the script add-on's `ProgressTasks` is an immediate system in `PreUpdate`, so systems in `OnLoad` and `PostLoad` always get a merge before `PreUpdate` (see [a frame in detail](/flecs/a-frame-in-detail/)).
 
 <Tip kind="note" title="Print the schedule">
 In a debug build, with `flecs::log::set_level(1)` (`ecs_log_set_level(1)` in C), flecs prints the schedule whenever it rebuilds it: `schedule: threading: 0, staging: 1:`, the systems in that run, then `merge`. That's the quickest way to check where your merges went; flecs's own `sync_point` example does exactly this. (Release builds compile this logging out.)
@@ -107,7 +107,7 @@ In an ordinary system the world is readonly, and every change goes through the s
 
 ## Takeaways
 
-- Commands are merged at the end of the frame unless an annotation says a later system needs them sooner.
+- Commands are merged at the end of the frame unless an annotation, a kind change or an immediate system puts a merge sooner.
 - `.write<T>()` (`[out] T()`) and `.read<T>()` (`[in] T()`) are about **merges**. A merge is inserted before the next system that matches or reads `T`.
 - Field writes never queue anything; `const` on your own terms is for change detection, not merges.
 - `set_threads(n)` is the main thread plus `n − 1` workers. Only `multi_threaded` systems are split, by slicing every table.

@@ -570,7 +570,9 @@ export class FrameView {
 
   private renderCode(): void {
     const v = this.sc.variants?.[this.cfg.variant];
-    const parts = [this.sc.setupCode.replace('set_threads(3)', `set_threads(${this.cfg.stages})`).replace('set_threads(2)', `set_threads(${this.cfg.stages})`)];
+    let setup = this.sc.setupCode.replace('set_threads(3)', `set_threads(${this.cfg.stages})`).replace('set_threads(2)', `set_threads(${this.cfg.stages})`);
+    if (v?.setupCodeEdit) setup = setup.replace(...v.setupCodeEdit);
+    const parts = [setup];
     const extra = v?.setupCodeExtra ?? this.sc.setupCodeExtra;
     if (extra) parts.push(extra);
     for (const s of this.sc.systems) parts.push(systemCpp(s, this.cfg.kinds[s.name], this.cfg.declared[s.name] ?? []));
