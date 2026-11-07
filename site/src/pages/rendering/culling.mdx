@@ -1,0 +1,91 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Culling
+order: 9
+part: Engine-side rendering
+summary: "Not drawing what can't be seen: frustum culling with bounding spheres and boxes, occlusion culling with a hierarchical Z-buffer and with occlusion queries, levels of detail, and the frame of latency that last-frame methods add. A city on the real GPU, culled by a model you can step."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The [last lesson](/rendering/batching-and-instancing/) made each draw cheaper. The cheapest draw is the one you don't make. A camera sees a small part of a level, and most of what's in front of it is hidden behind something nearer. **Culling** finds out what can be skipped before the GPU spends any time on it, and **levels of detail** draw what's left with no more triangles than its size on screen needs.
+
+The widget walks a camera through a city of 576 box-shaped buildings: up a street, round a corner, along the next. On the left is the city from above, coloured by what culling decided for each building; on the right is the camera's view, drawn by your GPU with only the buildings that survived. The culling itself runs on the CPU, in a model written for this lesson: it rasterises depth at 160 × 90 and calls a building **really visible** if it covers at least one pixel there when everything is drawn. The counts below come from that model, so they're the same on every machine.
+
+<RenderWidget kind="culling" />
+
+## Frustum culling
+
+The **view frustum** is the part of space the camera can see: a pyramid with its top cut off by the near plane, bounded by six planes. Anything entirely outside one of them can be skipped. Testing the real geometry would cost as much as drawing it, so engines test a **bounding volume** instead:
+
+- A **sphere** is outside if its centre is more than its radius behind any plane: one dot product per plane.
+- An **axis-aligned box** is outside if its corner furthest along the plane's normal is behind the plane. Pick that corner from the signs of the normal's components, and it's one dot product per plane too.
+
+Both tests are **conservative**. They never cull something that's in view, but they can keep something that isn't: a volume can straddle two planes near a corner of the frustum, behind neither one alone. And a sphere is loose around a tall, thin building. In frame 10, testing spheres culls 151 buildings and testing boxes culls 167: 16 more buildings skipped, because here the boxes are the buildings themselves.
+
+Engines don't test every object every frame. They test a hierarchy, a bounding volume tree, [grid or octree](/engine/spatial-partitioning/), and skip a whole branch when its volume is outside, and they test four or eight volumes at once with SIMD. The test itself is cheap; touching every object's data is what costs.
+
+Still, frustum culling only removes what's beside or behind the camera. In frame 10 the camera looks up a long street with the whole city in front of it: 409 buildings pass the frustum test, and 14 of them are really visible. The rest are behind the first row of buildings.
+
+## Occlusion culling with a hierarchical Z-buffer
+
+Something is **occluded** if what's in front of it covers it completely. The depth buffer knows exactly that, per pixel, but only after the occluders have been drawn. The usual answer is a **hierarchical Z-buffer** (HZB, from Greene, Kass and Miller in 1993): a mip chain of the depth buffer in which each texel stores the **farthest** depth of the four below it. To test an object, project its bounding box, find the level where its rectangle spans at most 2 × 2 texels, and compare the box's **nearest** depth with the farthest depth stored there. If the box is behind even the farthest depth, everything in that rectangle is in front of it, and it's hidden. Four reads per object, whatever its size on screen.
+
+That's conservative too: a coarse level stores the farthest of many pixels, so a box is only culled if it's behind all of them. Where does the depth come from? The options trade cost against latency:
+
+- **This frame's occluders.** Draw the biggest objects first (a depth prepass of chosen occluders, on the GPU or rasterised on the CPU at low resolution, as Intel's Masked Software Occlusion Culling does) and build the HZB from them. **HZB, occluders** uses the 119 buildings 30 m or taller. Assassin's Creed Unity drew the 300 best occluders into a depth prepass and combined that with last frame's depth, reprojected ([Haar and Aaltonen](https://advances.realtimerendering.com/s2015/aaltonenhaar_siggraph2015_combined_final_footer_220dpi.pdf)).
+- **Last frame's depth.** It's already there, so the HZB is nearly free. But it shows where things were. **HZB, last frame's** asks of each building "was it hidden last frame?", testing it with last frame's camera against last frame's depth. Walking straight, that's nearly right. Turning a corner, it isn't: a building that has just come into view was hidden last frame, so it's culled now, and there's a hole where it should be.
+- **Two-phase.** Draw what passes against last frame's HZB; build a new HZB from what you just drew; then retest only what was culled, against the new HZB, and draw what passes. Anything that has just come into view was in front of the new depth, so the second phase catches it in the same frame. It costs a second set of tests and a mid-frame HZB build. This is what GPU-driven renderers do, from Assassin's Creed Unity to [Nanite](/rendering/nanite-in-brief/).
+
+At frame 10, walking up the street, with boxes for the frustum:
+
+| Occlusion | Occlusion tests | Occlusion-culled | Drawn | Drawn but hidden | Visible but culled |
+|---|---|---|---|---|---|
+| Off | 0 | 0 | 409 | 395 | 0 |
+| HZB, occluders | 409 | 228 | 181 | 167 | 0 |
+| HZB, last frame's | 409 | 316 | 93 | 79 | 0 |
+| Two-phase | 725 | 315 | 94 | 80 | 0 |
+| Queries | 409 | 383 | 26 | 14 | 2 |
+
+The HZB methods still draw far more than the 14 visible buildings: at 160 × 90, a coarse level's farthest depth is often the sky between two roofs. A finer depth buffer culls more and costs more to build; real engines use something like 512 × 256 (Haar and Aaltonen's was) and test against the level that fits.
+
+Now step to frame 29, in the middle of the turn. Last frame's HZB culls 7 buildings that are really visible, red on the map and missing from the camera's view. Two-phase culls none of them: it draws 37 in its first phase and 20 more in its second.
+
+## Occlusion queries
+
+GPUs can count for you. An **occlusion query** wraps some draws and reports whether any of their samples passed the depth test (or how many). Draw an object's bounding box with colour and depth writes off, inside a query, and the answer tells you whether the object would be visible. D3D12, Vulkan, Metal, WebGPU and WebGL2 all have them.
+
+The answer arrives later. The GPU runs a frame or more behind the CPU (the *CPU–GPU frame pipeline* lesson, later in this section, is about why), so waiting for a result in the same frame stalls both. Engines read each query a frame or two late and draw using last frame's answers, which has the same problem as last frame's depth: in frame 29, **Queries** culls 10 visible buildings. The queries are exact per pixel, so the model's queries cull more than the HZB and keep only 26 buildings at frame 10, but 2 visible ones go missing there too, as the camera moves.
+
+There are other costs: one query per object adds draws and readback; a hidden object still needs its box drawn every frame, or it never comes back; and objects that are visible every frame pay for a query that never helps. *GPU Gems 2*'s *Hardware Occlusion Queries Made Useful* (Bittner and Wimmer) issues queries only where they're likely to pay off, using last frame's results and a hierarchy. **Conditional rendering** (D3D12's `SetPredication`, Vulkan's `VK_EXT_conditional_rendering`, OpenGL's `glBeginConditionalRender`) lets the GPU skip a draw on a query's result without a trip back to the CPU, at the price of recording every draw anyway. WebGPU and WebGL2 don't have it.
+
+<Tip title="Where the depth is rasterised">
+The model rasterises depth on the CPU so the claims can check every count. Engines do both: CPU rasterisers of simplified occluder meshes (Intel's Masked Software Occlusion Culling is a well-documented one) give an answer before the frame is submitted, while GPU HZBs are built in a few compute dispatches and tested on the GPU, which is the subject of the [last lesson in this part](/rendering/gpu-driven-rendering/).
+</Tip>
+
+## Levels of detail
+
+What survives culling can still be drawn with too many triangles. A building 300 m away covers a few pixels; drawing all 432 of its triangles wastes vertex work and, worse, produces tiny triangles that waste pixel work too (see [How shaders run](/rendering/how-shaders-run/)). **Levels of detail** (LODs) are simpler versions of a mesh, chosen by how big it is on screen. Here each building has three: a box with each face cut into 6 × 6, 3 × 3 or 1 × 1 squares, 432, 108 and 12 triangles, chosen from the bounding sphere's projected size.
+
+Switch on **Levels of detail** at frame 10 with occlusion off: the 409 buildings in the frustum drop from 176,688 triangles to 43,392. With last frame's HZB as well, 93 buildings are drawn with 19,032 triangles. **Colour by level** shows which level each building got.
+
+The cost of discrete levels is the moment of switching: a **pop**. Engines add hysteresis (switch down at a smaller size than they switch up), cross-fade or dither between levels for a few frames, or bias the choice by importance. Nanite replaces whole-mesh levels with clusters chosen per frame, so different parts of a mesh can be at different levels and the switches are too small to see ([Nanite in brief](/rendering/nanite-in-brief/)).
+
+## The frame of latency
+
+Every method that uses last frame's information is cheaper and wrong for a frame when the view changes quickly: turning a corner, a cut, a door opening, an explosion removing a wall. The symptom is the one you saw: objects that pop in a frame late, or holes. The fixes are to retest what you culled against this frame's depth (two-phase), to treat a cut as a new start (draw everything in the frustum for one frame), or to accept it and keep the camera's movements smooth. Frustum culling and this frame's occluders have no such latency, and no such errors.
+
+## Takeaways
+
+- **Frustum culling** tests bounding volumes against six planes. Boxes fit tighter than spheres; both are conservative. Test a hierarchy, not every object.
+- An **HZB** stores the farthest depth per texel, so one comparison at the right level culls an object for at most four reads. Its depth can come from this frame's occluders, or from last frame.
+- **Last frame's depth** and **occlusion queries** are a frame late: newly revealed objects go missing. **Two-phase** culling retests what it culled against this frame's depth, and never misses.
+- **Levels of detail** cut triangles by screen size; switching between them pops unless you hide it.
+
+## Further reading
+
+- Ned Greene, Michael Kass and Gavin Miller, *Hierarchical Z-buffer visibility* (SIGGRAPH 1993).
+- Ulrich Haar and Sebastian Aaltonen, [*GPU-Driven Rendering Pipelines*](https://advances.realtimerendering.com/s2015/aaltonenhaar_siggraph2015_combined_final_footer_220dpi.pdf) (SIGGRAPH 2015): occluder prepass, reprojected depth, the HZB and two-phase culling in Assassin's Creed Unity.
+- Jon Hasselgren, Magnus Andersson and Tomas Akenine-Möller, [*Masked Software Occlusion Culling*](https://www.intel.com/content/www/us/en/developer/articles/technical/masked-software-occlusion-culling.html) (HPG 2016), and Intel's open-source implementation.
+- Jiří Bittner and Michael Wimmer, [*Hardware Occlusion Queries Made Useful*](https://developer.nvidia.com/gpugems/gpugems2/part-i-geometric-complexity/chapter-6-hardware-occlusion-queries-made-useful), *GPU Gems 2*, chapter 6.
+- Microsoft, [`SetPredication`](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist-setpredication) on D3D12 command lists, and Khronos, [`VK_EXT_conditional_rendering`](https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_conditional_rendering.html).

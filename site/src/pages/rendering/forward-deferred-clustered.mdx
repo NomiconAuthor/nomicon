@@ -1,0 +1,101 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Forward, deferred and clustered
+order: 14
+part: Lighting and shading
+summary: "Where lighting happens: forward shading and its objects × lights cost, G-buffers and deferred lighting, tiled and clustered light lists, and what each costs in bandwidth, MSAA, transparency and material variety. One scene with up to 256 lights, drawn each way on your GPU."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A point light only lights what's inside its radius, but a shader doesn't know which lights those are. Lighting costs, roughly, **pixels × lights each pixel looks at**, and the architecture of a renderer is mostly about keeping the second number close to the lights that actually reach the pixel. This lesson draws one scene, a courtyard with up to 256 point lights, in the three ways engines do it, on your GPU.
+
+## The courtyard
+
+<RenderWidget kind="lights" />
+
+The scene is the [pipeline lesson's](/rendering/the-pipeline/) box with a floor, two rows of pillars and a few crates around it; the first three lights are the ones the GPU lessons share, and the rest are scattered along the courtyard with radii between 1.5 and 3.5 m. Each light fades to nothing at its radius (Karis's windowed inverse-square falloff, from [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf)), so a light can be skipped exactly where it can't reach. The shading is plain diffuse; the next lesson replaces it.
+
+**Lights per pixel** shows how many lights each pixel's shader loops over. The numbers beside the frame come from a model on the CPU: a ray through each pixel of a 320 × 200 image of the same scene, and the same light lists the GPU reads. They don't depend on your GPU. **Time 60 frames** measures the passes on your GPU, if the browser offers timestamp queries; expect the time to follow the lights-per-pixel view far more than the number of lights.
+
+## Forward shading
+
+**Forward** shading lights a surface while drawing it: the fragment shader that knows the material also loops over the lights. Choose **Forward** and **None**, and every pixel loops over all of them: with the default 64 lights, 64 per pixel, when the model finds only 3.3 lights actually reach the average pixel.
+
+Older forward renderers didn't loop over every light. The CPU picked the few lights nearest each object and passed those in, or drew the object once per light with additive blending (multi-pass forward). Either way the cost is **objects × lights**: a big object, like this courtyard's floor, is touched by nearly every light, and drawing it once per light means re-running its vertex work and re-reading its textures each time. And because lighting runs in the fragment shader, it's paid for every fragment shaded, including the ones a nearer surface later covers; a [depth prepass](/rendering/depth/) fixes that at the cost of drawing the geometry twice.
+
+## Deferred shading
+
+**Deferred** shading splits the two jobs. A **G-buffer** pass draws the geometry once and stores, per pixel, what lighting needs to know about the surface; a **lighting** pass then runs once per pixel, reads that back, and adds up the lights. Lighting no longer cares how many objects there are or how much they overlap. This widget's G-buffer is small:
+
+| Target | Format | Bytes | Holds |
+|---|---|---|---|
+| albedo | `rgba8unorm` | 4 | base colour in RGB (A unused) |
+| normal | `rgb10a2unorm` | 4 | the normal, 10 bits per axis |
+| depth | `depth24plus` | 4 | depth, to rebuild the position |
+
+That's **12 bytes per pixel**. Switch the view to **Albedo**, **Normals** or **Depth** to see each target. The lighting pass doesn't store a position: it rebuilds one from the pixel's coordinates and depth through the inverse view-projection matrix, which costs a few instructions and saves 12 bytes.
+
+Production G-buffers hold more: roughness, metalness, specular, material IDs, emissive, motion vectors, often in four or five render targets. They're the main cost of deferred shading, because every byte is written once and read back once for every pixel. Counting only those writes and reads (no caches, no framebuffer compression, no overdraw), this layout moves 28 bytes per pixel against forward's 8 (colour and depth). At 1920 × 1080 that's **55.4 MB a frame** against **15.8 MB**.
+
+What deferred gives up:
+
+- **MSAA.** The G-buffer has to be multisampled too (four samples per pixel at 4×, so four times the bytes), and the lighting pass has to light each sample separately where a pixel's samples differ, which is exactly at edges. Most deferred engines use post-process or temporal anti-aliasing instead; the post-processing lesson covers both.
+- **Transparency.** A G-buffer holds one surface per pixel. Glass, particles and anything blended are drawn afterwards with forward shading, so a deferred engine needs forward lighting code anyway.
+- **Material variety.** The lighting pass can only use what the G-buffer stores. A material that needs something else (hair, cloth, skin with subsurface scattering) needs bits in the G-buffer, usually a material ID and a branch in the lighting pass, or its own forward path.
+
+## Tiled light lists
+
+Deferred alone still loops over every light for every pixel: **Deferred** with **None** costs the same per pixel as forward. The fix is to work out, ahead of the loop, which lights can reach which part of the screen.
+
+**Tiled** shading cuts the screen into tiles, finds each tile's nearest and farthest depth, and tests each light's sphere against the small frustum that tile and depth range make. Each pixel then loops over its tile's list only. It was used in compute shaders for deferred lighting (Andersson's [Battlefield 3 talk](https://www.slideshare.net/DICEStudio/directx-11-rendering-in-battlefield-3), 2011; Olsson and Assarsson's *Tiled Shading*, 2011) and, with a depth prepass to get the tile depths, for forward shading as **Forward+** (Harada, McKee and Yang, 2012).
+
+Choose **Tiles**. The widget's grid is 16 × 10 tiles of the canvas, 160 in all, with depth bounds from a ray per pixel at the canvas's logical size. With 64 lights the average pixel now looks at 7.7 lights instead of 64, but the worst pixel still looks at 34. The heatmap shows where: tiles towards the far end, where a tile's pixels run from the floor a few metres ahead to the wall at the back, or from a pillar's edge to whatever is behind it. The tile's depth range spans everything in between, and every light along that stretch is in its list. [Olsson, Billeter and Assarsson](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf) put it this way: at depth discontinuities the bounds "must encompass all the empty space", in the worst case "degenerating to a pure 2D test".
+
+## Clustered light lists
+
+**Clustered** shading also cuts each tile along depth, into **clusters**. Olsson, Billeter and Assarsson space the slices exponentially, so that clusters far away are as deep as they are wide, "as cubical as possible". The widget uses 16 slices from 1 m to 64 m, each 2<sup>3/8</sup> (about 1.3) times deeper than the last, with everything nearer than the first boundary in the first slice: 16 × 10 × 16 = **2,560 clusters**. A pixel finds its cluster from its tile and the logarithm of its depth, with no depth bounds needed, so clusters work the same for forward and deferred, and for transparent surfaces, which have no single depth per tile.
+
+With 64 lights:
+
+| Light lists | Lights per pixel (average) | Worst pixel | List entries | Grid + lists |
+|---|---|---|---|---|
+| None | 64 | 64 | 64 | 264 B |
+| Tiles | 7.7 | 34 | 814 | 4.4 KB |
+| Clusters | 6.3 | 16 | 7,755 | 50.3 KB |
+
+On average clusters win a little here, because this courtyard has few big depth jumps; they halve the worst case, which is what a frame's time follows when the bad tiles cluster around one spot. And the culling is never wrong: in the model, no pixel loses a light that reaches it, with tiles or with clusters. The cost is a bigger structure, and most of it is spent on nothing: lights are assigned to every cluster they touch, and of the 1,801 clusters that get a light, only 219 hold a surface that a pixel of the model's image sees. Olsson's version assigns lights only to clusters that some pixel uses, found from the depth buffer each frame; a fixed grid is simpler, and the lists are small anyway.
+
+The widget builds the lists on the CPU and uploads them for the shaders: a grid with an offset and a count per cell, and one list of light indices, both in integer textures. That's the layout Emil Persson describes for Avalanche's engine in [*Practical Clustered Shading*](https://www.humus.name/Articles/PracticalClusteredShading.pdf) (2015), which also assigned lights on the CPU, with 64 × 64-pixel tiles and 16 depth slices. Many engines build the lists in a compute shader instead.
+
+<Tip title="Try">
+Set 256 lights and look at **Lights per pixel** with each kind of list. Then tick **Move the lights**: the lists are rebuilt on the CPU every frame, and the top-down view shows which cells each light lands in.
+</Tip>
+
+## Choosing
+
+| | Forward | Deferred | Clustered forward |
+|---|---|---|---|
+| Lights per pixel | all of them, or a few per object | a list per tile or cluster | a list per cluster |
+| Bandwidth | low: colour and depth | a G-buffer written and read back | low, plus a depth prepass if you want one |
+| MSAA | the hardware's | a multisampled G-buffer, per-sample lighting at edges | the hardware's |
+| Transparency | the same shaders | a separate forward path | the same lists |
+| Materials | any shader | what the G-buffer can describe | any shader |
+
+None of these is the answer for every game. Avalanche's engine kept a deferred core and used the clustered lists for its forward passes, transparency included; id's *Doom* (2016) runs [clustered forward](https://www.adriancourreges.com/blog/2016/09/09/doom-2016-graphics-study/) for everything, with a 16 × 8 × 24 grid. Clustered forward also suits GPUs where bandwidth is scarce, such as mobile ones. What they agree on is that a pixel should only look at lights that can reach it.
+
+## Takeaways
+
+- Lighting costs about **pixels × lights per pixel**. Forward without culling pays objects × lights, multiplied by overdraw.
+- **Deferred** stores the surface in a **G-buffer** and lights each pixel once; it costs bandwidth (here 12 bytes per pixel written and read back), MSAA and transparency, and limits materials to what the G-buffer holds.
+- **Tiled** lists cut the lights per pixel, but a tile's depth bounds span the empty space at depth discontinuities.
+- **Clustered** lists split tiles by depth, exponentially, need no depth bounds, and work for forward, deferred and transparent surfaces alike.
+
+## Further reading
+
+- Ola Olsson, Markus Billeter and Ulf Assarsson, [*Clustered Deferred and Forward Shading*](https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf), HPG 2012; Olsson and Assarsson, *Tiled Shading*, Journal of Graphics, GPU, and Game Tools 15(4), 2011.
+- Emil Persson, [*Practical Clustered Shading*](https://www.humus.name/Articles/PracticalClusteredShading.pdf), SIGGRAPH 2015: the CPU-built, fixed-grid version this widget follows.
+- Johan Andersson, [*DirectX 11 Rendering in Battlefield 3*](https://www.slideshare.net/DICEStudio/directx-11-rendering-in-battlefield-3), GDC 2011: tiled deferred lighting in a compute shader.
+- Takahiro Harada, Jay McKee and Jason C. Yang, *Forward+: Bringing Deferred Lighting to the Next Level*, Eurographics 2012 short papers.
+- Adrian Courrèges, [*DOOM (2016) – Graphics Study*](https://www.adriancourreges.com/blog/2016/09/09/doom-2016-graphics-study/): a clustered forward frame taken apart.
+- Brian Karis, [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf), SIGGRAPH 2013 course notes: the light falloff used here.

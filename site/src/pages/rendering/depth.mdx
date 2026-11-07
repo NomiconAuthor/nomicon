@@ -26,7 +26,7 @@ The widget looks down at a field from 50 m up, with a far plane at 5 km. A road 
 
 A depth format can only store so many values: 65,536 for 16 bits, about 16.8 million for 24. Because *d* follows 1/*z*, the stored values are packed tightly near the camera and spread thin further away: the gap in distance between two neighbouring values grows roughly with *z*² / *n*. When the ground and the road both round to the same value, or round the wrong way round, the test can't tell which is in front, and the result changes from pixel to pixel and frame to frame. That's **z-fighting**.
 
-With a **16-bit** buffer and the near plane at 0.1 m, the ground shows through on 392 of the road's 408 pixels. The chart under the frame shows why: at 100 m, two surfaces 1.5 m apart can still get the same 16-bit value.
+With a **16-bit** buffer and the near plane at 0.1 m, the ground shows through on 392 of the road's 408 pixels. The widget's resolution chart shows why: at 100 m, two surfaces 1.5 m apart can still get the same 16-bit value.
 
 How far apart two surfaces must be to get different depths, with the near plane at 0.1 m and the far plane at 5 km:
 

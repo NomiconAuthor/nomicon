@@ -1,0 +1,75 @@
+---
+layout: ../../layouts/Lesson.astro
+title: The CPU–GPU frame pipeline
+order: 21
+part: Performance and profiling
+summary: "Frames in flight and the CPU running ahead, present modes (FIFO, mailbox, immediate) and swapchain images, where the time from input to photon goes, and how engines cut it: fewer frames in flight, waiting for the swapchain before reading input, Reflex-style just-in-time starts and late latching."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A frame passes through several workers in turn: the CPU simulates it and records its draw calls, the GPU draws it, the swapchain holds it until the display can show it, and the display scans it out. They run in parallel, each on a different frame, like a production line. That's what lets a game reach its frame rate, and it's also where its input latency comes from: a frame's input can be several refreshes old by the time it's on screen. This lesson models the line, measures latency from input to photon, and goes through the ways engines shorten it.
+
+## Frames in flight
+
+The CPU doesn't wait for the GPU to finish a frame before starting the next one; it [records commands into a queue](/rendering/same-frame-real-gpu/#command-encoders-and-queues) and moves on. To stop it getting arbitrarily far ahead, a renderer keeps a fixed number of **frames in flight**: each has its own copy of whatever the CPU writes every frame (constant buffers, command allocators, descriptor ranges), and a **fence** the GPU signals when it's done with that frame. Before reusing a frame's resources, the CPU waits on its fence. With two frames in flight, the CPU can record frame *N* + 1 while the GPU draws frame *N*, but not frame *N* + 2.
+
+D3D11 and OpenGL drivers do this for you; DXGI's [default is to let 3 frames queue](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgidevice1-setmaximumframelatency). In D3D12 and Vulkan the engine chooses, usually 2 or 3.
+
+## Present modes and the swapchain
+
+The finished image goes to a **swapchain**, a small set of images the display shows in turn. How a new image replaces the one on screen is the **present mode**. In Vulkan's terms ([`VkPresentModeKHR`](https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html)):
+
+- **FIFO** is vsync. Presented images wait in a queue and the display takes the next one at each vertical blank, so nothing tears and nothing is dropped. It's the only mode every Vulkan implementation must support. When the queue is full, the next present (or the next image acquire) blocks: that **back-pressure** is what holds the CPU and GPU to the refresh rate. *FIFO relaxed* is the same but shows a late frame at once, tearing, rather than waiting for the next refresh.
+- **Mailbox** keeps a single slot. A new image replaces whatever is waiting in it, and at each vertical blank the display takes the newest. No tearing, no blocking: the CPU and GPU run as fast as they can and the frames nobody saw are thrown away.
+- **Immediate** shows each image the moment it's presented, even mid-scan-out, so the screen tears where the old and new images meet.
+
+D3D's flip-model swapchains map onto the same ideas: `Present` with a sync interval of 1 waits for vertical blanks, and the `DXGI_PRESENT_ALLOW_TEARING` flag with a sync interval of 0 presents at once. The number of swapchain images bounds how many finished frames can wait: one is on screen, the rest can be queued or drawn into. A browser chooses for you: a WebGPU canvas is handed to the page's compositor, which shows it with the rest of the page at the next refresh.
+
+## Where the latency comes from
+
+The widget is a model of that line, the same on every machine. One CPU thread runs each frame's simulation, reading input at its start, then records and submits the rendering; the GPU draws frames in order; the swapchain has one image per frame in flight plus the one on screen (one more for mailbox, which needs a spare to never block). Latency is the time from the input read to the refresh that starts showing the frame. The display's own processing and the scan-out from top to bottom come on top of it.
+
+<RenderWidget kind="frame-pipeline" />
+
+It starts at 60 Hz with FIFO, 2 frames in flight, 4 ms of simulation, 3 ms of rendering on the CPU and 6 ms on the GPU. All of that work fits in one refresh, yet input to photon is 47.0 ms, nearly three refreshes. Most of it is waiting. The CPU, with nothing slowing it but back-pressure, runs ahead until the swapchain is full; from then on every frame waits for an image to come free and then waits in the present queue behind the frames ahead of it. Follow the marked frame: the gaps are the latency.
+
+- **Frames in flight** set how deep the queue gets. With 1 the same work shows in 24.3 ms; with 3, 63.7 ms.
+- **Mailbox** never makes the CPU wait, so it reads input as late as the work allows: 16.4 ms on average (13.0 ms to 20.3 ms, depending on where a frame finishes relative to the refresh). The cost is work: 57% of the frames are drawn and never shown.
+- **Immediate** shows each frame as soon as the GPU finishes it: 13.0 ms, just the work itself, with the CPU and GPU running at 143 frames a second and tearing.
+
+Now make the GPU the bottleneck: 20 ms of GPU work, more than a 60 Hz refresh. With FIFO and 2 frames in flight it shows 50 frames a second, unevenly (some frames for one refresh, some for two), and latency averages 49.7 ms (43.0 ms to 56.3 ms): the CPU is again far ahead, now waiting on the GPU. One frame in flight cuts latency to 43.7 ms but halves the frame rate to 30, because the CPU and GPU no longer overlap. That's the trade Microsoft describes for its [waitable swapchains](https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains): a latency of 1 frame is lowest, but if the CPU and GPU each fit in a refresh only when they overlap, you need 2.
+
+Engines often add more stages than this model has. A separate render thread, recording frame *N* while the game thread simulates *N* + 1 ([the threads lesson's pipeline](/engine/threads-pools-and-fibers/)), adds a frame. A [fixed timestep with interpolation](/engine/game-loops/) draws up to one step in the past. Each is a choice of throughput or smoothness over latency.
+
+## How engines cut it
+
+**Limit the frames in flight.** Fewer frames queued means less waiting, until the CPU and GPU can't overlap any more. Many engines expose it as a setting, and DXGI's `SetMaximumFrameLatency` sets it for the driver's queue.
+
+**Wait before reading input, not after.** In FIFO the waiting is unavoidable, but where it happens matters. If the CPU waits for the swapchain *before* reading input, the input it reads is fresh when the frame is drawn. That's what DXGI's [frame latency waitable object](https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains) is for: wait on it, then read input and render, "based on current data". Vulkan's `VK_KHR_present_wait` lets an engine wait until an earlier frame has reached the screen, and Android's [Swappy frame pacing library](https://developer.android.com/games/sdk/frame-pacing) injects fence waits for the same reason: so back-pressure doesn't build up a queue of stale frames.
+
+**Start just in time.** NVIDIA's [Reflex](https://www.nvidia.com/en-us/geforce/news/reflex-low-latency-platform/) goes further: the game lets the driver delay the start of each CPU frame, just long enough that its work reaches the GPU as the GPU becomes free ("just-in-time", in NVIDIA's words). The render queue stays empty, and input is sampled as late as possible. In NVIDIA's words, the pipeline then behaves as though it's CPU-bound while the GPU stays fully busy. Tick **Start each frame just in time**: the model moves all of the CPU's waiting to before the input read, and starts each frame as late as it can without the frame reaching the screen later or the GPU waiting for it (keeping a 1 ms margin, since real frame times vary). With the starting settings latency drops from 47.0 ms to 14.0 ms, the work plus the margin, at the same 60 frames a second. With the 20 ms GPU it drops from 49.7 ms to 36.7 ms on average, still at 50 frames a second. When the CPU is the bottleneck there's nothing to wait for, so it changes nothing.
+
+**Read the input later still.** Not all input has to be read at the start of the simulation. A camera's rotation can be read again when the render thread builds the view, after the simulation. VR goes furthest: Oculus's [late latching](https://developers.meta.com/horizon/blog/optimizing-vr-graphics-with-late-latching/) has the GPU copy the latest head pose into a buffer just before it renders with it, and a final warp corrects the image for the head's movement since.
+
+**Pace the frames.** Latency that changes from frame to frame reads as stutter. A game running at 30 frames a second on a 60 Hz display that doesn't know which refresh each frame lands on can show frames for 1, 2 and 3 refreshes in a row; Android's frame pacing docs give [49, 16 and 33 ms](https://developer.android.com/games/sdk/frame-pacing) as an example. The model shows a milder case with the 20 ms GPU: four frames shown for one refresh each, then one for two. Pacing means presenting at an even rate the display can hold, with explicit present times where the platform has them.
+
+<Tip title="Deadlines, again">
+The engine section's [deadlines lesson](/engine/deadlines-and-async-work/) makes the same trade for async jobs: a fixed latency of *K* ticks costs a little responsiveness and buys determinism and steady frames. Frames in flight are the GPU's version: a fixed number of frames of latency, bought for throughput.
+</Tip>
+
+## Takeaways
+
+- The CPU, the GPU, the swapchain and the display work on different frames at once. **Frames in flight** and **swapchain images** set how far apart they can get, and every frame between input and display adds latency.
+- **FIFO** (vsync) never tears or drops but blocks when the queue is full; **mailbox** never blocks and throws away frames; **immediate** shows frames at once and tears.
+- With fast CPU and GPU and FIFO, latency is mostly **waiting**: for an image, then in the present queue.
+- Engines cut it by **limiting frames in flight**, **waiting for the swapchain before reading input**, **starting each frame just in time** (Reflex), **reading input late** (late latching) and **pacing** frames evenly.
+
+## Further reading
+
+- Khronos, [`VkPresentModeKHR`](https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html).
+- Microsoft, [*Reduce latency with DXGI 1.3 swap chains*](https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains) and [`IDXGIDevice1::SetMaximumFrameLatency`](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgidevice1-setmaximumframelatency).
+- NVIDIA, [*Introducing NVIDIA Reflex*](https://www.nvidia.com/en-us/geforce/news/reflex-low-latency-platform/).
+- Meta, [*Optimizing VR graphics with late latching*](https://developers.meta.com/horizon/blog/optimizing-vr-graphics-with-late-latching/).
+- Android, [*Frame pacing*](https://developer.android.com/games/sdk/frame-pacing).
+- The engine section's [*Game loops*](/engine/game-loops/), [*Deadlines and async work*](/engine/deadlines-and-async-work/) and [*Threads, pools and fibers*](/engine/threads-pools-and-fibers/).

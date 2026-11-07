@@ -1,0 +1,69 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Shadow maps
+order: 16
+part: Lighting and shading
+summary: "Rendering depth from the light (Williams, 1978), why that gives shadow acne and peter-panning, constant and slope-scaled bias, softening the edges with percentage-closer filtering, and cascades for scenes bigger than one map. A sun you can move over the courtyard, with every setting live on your GPU."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A point is in shadow if something lies between it and the light. Ray tracing asks that question directly, per pixel. The rasteriser can't, but it can answer a different question very fast: *what's the nearest surface along each ray from a viewpoint?* That's what a depth buffer holds. Lance Williams's idea, in [*Casting curved shadows on curved surfaces*](https://dl.acm.org/doi/10.1145/965139.807402) (SIGGRAPH 1978), was to render a depth buffer **from the light**, then, for each pixel the camera sees, project the point into it and compare: if the light saw something nearer, the point is in shadow. Almost every game since has done this, and most of their shadow bugs come from the comparison.
+
+## The courtyard in sunlight
+
+<RenderWidget kind="shadows" />
+
+The sun is a directional light, so its shadow map is an **orthographic** depth image: parallel rays, one per texel. Every frame the GPU draws the courtyard's three meshes again from the sun, depth only, into a 32-bit float depth texture, then draws the camera's view and looks every pixel up in it. The widget starts with the sun lower than the concept lessons' light and off to the right, so the pillars' shadows fall towards the camera, and with **no bias at all**. The stripes all over the lit surfaces are **shadow acne**.
+
+The numbers beside the frame come from a model on the CPU: a ray through each pixel of a 320 × 200 image, looked up in a shadow map built the same way (for each texel, the nearest surface along a ray through its centre, which is what the rasteriser stores), compared with the same bias, and checked against the truth, a ray from the surface towards the sun. With no bias, 49.6% of the sunlit pixels the model sees get shadowed by mistake.
+
+**Map texels** shows the shadow map's texels as a checkerboard on the surfaces they cover, and **Shadow map** shows the map itself, lighter where the surface is nearer the sun.
+
+## Acne
+
+One texel of the map stores one depth: the depth of the surface at the texel's **centre**. But the texel covers an area, and every pixel inside it is compared with that one value. On a surface that slopes away from the light, half the points in a texel are a little farther from the light than its centre and half are nearer. The farther half fail the comparison and shade themselves: the floor, lit at a slant, turns into stripes, one per row of texels. Precision adds noise on top, because the rasteriser computed the stored depth and the pixel shader computes the compared one, in different ways. Resolution doesn't fix it: at 256 or 2048 texels the stripes get finer, but about half the floor is still wrong.
+
+## Bias, and peter-panning
+
+The fix is to move the comparison: subtract a **bias** from the pixel's depth, so it has to be clearly behind the stored surface to count as shadowed.
+
+- A **constant** bias has to cover the worst slope in the scene. At 2 cm, 17.3% of the sunlit pixels still have acne; at 5 cm, 1.1%.
+- A **slope-scaled** bias grows with how steeply the surface faces away from the light. The depth error across one texel is about the texel's width × tan θ, with θ the angle between the normal and the light, so this widget's slope bias is a number of texels' width × tan θ (capped at tan θ = 10, θ about 84°, so grazing surfaces don't get unbounded bias). With 1.5 texels and no constant bias at all, the acne falls to 0.1% (36 pixels).
+
+Too much bias moves shadows away from the objects that cast them: the contact shadow under a box disappears and the box seems to float. That's **peter-panning**, after the boy who lost his shadow. Set the constant bias to 30 cm and look at the bottom of the box and the crates: the model counts 63 shadowed pixels wrongly lit, against 41 with the suggested 2 cm and 1.5 texels. Some are lit by mistake whatever the bias, along shadow edges where one texel straddles the edge.
+
+The widget applies the bias in the shader, where it compares. The rasteriser can apply it instead while drawing the map: D3D's `DepthBias` and `SlopeScaledDepthBias`, Vulkan's `depthBiasConstantFactor` and `depthBiasSlopeFactor`, WebGPU's `depthBias` and `depthBiasSlopeScale`, OpenGL's `glPolygonOffset`. For a UNORM depth buffer, D3D's [depth bias](https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-output-merger-stage-depth-bias) is `DepthBias * r + SlopeScaledDepthBias * MaxDepthSlope`, where *r* is the smallest representable depth step and `MaxDepthSlope` the larger of the depth's horizontal and vertical slopes at the pixel; a float depth buffer scales the constant term by the exponent of the primitive's largest depth instead. Engines also offset the receiver along its normal, and some draw only back faces into the map, which moves the stored surface to the far side of closed objects.
+
+## Filtering: PCF
+
+The shadow's edge follows the texels, so it's jagged, and at 1024 texels across the whole courtyard each texel is 4.3 cm wide. Blurring the map doesn't help: averaging depths and then comparing gives a hard edge in a different place. **Percentage-closer filtering** (Reeves, Salesin and Cook, [*Rendering antialiased shadows with depth maps*](https://graphics.pixar.com/library/ShadowMaps/), SIGGRAPH 1987) does it the other way round: compare first, against several texels, and average the answers, so the result is the fraction of nearby texels that say "lit".
+
+GPUs do part of this for free. With a **comparison sampler** set to linear filtering, a depth texture lookup compares the reference against the four nearest texels and blends the four results bilinearly: **2 × 2** in the widget, still one lookup in the shader. **3 × 3** and **5 × 5** take 9 or 25 of those, one texel apart, for softer edges at 9 or 25 times the lookups. All of them soften the edge by the same amount everywhere; real penumbrae widen with the distance to the caster, which is what techniques like PCSS estimate.
+
+## Cascades
+
+One map over the whole courtyard spends its texels evenly over the ground, but the camera doesn't look at the ground evenly: near the camera a pixel covers a few millimetres of floor, far away tens of centimetres. At 5 m from the camera a pixel of the widget's 640 × 400 canvas covers about 1.7 cm; at 30 m, about 10 cm. The 4.3 cm texels are too coarse near the camera and finer than needed far away. That mismatch is **perspective aliasing**, and doubling the resolution to 2048 only brings the texels to 2.1 cm, at four times the memory.
+
+**Cascaded shadow maps** split the view into depth ranges and give each its own map, small near the camera and large far away. Tick **Cascades**: the widget splits the view out to 40 m into 4 cascades, each a 512 × 512 quarter of the same texture, so the memory doesn't change. The splits follow Zhang et al.'s practical scheme from [*Parallel-split shadow maps*](https://faculty.digipen.edu/~gherron/references/References/ShadowAlgorithms/ParallelSplitShadowMaps.pdf) (2006): a blend, by **λ**, of uniform splits and logarithmic ones. At λ = 0.5 they fall at 5.3 m, 11.0 m and 19.5 m, and the texels are 2.8 cm, 5.5 cm, 9.7 cm and 20 cm. **Cascades** colours each pixel by the map it uses. In a scene this short, one map is a fair fight; over a view of a kilometre, one map can't work at all, and cascades are what most engines with a sun use.
+
+The cost is that every cascade redraws the shadow casters: this widget draws each mesh four times into the map, once per cascade, with a viewport per quarter.
+
+<Tip title="Shimmering, and stabilising cascades">
+Tick **Move the camera** with **Stabilise** off. Each cascade is then fitted tightly around its slice of the view, so as the camera moves the map slides and resizes by fractions of a texel, and every shadow edge crawls. Stabilising fixes the map's size (here, the slice's bounding sphere, which doesn't change as the camera turns) and moves it only in whole texels, the technique Microsoft describes in [*Common Techniques to Improve Shadow Depth Maps*](https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps). The edges stay put; the price is a looser fit and bigger texels.
+</Tip>
+
+## Takeaways
+
+- A **shadow map** is a depth buffer drawn from the light; a pixel is shadowed if its depth, seen from the light, is behind what the map stored.
+- **Acne** comes from one stored depth per texel: about half of a sloped surface fails the comparison. **Bias** fixes it; **slope-scaled** bias fixes it where it's needed, and too much bias gives **peter-panning**.
+- **PCF** compares against several texels and averages the answers; a linear comparison sampler gives 2 × 2 in one lookup.
+- **Cascades** spend texels where the camera looks closely, split by a blend of uniform and logarithmic distances; **stabilised** cascades move in whole texels so edges don't shimmer.
+
+## Further reading
+
+- Lance Williams, [*Casting curved shadows on curved surfaces*](https://dl.acm.org/doi/10.1145/965139.807402), SIGGRAPH 1978.
+- William Reeves, David Salesin and Robert Cook, [*Rendering antialiased shadows with depth maps*](https://graphics.pixar.com/library/ShadowMaps/), SIGGRAPH 1987: percentage-closer filtering.
+- Fan Zhang, Hanqiu Sun, Leilei Xu and Lee Kit Lun, [*Parallel-split shadow maps for large-scale virtual environments*](https://faculty.digipen.edu/~gherron/references/References/ShadowAlgorithms/ParallelSplitShadowMaps.pdf), VRCIA 2006: the practical split scheme.
+- Microsoft, [*Common Techniques to Improve Shadow Depth Maps*](https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps) and [*Cascaded Shadow Maps*](https://learn.microsoft.com/en-us/windows/win32/dxtecharts/cascaded-shadow-maps): acne, peter-panning, fitting and stabilisation.
+- Microsoft, [*Depth Bias*](https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-output-merger-stage-depth-bias): how the rasteriser's bias is computed.

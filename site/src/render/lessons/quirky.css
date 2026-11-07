@@ -1,0 +1,61 @@
+/* Widgets of the two "Quirky solutions" lessons (texture-atlases, nanite-in-brief): a labelled
+   slider and the small comparison tables. Sizing follows render.css. */
+.rq-slider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--muted);
+}
+.rq-slider input {
+  flex: 1 1 140px;
+  max-width: 260px;
+  accent-color: var(--accent);
+}
+.rq-slider output {
+  font-family: var(--f-mono);
+  color: var(--ink);
+  min-width: 5.5em;
+}
+.rq-tab tr.on td,
+.rq-tab tr.on th {
+  color: var(--accent);
+}
+.rq-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.rq-key i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+.rq-key i.q1 {
+  background: color-mix(in srgb, var(--ink) 22%, var(--bg));
+}
+.rq-key i.q2 {
+  background: color-mix(in srgb, var(--warn) 60%, var(--bg));
+}
+.rq-key i.q3 {
+  background: var(--alert);
+}
+/* Two canvases side by side, stacked when the widget is narrow. */
+.rq-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.rd-fig.rq-pair > .rd-canvas {
+  width: calc(50% - 5px);
+}
+@container rd (max-width: 560px) {
+  .rd-fig.rq-pair > .rd-canvas {
+    width: 100%;
+  }
+}

@@ -1,0 +1,107 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Quirky solutions: Nanite in brief'
+order: 13
+part: Engine-side rendering
+summary: "Unreal's virtualised geometry: clusters of 128 triangles in a DAG of levels of detail, a cut chosen per frame by screen-space error, two-pass occlusion culling, software rasterisation of small triangles in compute, and a visibility buffer written with 64-bit atomics. Why people get excited, and what it costs."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+**Nanite** is Unreal Engine 5's geometry system. Brian Karis, Rune Stubbe and Graham Wihlidal presented it at SIGGRAPH 2021 in [*Nanite: A Deep Dive*](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf), and the goal on their slides is one sentence: "the cost of rendering geometry should scale with screen resolution, not scene complexity". Do for triangles what virtual texturing did for texels.
+
+The usual way of drawing meshes runs into three walls. Every object is a draw call, so the CPU cost grows with the number of objects. Levels of detail are whole meshes, authored or generated per asset, and switching between them **pops**. And triangle budgets are set by the slowest part of the GPU on tiny triangles. Nanite attacks all three. This lesson takes the pieces in order; the widgets run on the CPU, modelling one mechanism each.
+
+## Clusters, and a DAG of levels of detail
+
+When a mesh is imported, Nanite splits it into **clusters** of 128 triangles. Clusters are the unit of everything at run time: culling, level of detail, streaming. A level of detail is no longer a whole mesh; different parts of one mesh can be at different levels in the same frame.
+
+The coarser levels are built bottom-up, and the build is where the cleverness is:
+
+1. **Group** neighbouring clusters (Nanite partitions them with METIS, minimising the boundary between groups).
+2. **Merge** each group's triangles and **simplify** them to half as many, with the group's outer boundary **locked**: those edges may not change.
+3. **Split** the result back into clusters of 128 triangles. These are the next level up.
+4. Repeat, grouping the new clusters differently, until one cluster is left.
+
+Locking the boundary is what prevents **cracks**. Two neighbouring groups can be drawn at different levels, and because neither was allowed to move the edges they share, the edges still match. But locked edges that stay locked for ever collect detail: after a few levels everything else is coarse and the old boundaries are still full of triangles. Step 4 fixes that: the next level's groups are formed across the old boundaries, so an edge locked at one level is inside a group, and free to simplify, at the next. Because a group's clusters come from several parents and feed several children, the hierarchy isn't a tree but a **DAG**.
+
+The widget does the same build one dimension down, so it fits on a page: the mesh is a closed outline of 1,024 segments in 128 clusters of 8 (segments for triangles, 8 for Nanite's 128), groups of 4 clusters are simplified to half their segments with their ends locked and split in two, and each level's groups start one cluster later than the last, straddling the old boundaries. That gives 8 levels, 128, 64, 32, 16, 8, 4, 2, 1 clusters. The simplifier only removes points; Nanite's collapses edges and moves vertices, with an error estimate of its own.
+
+<RenderWidget kind="nanite-lod" />
+
+Drag the viewer around and change the threshold. Colours are levels; the small squares are where clusters start. Whatever you do, the clusters meet end to end: the claims check 6,804 cuts from viewer positions all over and around the outline, and every one is watertight.
+
+Switch to **Each cluster on its own**: every cluster is simplified by itself with its own ends locked, 8 segments to 4 to 2 to 1. It never cracks either, but the coarsest cut is 8 segments; built cluster by cluster it can't go below 128. Up close it can even win: from where the viewer starts, with 1 pixel of error allowed, the DAG draws 432 segments and the cluster-by-cluster build 340, because the DAG decides in groups and each group carries its worst cluster's error. Back away and the chart shows the difference that matters: the DAG keeps going down, 128 segments at a distance of 1,000, 48 at 3,000, 8 at 10,000, while the other build stops at 128. Cost that falls with screen size, all the way down, is the point.
+
+## Choosing the cut each frame
+
+Each group records the error its simplification introduced, made **monotonic** (never less than its children's), and a bounding sphere that encloses its children's. Each frame, every cluster is tested on its own, with no traversal order:
+
+> draw this cluster if its own error, projected to the screen, is at most the threshold, and its parent group's error is above it.
+
+Because the parent's error and bounds are never smaller than the child's, its projected error is never smaller either, so exactly one level is chosen along every path through the DAG, and all clusters of a group make the same choice. With the threshold under one pixel, Karis's argument is that a switch can't be seen, so there is no popping to hide. On the GPU this is a compute pass over a BVH of the clusters, run with persistent threads pulling from a work queue, that also does frustum and occlusion culling per cluster.
+
+## Occlusion against last frame's depth
+
+There is no depth prepass to cull against, so Nanite uses **two-pass occlusion culling** with a hierarchical Z-buffer (HZB). Pass one tests clusters against *last* frame's HZB, using last frame's transforms, and draws those that were visible: "what was visible last frame is very likely to be what is visible this frame". It builds a new HZB from that, then pass two tests everything that was rejected against the new HZB and draws what turned out to be visible after all. Nothing visible is missed; the cost is the second pass, which grows when the view changes a lot (a camera cut, fast motion, something big moving out of the way).
+
+## Small triangles: why a software rasteriser
+
+Pixel-sized detail needs pixel-sized triangles, and hardware rasterisers are built for big ones. They set up a few triangles per clock (Karis quotes at most 4 a clock for the GPUs of 2021) and shade in **2 × 2 quads**, so that derivatives can be taken across neighbours: a triangle that covers one pixel of a quad still occupies four shader lanes.
+
+The widget covers a 32 × 32 pixel square with triangles and counts the quads a conventional rasteriser would shade for each one. The darker squares are quads shaded for more than one triangle.
+
+<RenderWidget kind="nanite-quads" />
+
+| Triangles | Pixels each | Lanes shaded | Useful |
+|---|---|---|---|
+| 2 | 512 | 1,088 | 94.1% |
+| 8 | 128 | 1,152 | 88.9% |
+| 32 | 32 | 1,280 | 80.0% |
+| 128 | 8 | 1,536 | 66.7% |
+| 512 | 2 | 2,048 | 50.0% |
+| 2,048 | 0.5 | 4,096 | 25.0% |
+
+At 2,048 triangles, 1,024 of the 2,048 triangles cover no pixel centre at all, yet each still went through setup, and three quarters of the lanes shade nothing.
+
+So Nanite rasterises clusters whose triangles are small (edges under 32 pixels) itself, in a compute shader: a thread per vertex to transform them, then a thread per triangle that loops over the pixels in its bounding rectangle with edge functions (or a scanline variant, when rectangles get wider). Karis reports it about 3× faster than their fastest hardware path on average, more for pure micro-polygon cases. Clusters with bigger triangles still go to the hardware rasteriser, chosen per cluster.
+
+## The visibility buffer
+
+A compute shader has no depth test or output merger. Nanite's rasterisers instead write each pixel with a **64-bit atomic max** into a **visibility buffer**: depth in the top 30 bits, and below it the visible cluster's index (27 bits) and the triangle's index within the cluster (7 bits, since there are at most 128). The atomic keeps the largest value, and with depth in the high bits (reverse-Z: nearer is larger) that's the nearest triangle: a depth test and a write in one instruction.
+
+Nothing is shaded while rasterising. Materials run afterwards, once per pixel: decode the IDs, fetch and transform the triangle's three vertices again, compute barycentrics and analytic derivatives, and shade. In the 2021 design each material was a full-screen pass that used its material ID as a depth value with an "equal" test (and coarse tiles) so that it touched only its own pixels; Unreal 5.4 added compute-based material shading. Either way, the CPU cost is a draw per material, not per object.
+
+**Streaming** works like virtual texturing: when the cut wants finer clusters than are resident, the GPU requests them, and they stream in pages of cluster groups (128 KB in the talk). Only the detail that's visible needs to be in memory.
+
+## Why people get excited
+
+- **Film-quality assets go straight in.** Sculpts and photogrammetry with millions of triangles, without baking detail into normal maps or authoring LODs.
+- **No popping.** Levels of detail change per cluster, under a pixel of error.
+- **CPU cost independent of object count**, and GPU cost that follows the pixels on screen more than the triangles in the scene.
+- The same machinery renders Unreal's virtual shadow maps, so shadows get the same detail.
+
+## What it costs
+
+- **Big source assets.** Nanite's own format is compact: Epic's documentation says a mesh with Nanite enabled will "typically render faster, and take up less memory and disk space" than the same mesh without. But it invites film-density meshes, and a game built on them carries real triangles where it used to carry normal maps: big source files, long imports and builds, more data to ship and stream. Epic recommends SSDs.
+- **Aggregates.** Foliage, grass and other geometry "riddled with holes" is the worst case. Thousands of thin, separate leaves can't be simplified into something solid without changing how they look, overdraw is high, and leaves usually need masked materials and wind animation (world position offset, which Nanite supports only within limits). Unreal 5.7 added **Nanite Foliage**, experimental at the time: plants built from instanced parts (Nanite Assemblies), distant canopies drawn as voxels (Nanite Voxels), and wind by skinning rather than world position offset.
+- **Material limits.** Nanite draws opaque and masked materials, not translucent ones. Morph targets aren't supported, and deformation in general is limited; recent versions add Nanite skeletal meshes. Check your version's documentation: the list changes with every release.
+- **Occlusion leans on last frame.** Karis calls the reliance on the previous frame's depth "one of Nanite's biggest deficiencies": when the view changes a lot, the second pass has more to do.
+
+<Tip kind="note" title="What the widgets simplify">
+The LOD widget works on line segments in 2D, with fixed groups of four and a simplifier that only drops points; Nanite works on triangles, partitions clusters into groups with METIS, and simplifies with edge collapses. The quad widget counts lanes for a regular grid of triangles with the rasteriser's own edge functions and top-left rule; real GPUs also differ in how many triangles they set up per clock and how they pack quads into waves.
+</Tip>
+
+## Takeaways
+
+- Nanite builds a **DAG of 128-triangle clusters**: group, simplify with the group boundary locked, split, and regroup across the old boundaries, so there are **no cracks** and no edge stays locked for ever.
+- Each frame, each cluster is drawn if **its error is small enough and its parent's isn't**, with errors and bounds that never shrink going up.
+- **Two-pass occlusion culling** tests against last frame's HZB first, then rechecks what it rejected.
+- Small triangles go to a **software rasteriser in compute**; big ones to the hardware. Both write a **64-bit visibility buffer** with atomic max, and materials are shaded per pixel afterwards.
+- It costs **source data size**, struggles with **aggregates such as foliage** (what Nanite Foliage works on), supports **opaque and masked** materials only, and its occlusion **depends on last frame**.
+
+## Further reading
+
+- Brian Karis, Rune Stubbe, Graham Wihlidal, [*Nanite: A Deep Dive*](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf), SIGGRAPH 2021 Advances in Real-Time Rendering: the source for the build, the cut, culling, the rasterisers and the visibility buffer.
+- Epic Games, [*Nanite Virtualized Geometry*](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-virtualized-geometry-in-unreal-engine) (Unreal Engine 5.8 documentation): supported features, materials, foliage and limits in the current version.
+- Epic Games, [*Unreal Engine 5.7 Released*](https://forums.unrealengine.com/t/unreal-engine-5-7-released/2673913): Nanite Foliage, Assemblies, Voxels and skinning.

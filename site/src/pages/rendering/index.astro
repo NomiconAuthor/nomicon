@@ -24,8 +24,8 @@ const parts = OUTLINE.map((p) => ({
     <h1>How GPUs draw a frame, and how engines feed them</h1>
     <p class="lede">
       Four parts. <b>Pipeline fundamentals</b> run on a small software rasteriser written for this site, which you can pause after any vertex,
-      triangle or pixel. The later parts, on <b>engine-side rendering</b>, <b>lighting and shading</b> and <b>performance</b>, will run on your
-      real GPU through WebGPU. Lessons marked <span class="soon">coming</span> are planned and not written yet.
+      triangle or pixel. The later parts, on <b>engine-side rendering</b>, <b>lighting and shading</b> and <b>performance</b>, run on your
+      real GPU through WebGPU, falling back to WebGL2 where WebGPU is missing.
     </p>
     {
       parts.map((p) => (

@@ -1,0 +1,81 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Physically based shading
+order: 15
+part: Lighting and shading
+summary: "Microfacet BRDFs in practice: GGX, Smith and Schlick's Fresnel, the metalness and roughness workflow, energy conservation checked in a white furnace, and image-based lighting with the split-sum approximation. Spheres on your GPU, with the BRDF's lobe and energy computed beside them."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The [last lesson](/rendering/forward-deferred-clustered/) added up lights with plain diffuse shading: albedo × light × cos θ. Real surfaces also reflect, and how sharply depends on how rough they are at a scale far below a pixel. **Physically based shading** is the set of conventions most engines settled on around 2012–2014 to model that: a microfacet BRDF with a handful of inputs that mean the same thing under any lighting. This lesson follows the model Brian Karis described for Unreal Engine 4 in [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf) (SIGGRAPH 2013), which built on Brent Burley's [*Physically Based Shading at Disney*](https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf) (2012).
+
+## The widget
+
+<RenderWidget kind="pbr" />
+
+The grid has roughness from 0 on the left to 1 on the right, a dielectric row above a metal row; **One sphere** uses the material's own sliders. Light comes from a sun (the concept lessons' light direction) and from an **environment**: a sky, a darker ground and two bright windows, which the smooth spheres reflect. Beside the frame, computed on the CPU with the same formulas as the shader: the specular **lobe** for the current material, and a **white furnace** chart, explained below.
+
+## The microfacet BRDF
+
+A **BRDF**, *f*(**l**, **v**), says how much of the light arriving from direction **l** leaves towards **v**. The light a pixel sees is the sum over all incoming light of *f* × incoming radiance × cos θ<sub>l</sub>. Microfacet theory models a rough surface as many tiny perfect mirrors, and the specular BRDF as
+
+*f*<sub>spec</sub> = *D*(**h**) *F*(**v**, **h**) *G*(**l**, **v**) / (4 (**n**·**l**)(**n**·**v**))
+
+where **h** is the half vector between **l** and **v**: only microfacets facing along **h** reflect **l** into **v**.
+
+- ***D*, the normal distribution**: how many microfacets face along **h**. UE4 uses **GGX** ([Walter et al., 2007](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf), the same function as Trowbridge and Reitz's from 1975): *D* = α² / (π ((**n**·**h**)²(α² − 1) + 1)²). Its long tail gives highlights a soft glow that older Blinn-Phong lobes lack. Following Burley, α = roughness², which Burley found gives "a more perceptually linear change in the roughness". *D* is normalised: ∫ *D*(**h**)(**n**·**h**) d**ω** = 1, which the lesson's test checks numerically for every roughness.
+- ***G*, geometry or shadowing-masking**: the share of those microfacets that aren't hidden from **l** or **v** by their neighbours. UE4 uses Schlick's approximation of Smith's function, *G*<sub>1</sub>(**x**) = **n**·**x** / (**n**·**x** (1 − *k*) + *k*), once for **l** and once for **v**, with *k* = α / 2 for the environment and *k* = (roughness + 1)² / 8 for lights: that's Disney's modification, which Karis adopted "to reduce 'hotness'" of smooth surfaces, remapping roughness to (roughness + 1) / 2 before squaring.
+- ***F*, Fresnel**: how much light reflects rather than refracts, which rises towards 1 at grazing angles. **Schlick's approximation**: *F* = *F*<sub>0</sub> + (1 − *F*<sub>0</sub>)(1 − **v**·**h**)<sup>5</sup>, with *F*<sub>0</sub> the reflectance looking straight on. (Karis replaces the fifth power with a spherical Gaussian approximation; the widget uses the power.)
+
+The **diffuse** part is Lambert: *f*<sub>diff</sub> = albedo / π. Karis tried Burley's diffuse and "saw only minor differences".
+
+**View angle** in the widget's side panel moves the viewer; the lobe shows *f*<sub>spec</sub> cos θ<sub>l</sub> for light from every direction in the plane. Smooth surfaces give a narrow, tall lobe around the mirror direction; rough ones a wide, low one. Near grazing the lobe grows and tilts towards the horizon: that's Fresnel, and the shadowing term pulling against it.
+
+## Metalness and roughness
+
+The inputs are few on purpose: **base colour**, **metalness**, **roughness**, and for non-metals a **reflectance**.
+
+- A **dielectric** (plastic, wood, stone, skin) reflects a few per cent of light at its surface, the same for every colour, and scatters the rest under the surface, which comes back out tinted: that's the diffuse. Naty Hoffman's [course notes](https://blog.selfshadow.com/publications/s2013-shading-course/hoffman/s2013_pbs_physics_math_notes.pdf) put most dielectrics' *F*<sub>0</sub> "between 2% and 5%"; water's is 0.02, diamond's 0.17. Base colour is the diffuse albedo, and *F*<sub>0</sub> defaults to **0.04** (UE4's Specular of 0.5).
+- A **metal** has no diffuse: light that enters is absorbed. Its reflection is coloured and strong. In Hoffman's table, linear *F*<sub>0</sub> is (1.00, 0.71, 0.29) for gold, (0.95, 0.64, 0.54) for copper and (0.56, 0.57, 0.58) for iron. Base colour becomes *F*<sub>0</sub>.
+
+So the shader computes *F*<sub>0</sub> = lerp(reflectance, base colour, metalness) and diffuse albedo = base colour × (1 − metalness). Metalness in between is for the transitions in a texture (rust on metal, dust on paint); Karis advises that whether a material is metal, it's "best to just say 'Yes!'" or no. The **Gold**, **Copper**, **Iron** and **Silver** presets use Hoffman's values; switch the view to **Specular** and **Diffuse** to see that metals have no diffuse at all.
+
+## Energy conservation and the white furnace
+
+A surface lit equally from every direction by white light, inside a **white furnace**, should reflect at most what arrives: an albedo of 1 or less. Lambert's 1 / π is what makes that work: ∫ (1 / π) cos θ d**ω** = 1, so a white diffuse surface reflects exactly what it receives.
+
+The furnace chart integrates the specular BRDF the same way, on the CPU, with the 1,024 samples per entry Karis's code uses. With *F* = 1 (blue line), a perfect mirror's microfacets would return everything. GGX with the Smith term doesn't: light that bounces off one microfacet into another is counted as lost, so rough surfaces come out too dark. In this model, looking straight on, the specular lobe reflects 100% at roughness 0, 90% at roughness 0.5 and only 31% at roughness 1. Kulla and Conty's [*Revisiting Physically Based Shading at Imageworks*](https://blog.selfshadow.com/publications/s2017-shading-course/imageworks/s2017_pbs_imageworks_slides_v2.pdf) (2017) add back the missing multiple scattering with a small extra term, read from a table like the one below.
+
+The gold line is a white dielectric: Lambert diffuse plus the 0.04 specular, added together as UE4's model does. It reflects 1.04 times the light that arrives at normal incidence, and up to 1.59 times at a grazing view (*n*·*v* = 0.1) when it's smooth: the specular adds energy the diffuse never gave up. Some engines scale the diffuse down by (1 − *F*), or by one minus the specular's albedo, to keep the total under 1. Turn the view angle up to see the gap open.
+
+## Image-based lighting and the split sum
+
+A sun is one direction; the environment is light from all of them. Lighting with it means integrating the BRDF against the whole environment for every pixel, which is too slow to do by brute force. Karis's **split-sum approximation** splits the integral into two factors that can each be precomputed:
+
+1. **The environment, prefiltered for each roughness**: the light the lobe would gather, assuming the view looks straight along the normal (*n* = *v* = *r*). The widget stores it as an equirectangular map, 64 × 32 texels per level, for roughness 0, 0.25, 0.5, 0.75 and 1, and blends between levels. A real engine uses a cube map's mip chain, one roughness per mip.
+2. **The BRDF integrated against white light**, which depends only on roughness and *n*·*v*, so it fits in a 2D table. Fresnel's *F*<sub>0</sub> factors out, leaving a scale and a bias: the integral is *F*<sub>0</sub> · *A* + *B*. The widget's table is 32 × 32; at roughness 0.5 and *n*·*v* = 0.5, *A* is 0.727 and *B* is 0.019.
+
+The shader multiplies the two. Karis notes it's "exact for a constant *L*<sub>i</sub>(**l**)": in the white furnace, the table is the exact answer, and that's how the furnace chart is computed. The error comes from the *n* = *v* = *r* assumption, which loses the stretched reflections you see on wet roads at grazing angles. Diffuse uses a third table: the environment convolved with a cosine, one more band of the same texture.
+
+Untick **Sun** to see the environment's contribution alone, and untick **Environment** to see how flat the spheres are with one light.
+
+<Tip title="Units and tone mapping">
+The values in this model are linear radiance, and the sun and windows are brighter than 1. The widget maps them to the screen with a filmic curve (Narkowicz's fit of ACES) and the sRGB encoding; the [post-processing lesson](/rendering/post-processing/) is about that step. Without it, everything brighter than 1 clips to white.
+</Tip>
+
+## Takeaways
+
+- The specular BRDF is *D* *F* *G* / (4 (**n**·**l**)(**n**·**v**)): GGX for *D*, Smith (in Schlick's form) for *G*, Schlick for *F*.
+- **Metalness** picks between a dielectric (diffuse = base colour, *F*<sub>0</sub> about 0.04) and a metal (no diffuse, *F*<sub>0</sub> = base colour). **Roughness** squared is GGX's α.
+- **Energy conservation** is a test you can run: Lambert passes the white furnace exactly; single-scattering GGX loses energy at high roughness (31% left at roughness 1 here), and adding diffuse and specular without trading them off gains it.
+- **Image-based lighting** with the **split sum**: a prefiltered environment per roughness, times *F*<sub>0</sub> · *A* + *B* from a 2D table.
+
+## Further reading
+
+- Brian Karis, [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf), SIGGRAPH 2013 course notes: the model, the remappings and the split sum, with code.
+- Brent Burley, [*Physically Based Shading at Disney*](https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf), SIGGRAPH 2012 course notes: where α = roughness² and the "principled" parameters come from.
+- Bruce Walter, Stephen Marschner, Hongsong Li and Kenneth Torrance, [*Microfacet Models for Refraction through Rough Surfaces*](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf), EGSR 2007: GGX.
+- Naty Hoffman, [*Background: Physics and Math of Shading*](https://blog.selfshadow.com/publications/s2013-shading-course/hoffman/s2013_pbs_physics_math_notes.pdf), SIGGRAPH 2013 course notes: microfacets, Fresnel and the *F*<sub>0</sub> table.
+- Christopher Kulla and Alejandro Conty, [*Revisiting Physically Based Shading at Imageworks*](https://blog.selfshadow.com/publications/s2017-shading-course/imageworks/s2017_pbs_imageworks_slides_v2.pdf), SIGGRAPH 2017: energy lost to single scattering, and how to put it back.
+- Eric Heitz, [*Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs*](https://jcgt.org/published/0003/02/03/), JCGT 2014: the Smith term properly.

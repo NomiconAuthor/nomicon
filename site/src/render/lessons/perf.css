@@ -1,0 +1,173 @@
+/* The performance lessons' widgets (overdraw-and-fill-rate, bandwidth, timing-the-gpu,
+   cpu-gpu-frame-pipeline). Sizing follows render.css; these are the extra pieces. */
+
+.rp-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+.rp-slider > span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.rp-slider input {
+  width: clamp(90px, 22vw, 180px);
+  accent-color: var(--accent);
+}
+.rp-slider output {
+  font-family: var(--f-mono);
+  min-width: 4.5em;
+  color: var(--ink);
+}
+.rp-note {
+  margin: 0;
+  color: var(--warn);
+  font-size: 13px;
+}
+.rp-fine {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.rd-tab tr.rp-total th,
+.rd-tab tr.rp-total td {
+  font-weight: 600;
+  color: var(--ink);
+}
+.rd-tab tr.rp-off th,
+.rd-tab tr.rp-off td {
+  color: var(--muted);
+  opacity: 0.6;
+}
+.rp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.rp-legend i {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  vertical-align: -2px;
+  margin-right: 4px;
+  border: 1px solid var(--line-soft);
+}
+.rp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+}
+.rp-h {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.rp-warn {
+  margin: 0;
+  color: var(--alert);
+  font-size: 13px;
+}
+.rp-warn:empty {
+  display: none;
+}
+/* Bars for the timing comparison. */
+.rp-bars {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.rp-bars .bar {
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+  min-width: 2px;
+  max-width: 100%;
+}
+.rp-bars .bar.cpu {
+  background: var(--c2);
+}
+.rp-bars .bar.wait {
+  background: var(--warn);
+}
+.rp-bars .lab {
+  color: var(--muted);
+}
+.rp-bars .val {
+  font-family: var(--f-mono);
+  color: var(--ink);
+  text-align: right;
+}
+/* The pass list with load and store ops (bandwidth). */
+.rp-att {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  width: 100%;
+}
+.rp-att th,
+.rp-att td {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+.rp-att th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.rp-att td.num {
+  font-family: var(--f-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+.rp-att select {
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 2px;
+  max-width: 100%;
+}
+.rp-att tr.pass td {
+  padding-top: 8px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rp-wrap {
+  overflow-x: auto;
+}
+.rp-code {
+  margin: 0;
+  max-height: min(16rem, 40vh);
+  overflow: auto;
+  font-size: 12px;
+}
+.rd-tab td.rp-cell-note {
+  white-space: normal;
+  font-family: inherit;
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 8em;
+}
+/* Compact readout tables in these widgets, so the widget stays near one screen tall. */
+:is(.rd-fill, .rd-bandwidth, .rd-timing, .rd-pipe) .rd-tab th,
+:is(.rd-fill, .rd-bandwidth, .rd-timing, .rd-pipe) .rd-tab td {
+  padding: 2px 8px 2px 0;
+  line-height: 1.35;
+}
+:is(.rd-fill, .rd-bandwidth, .rd-timing, .rd-pipe) .rd-side {
+  gap: 6px;
+}

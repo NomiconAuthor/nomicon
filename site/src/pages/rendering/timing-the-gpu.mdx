@@ -1,0 +1,81 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Timing the GPU
+order: 20
+part: Performance and profiling
+summary: "Why a CPU timer around draw calls measures almost nothing, how timestamp queries let the GPU time itself (WebGPU, D3D12, Vulkan, and Chrome's 100 µs rounding), what pipeline statistics count, and what PIX, RenderDoc, Nsight Graphics and Radeon GPU Profiler show and when to reach for each."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The [profiling lesson](/engine/profiling/) is about finding where the CPU's time goes. The GPU needs a clock of its own, because it runs on its own schedule: a frame's GPU work happens after the CPU has recorded it, often while the CPU is already on the next frame. This lesson shows what goes wrong when you time it from the CPU, how GPUs time themselves, and which tools to reach for.
+
+## Why a CPU timer can't see GPU work
+
+[Nothing is drawn](/rendering/same-frame-real-gpu/#command-encoders-and-queues) when you call `drawIndexed`. The call records a command into a command buffer; `submit` puts the buffer in a queue; the GPU gets to it when it gets to it. So a timer around the draw calls measures how long it took to *record* them, which is CPU work and usually small whatever the GPU then does with them. The [next lesson](/rendering/cpu-gpu-frame-pipeline/) follows frames through that queue.
+
+The obvious fix, waiting until the GPU has finished and timing that, measures something else again: the GPU's work, plus whatever was ahead of it in the queue, plus the time it takes the CPU to find out. And the wait itself is the problem. A CPU that blocks until the GPU is done can't record the next frame meanwhile, so the two stop overlapping and the frame gets slower because you measured it.
+
+The widget draws a frame whose GPU cost you control: layers of full-screen triangles, one instanced draw, each fragment running a loop. It times every frame four ways, live:
+
+- **CPU timer around the calls:** `performance.now()` before recording and after `submit`.
+- **CPU timer until the GPU is done:** until WebGPU's `queue.onSubmittedWorkDone()` resolves. On WebGL2, which has no such promise, it reads one pixel back with `readPixels`, which can't return before the GPU has drawn it: a real stall, done on purpose.
+- **GPU timestamps:** the GPU's own clock, written at the start and end of each pass (below).
+- **Time between animation frames:** how often the page gets to draw at all.
+
+<RenderWidget kind="gpu-timing" />
+
+Turn the cost up and watch the bars, not the numbers (which are your machine's). The first bar barely moves: the calls are the same calls however expensive the shader they ask for. The GPU bar grows with layers × iterations. The "until done" bar is at least as long as the GPU's (give or take the rounding), and usually longer. The time between animation frames typically stays at your display's refresh interval until the GPU's work no longer fits in it, then grows: the frame has become GPU-bound, and nothing the CPU timer around the calls showed would have told you.
+
+## Timestamp queries
+
+A **timestamp query** asks the GPU to write its own clock into a small buffer when it reaches a point in the command stream. Write one at the start of a pass and one at the end, copy the results into a buffer the CPU can read, and read them a frame or two later, when the GPU has caught up. A renderer keeps a ring of these buffers, so it never waits for one.
+
+- **WebGPU:** ask for the optional `timestamp-query` feature when you create the device (it isn't always offered). A render pass descriptor's `timestampWrites` names a query set and the indices to write at the beginning and end of the pass; `resolveQuerySet` copies the values into a buffer, and `mapAsync` reads them. The values are nanoseconds, though how they're produced is up to the implementation. Chrome [rounds them to 100 µs](https://developer.chrome.com/docs/web-platform/webgpu/developer-features) to blunt timing attacks unless you turn on its "WebGPU Developer Features" flag, so passes as small as these often read 0 or jump in steps.
+- **WebGL2:** the `EXT_disjoint_timer_query_webgl2` extension measures the time between `beginQuery` and `endQuery`, and throws the result away if something (a power-state change, say) made the timer unreliable. Firefox and Safari don't expose it.
+- **D3D12:** a query heap of type `TIMESTAMP`, `EndQuery` with `D3D12_QUERY_TYPE_TIMESTAMP` wherever you want a sample, `ResolveQueryData` into a readback buffer. The values are ticks: divide by the queue's `GetTimestampFrequency`. A timestamp is [taken once all preceding work has finished](https://learn.microsoft.com/en-us/windows/win32/direct3d12/timing). `GetClockCalibration` pairs a GPU timestamp with the CPU's `QueryPerformanceCounter`, so you can put GPU work on the same timeline as CPU work.
+- **Vulkan:** a query pool of type `VK_QUERY_TYPE_TIMESTAMP` and `vkCmdWriteTimestamp2` at a pipeline stage; multiply ticks by the device's `timestampPeriod` to get nanoseconds. `VK_KHR_calibrated_timestamps` does what `GetClockCalibration` does.
+
+Three things make timestamps harder to read than they look:
+
+- **The GPU overlaps work.** Consecutive draws and passes run at the same time where nothing forbids it, so the time between a pass's two timestamps includes the tail of the pass before and the start of the one after, and per-pass times don't add up exactly to the frame.
+- **Clocks move.** A GPU raises and lowers its clock with load and temperature, so the same work takes different time from run to run. Microsoft warns that on some hardware the timestamp clock can stop while the GPU is idle, and has `SetStablePowerState` to pin clocks while you profile (not to ship).
+- **Small numbers are noisy.** Take medians over many frames, as the widget does, and compare passes with each other on the same machine.
+
+<Tip title="Keep them on">
+GPU timestamps are cheap enough to leave on in development builds: a pair per pass, resolved every frame, read a few frames later. Engines draw them in an on-screen overlay and feed them to their CPU profiler's timeline (Tracy's GPU zones do this), so a GPU-bound frame is visible the moment it happens, not after someone takes a capture.
+</Tip>
+
+## Pipeline statistics
+
+A **pipeline-statistics query** counts instead of timing: how many vertices the input assembler read, how many times each shader stage ran, how many primitives reached and left the clipper. In D3D12 it's `D3D12_QUERY_TYPE_PIPELINE_STATISTICS`, whose result has fields such as `IAVertices`, `IAPrimitives`, `VSInvocations`, `CInvocations`, `CPrimitives` and `PSInvocations`; Vulkan's `VK_QUERY_TYPE_PIPELINE_STATISTICS` counts the same things (it's an optional device feature). WebGPU has no such query, so the widget shows what one would count for its work pass from the frame's plan.
+
+They're for questions with exact answers: did culling remove the triangles you expected (`CInvocations` against `IAPrimitives`), how many times did the pixel shader really run (`PSInvocations` against the pixels on screen is [overdraw](/rendering/overdraw-and-fill-rate/))? The widget's starting frame draws 8 layers, so 8 primitives reach the rasteriser, and each covers all 230,400 pixels of its 640 × 360 target: 1,843,200 pixel-shader invocations, running 29,491,200 iterations of the loop between them. Double the layers and every count doubles; raise the iterations and only the work inside each invocation grows, which only the timestamps see.
+
+## The tools
+
+Timestamps tell you which pass is slow. Finding out why takes a GPU profiler. The common ones, and when to reach for each:
+
+| Tool | What it is | APIs | Reach for it when |
+|---|---|---|---|
+| [**PIX**](https://devblogs.microsoft.com/pix/timing-captures-new/) | Microsoft's profiler and debugger for Direct3D 12 on Windows and Xbox. *GPU captures* record a frame and replay it to time and inspect each event; *timing captures* record what every CPU thread and every D3D12 queue did across many frames, for up to hours | D3D12 | The frame is slow and you need to see CPU and GPU together, or which events in a frame cost the most |
+| [**RenderDoc**](https://renderdoc.org/docs/getting_started/faq.html) | A frame debugger: capture one frame and inspect every draw, its state, inputs and outputs, with overlays such as quad overdraw. It can time each action by replaying it, but capturing changes the timing it measures | Vulkan, D3D11, D3D12, OpenGL, OpenGL ES | Something draws wrong, or you need to see what a frame really does. It's a debugger first |
+| [**Nsight Graphics**](https://developer.nvidia.com/nsight-graphics) | NVIDIA's frame debugger and profiler. *GPU Trace* shows a timeline with each hardware unit's throughput, cache hit rates and memory throughput; the shader profiler shows where shaders stall and why | D3D11, D3D12, Vulkan, OpenGL | A pass is slow on NVIDIA hardware and you need to know which unit limits it |
+| [**Radeon GPU Profiler**](https://gpuopen.com/rgp/) | AMD's profiler: how wavefronts went through the GPU (occupancy), which barriers flushed caches or stalled the queue, when each command buffer ran on each queue, and the average latency of each shader instruction | D3D12, Vulkan | A pass is slow on AMD hardware, or barriers and queue overlap look suspicious |
+
+The usual order: in-engine timestamps say the GPU is the bottleneck and which pass to look at; PIX or the vendor's tool says why (bandwidth, occupancy, a stall on a barrier, a slow shader); RenderDoc is for when the picture itself is wrong. Apple's Xcode and Arm's Performance Studio do the same jobs for their GPUs. The [profiling lesson's table](/engine/profiling/#which-tool-does-what) puts these next to the CPU profilers.
+
+## Takeaways
+
+- A CPU timer around draw calls measures **recording**, not the GPU's work. Waiting for the GPU to finish measures more than its work and **serialises** CPU and GPU.
+- **Timestamp queries** let the GPU write its own clock between commands: `timestamp-query` in WebGPU (rounded to 100 µs in Chrome), `TIMESTAMP` query heaps in D3D12, timestamp query pools in Vulkan. Read them frames later, from a ring of buffers.
+- Per-pass times **overlap** and **wobble** with clocks: compare medians, on one machine.
+- **Pipeline statistics** count work exactly: primitives, shader invocations. WebGPU doesn't have them.
+- **PIX** for D3D12 frames and CPU–GPU timelines, **Nsight Graphics** and **Radeon GPU Profiler** for why a pass is slow on that vendor's hardware, **RenderDoc** for what a frame actually draws.
+
+## Further reading
+
+- Microsoft, [*Timing*](https://learn.microsoft.com/en-us/windows/win32/direct3d12/timing) (D3D12 timestamps, calibration and stable power state).
+- Chrome, [*WebGPU developer features*](https://developer.chrome.com/docs/web-platform/webgpu/developer-features) (timestamp quantisation) and MDN on [`beginRenderPass`](https://developer.mozilla.org/en-US/docs/Web/API/GPUCommandEncoder/beginRenderPass) (`timestampWrites`).
+- Microsoft, [*PIX timing captures*](https://devblogs.microsoft.com/pix/timing-captures-new/); [RenderDoc's FAQ](https://renderdoc.org/docs/getting_started/faq.html) and [event browser](https://renderdoc.org/docs/window/event_browser.html) (timing actions); NVIDIA [Nsight Graphics](https://developer.nvidia.com/nsight-graphics); AMD [Radeon GPU Profiler](https://gpuopen.com/rgp/).
+- The engine section's [*Profiling*](/engine/profiling/) lesson: frames rather than averages, sampling against instrumentation, and the CPU-side tools.

@@ -1,0 +1,93 @@
+---
+layout: ../../layouts/Lesson.astro
+title: How shaders run
+order: 6
+part: Pipeline fundamentals
+summary: 'Waves and warps: one instruction stream for 32 or 64 lanes, what a divergent branch costs, registers and occupancy, and why tiny triangles waste most of their work in 2 × 2 quads.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The lessons so far ran the fragment shader once per pixel, one after another. A GPU runs thousands at once, and the way it does that explains a handful of rules every graphics programmer meets: branches can cost both sides, a shader that uses too many registers runs slower even when it does less, and lots of tiny triangles are expensive out of all proportion to their size.
+
+## Waves: one instruction, many lanes
+
+A GPU core doesn't fetch instructions for each pixel. It groups invocations of the same shader into a **wave** (AMD's term; NVIDIA says **warp**, Vulkan **subgroup**) and runs them in lockstep: each instruction is fetched and issued once, and executed by every **lane** of the wave on its own data. That's SIMD, with the shader compiler writing scalar-looking code for one lane.
+
+NVIDIA's warps are 32 lanes. AMD's GCN GPUs ran waves of 64; RDNA runs 32 natively and can also run a shader as wave64, over two cycles. Intel compiles shaders for 8, 16 or 32 lanes. A shader can ask with `WaveGetLaneCount()` in HLSL or `gl_SubgroupSize` in GLSL. For pixel shaders, a wave is made of whole 2 × 2 quads (the [textures lesson](/rendering/textures-and-sampling/) explained why quads): 8 of them for 32 lanes, 16 for 64.
+
+## Branches: both sides, masked
+
+Lanes in a wave share one instruction stream, so what happens at an `if` where some lanes go one way and some the other? The wave runs **both sides**. A per-lane **execution mask** (on AMD, the `EXEC` register) switches off the lanes that didn't take the side being run; they sit idle while the others work, and then the roles swap. A branch is only skipped when *no* lane in the wave takes it.
+
+The widget's pixel shader lights a floor with a spotlight: inside the light's radius it runs four lines of lighting, outside it one line of ambient. Pick a wave and step through its instructions. The lanes panel shows each lane, lit or unlit, with the ones masked off faded.
+
+<RenderWidget kind="waves" />
+
+Counting only the lines that compute, a wave whose lanes are all lit issues 7 instructions, and one with no lit lane issues 4: the branch saves the unlit waves the lighting entirely. A wave on the edge of the light issues 8, both sides, and its unlit lanes spend the lighting instructions idle. Over the frame, with 32 lanes 20 of the 122 waves are divergent; with 64 lanes, 13 of 61. Bigger waves straddle more edges, and each divergent one wastes more lanes. Counting every lane slot the waves issue, 87% do a real pixel's work with 32 lanes and 84% with 64; the rest are masked-off lanes, helper lanes and the empty end of the last wave.
+
+So branches in shaders aren't bad in themselves:
+
+- A branch on a **uniform** value (a constant, a material flag) goes the same way for every lane, so it never diverges. AMD's GPUs even evaluate such values once per wave, on a scalar unit.
+- A branch that's **coherent in screen space**, like this light's radius, diverges only along its boundary. It's usually a win when it skips expensive work.
+- A branch that's **incoherent**, varying pixel by pixel like a noise threshold, makes most waves run both sides. Then it costs as much as computing both and selecting, plus the overhead of the branch.
+
+## Registers and occupancy
+
+Waves don't run alone either. Each SIMD keeps several waves **resident** and switches between them every cycle at no cost, so when one waits for a texture or memory read, which GPUOpen describes as taking hundreds of cycles when it misses the cache, another can issue. How many waves fit is the **occupancy**, and it's usually limited by **registers**: every lane of every resident wave needs its own copy of every register the shader uses, all held in the SIMD's register file.
+
+On AMD's RDNA 3 GPUs with the larger register file (the RX 7900 series that GPUOpen's [*Occupancy explained*](https://gpuopen.com/learn/occupancy-explained/) uses), a SIMD has 1,536 vector registers per lane for wave32 and 16 wave slots. Registers are handed out in blocks of 24 (LLVM's AMDGPU backend has the numbers). So:
+
+| Registers per lane | Waves per SIMD |
+|---|---|
+| up to 96 | 16 |
+| 120 | 12 |
+| 128 | 10 |
+| 168 | 9 |
+| 256 | 5 |
+
+Those are exact for that hardware. What happens to speed isn't, so the widget uses a **toy model**: each wave runs 40 instructions, then waits 400 cycles for memory, over and over. With 16 waves resident, the SIMD always has one ready. At 128 registers, 10 waves keep it busy 91% of the time; at 256 registers, 5 waves only 46%.
+
+<RenderWidget kind="occupancy" />
+
+That's why a shader can get slower by using *more* registers, even with fewer instructions: unrolling a loop or keeping more values live can drop it under a threshold. Profilers (Radeon GPU Profiler, Nsight, PIX) show each shader's register count and occupancy. Occupancy isn't a goal on its own, though: a shader that issues its memory reads early and has plenty of independent maths to do while it waits can run well with few waves. It matters when waves have nothing to do but wait.
+
+## Tiny triangles and helper lanes
+
+Pixels are shaded in 2 × 2 quads, and a quad runs all four lanes even if the triangle covers only one of its pixels: the other three are **helper lanes**, there to give the derivatives a value. Along the edges of a big triangle that's a small loss. When triangles get down to a few pixels, almost every quad is on an edge.
+
+The widget cuts one 32 × 32-pixel square into more and more triangles. The pixels shaded stay the same, 1,024 (the top-left rule gives each pixel to exactly one triangle); what grows is the quads:
+
+<RenderWidget kind="quads" />
+
+| Triangles | Quads launched | Lanes run | Helper lanes | Lanes that shade a pixel |
+|---|---|---|---|---|
+| 2 | 272 | 1,088 | 64 | 94% |
+| 8 | 292 | 1,168 | 144 | 88% |
+| 32 | 372 | 1,488 | 464 | 69% |
+| 128 | 468 | 1,872 | 848 | 55% |
+| 512 | 512 | 2,048 | 1,024 | 50% |
+| 2,048 | 1,024 | 4,096 | 3,072 | 25% |
+
+At 2,048 triangles each covers half a pixel on average, and 1,024 of them cover no pixel centre at all. Every one that does launches its own quad for its single pixel: four lanes to shade one. Fatahalian and others measured the same effect on real hardware, and proposed merging quads from neighbouring triangles, which cut shading work for pixel-sized triangles by a factor of eight.
+
+This is the cost behind level of detail for meshes: drawing a distant object with fewer, larger triangles saves pixel shading, not just vertex work. It's also part of why Nanite rasterises small triangles in a compute shader into a visibility buffer and shades the pixels in a later pass, where quads come from the screen rather than from triangles.
+
+<Tip kind="note" title="What the widgets simplify">
+The widget packs quads into waves in the order this rasteriser launches them, walking 8 × 8-pixel tiles; real GPUs have their own tile sizes and may pack quads from several triangles or several draws into one wave. Instruction counts here are lines of the shader, not machine instructions, and the latency model has one SIMD and fixed timings. The register and wave-slot numbers are AMD's; NVIDIA's and Intel's limits differ, but the trade-off is the same.
+</Tip>
+
+## Takeaways
+
+- A **wave** (warp, subgroup) runs one instruction stream for 32 or 64 lanes; pixel shader waves are whole 2 × 2 quads.
+- A **divergent branch** runs both sides with lanes masked off. Uniform and screen-coherent branches are cheap; pixel-by-pixel incoherent ones aren't.
+- **Occupancy** is how many waves a SIMD keeps resident to hide memory latency; **registers** per lane usually limit it.
+- Quads run four lanes even for one covered pixel: **tiny triangles** spend most of their shading on **helper lanes**.
+
+## Further reading
+
+- AMD GPUOpen, [*Occupancy explained*](https://gpuopen.com/learn/occupancy-explained/): wave slots, register limits and latency hiding on RDNA.
+- AMD, [*RDNA Architecture*](https://gpuopen.com/download/RDNA_Architecture_public.pdf) whitepaper: wave32 and wave64, and the scalar unit.
+- Kayvon Fatahalian and others, [*Reducing Shading on GPUs using Quad-Fragment Merging*](https://doi.org/10.1145/1778765.1778804) (SIGGRAPH 2010): how much quad shading costs small triangles.
+- Fabian Giesen's [*A trip through the graphics pipeline*](https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/), parts 8 and 9, on pixel processing.
+- The [D3D11.3 functional spec](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm), §3.5.7, on 2 × 2 quads and helper pixels.

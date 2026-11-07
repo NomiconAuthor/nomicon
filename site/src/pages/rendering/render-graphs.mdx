@@ -1,0 +1,67 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Render graphs
+order: 10
+part: Engine-side rendering
+summary: 'Describing a frame as passes that declare what they read and write, so the engine can cull passes nobody needs, order them, insert the barriers D3D12 and Vulkan require, and alias transient memory. A small graph compiler you can edit.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A modern frame is dozens of passes: shadows, a depth prepass, a G-buffer, ambient occlusion, lighting, sky, transparency, bloom, temporal anti-aliasing, tone mapping, UI. Each reads textures that earlier passes wrote. Written by hand, that's a lot of bookkeeping that has to stay right as features come and go: which textures to allocate and when to free them, and on D3D12 and Vulkan, every **barrier** between a pass that writes a texture and the next one that reads it.
+
+A **render graph** (Frostbite's *FrameGraph*, Unreal's *Render Dependency Graph*, Unity's *Render Graph*) turns that around. Each frame, the engine first **declares** the passes and, for each one, which resources it reads and writes and how. Then it **compiles** the graph: works out what's needed, in what order, with which barriers and how much memory. Only then does it **execute** the passes, calling each one's code with real GPU resources. Yuriy O'Donnell's GDC 2017 talk [*FrameGraph: Extensible Rendering Architecture in Frostbite*](https://www.slideshare.net/DICEStudio/framegraph-extensible-rendering-architecture-in-frostbite) named the three phases setup, compile and execute.
+
+## A frame you can edit
+
+The widget is a small render graph compiler. The frame is a deferred renderer's: 15 passes declared when everything is on. Each column is a pass, each row a resource; a filled square is a write, an outlined one a read. Turn effects on and off, or send the normals to the screen instead of the final image, and the graph is compiled again. It runs on the CPU, because the compiler is the point: it's the same work an engine does every frame before it records a single command.
+
+<RenderWidget kind="render-graph" />
+
+## Culling passes
+
+Compiling starts from the output, the **backbuffer**, and walks backwards: a pass is kept if something that reaches the screen reads what it writes. Everything else is **culled**: never run, and its resources never allocated. A write to the TAA history, which lives from frame to frame, is kept as long as the pass it copies from is.
+
+With everything on, 14 of the 15 passes run. The one that doesn't is the **debug view**, which writes a visualisation of the normals that nothing reads. Turn off **TAA** and the motion-vector pass goes too: the setup code still declares it, but only TAA read it, so 11 of 13 passes run. Nobody had to remember to switch it off.
+
+Now choose **Normals (debug)**. The tone-mapping pass reads the debug view instead of the lit image, and the graph keeps 4 passes: the depth prepass, the G-buffer, the debug view and the final pass. Lighting, shadows, ambient occlusion, sky, transparency, bloom and TAA, 11 passes in all, are culled because nothing that reaches the screen depends on them. That's the example O'Donnell gave: plug a debug output into the backbuffer and the passes it bypasses switch themselves off.
+
+## Ordering
+
+Each read refers to the last write before it, so the declaration order is already a valid order, and that's what Frostbite and Unreal execute. What the graph adds is knowing the dependencies. The pass list shows each pass's **dependency level**: the shadow map and the depth prepass depend on nothing, the G-buffer depends on the depth prepass, and so on. Passes that don't depend on each other can overlap on the GPU, or move to an **async compute** queue; Frostbite's example moved SSAO there with one call in its setup, and the graph inserts the cross-queue synchronisation and keeps its resources alive until the other queue is done. Engines can also reorder passes to shorten lifetimes or to merge passes into one render pass, which matters on tile-based GPUs.
+
+## Barriers
+
+A GPU doesn't keep a texture coherent for every use at once. A render target is written through the colour pipeline's caches and may be **compressed** (delta colour compression, depth compression), while a shader reads textures through the texture caches, which don't understand that compression. Between a pass that writes a texture and one that reads it, the GPU has to finish the writes, flush or invalidate caches, and sometimes decompress. On D3D12 that's a **resource barrier** (a transition from one state to another); on Vulkan, a **pipeline barrier** with an image layout transition. D3D11, OpenGL, WebGL2 and WebGPU do it for you, by tracking every resource's use as you go: that's part of what made old drivers slow, and what [the first GPU lesson](/rendering/same-frame-real-gpu/#what-happens-to-a-draw-call) saw Dawn doing in the browser.
+
+A render graph knows each resource's uses ahead of time, so it can insert exactly the transitions needed and batch each pass's into one call. With everything on, the frame needs 32 transitions in 14 barrier calls. Click a pass to see its own: the lighting pass, for example, waits for the albedo and material targets, the shadow map and the AO to go from being written to being read, and for the HDR target's first use. The normals aren't in its list: SSAO read them first, so their transition happened there. Real graphs go further: they merge read states that can coexist (D3D12 lets a resource be in several read states at once), and split a barrier into a begin, issued as soon as the writer is done, and an end just before the reader, so the GPU can do other work in between; Unreal's RDG uses split barriers.
+
+## Lifetimes and aliasing
+
+Most of a frame's textures are **transient**: written and read within the frame, then garbage. The graph knows each one's first and last use, and so which ones are never alive at the same time. Those can share memory. On D3D12 you create a heap and **place** several resources in it at overlapping addresses; on Vulkan you bind several images to the same memory. That's **aliasing**. Two rules come with it: issue an **aliasing barrier** when the memory changes owner, and treat the new owner's contents as undefined, so its first use has to overwrite it (a clear, a discard, or writing every pixel).
+
+The chart under the passes is the transient heap: each resource drawn at its offset, from its first use to its last. With everything on at 1080p, the transients add up to 99.4 MB; aliased, the heap's peak is 75.6 MB, with 3 aliasing barriers: bloom A and bloom B move into the memory of resources whose lifetimes have ended, and so does the TAA output. At 4K it's 348.7 MB against 253.6 MB. The saving is modest here because the shadow map, depth and motion vectors stay alive into the second half of the frame. Frostbite reported 1,042 MB of transients at 4K without aliasing and 472 MB with it. Untick **Alias memory** to see every resource get its own place.
+
+<Tip title="Sizes in the widget">
+Sizes are width × height × bytes per pixel, rounded up to 64 KB, D3D12's default placement alignment (1 MB here is 1,048,576 bytes). Real textures are padded and tiled by the driver, so they're a little bigger; the shadow map is 2048 × 2048 whatever the screen size.
+</Tip>
+
+## What the graph costs
+
+A render graph is rebuilt every frame, so declaring and compiling must be cheap: they're a few hundred passes and resources at most, handled with flat arrays and no allocation. Pass code becomes a callback that runs later, which makes it harder to read and to debug than straight-line rendering code. And it only knows what it's told: a pass that reads a resource it didn't declare gets no barrier and a race. Engines catch that with validation in debug builds.
+
+WebGPU has neither barriers nor aliasing in its API, so a browser engine gets less out of a graph: culling, ordering and lifetimes still help, but the barriers are the implementation's, and memory can only be reused by keeping a pool of textures and handing them out by lifetime.
+
+## Takeaways
+
+- A render graph **declares** passes with their reads and writes, **compiles** the frame, then **executes** it.
+- **Culling** walks back from the output: passes whose results never reach it don't run, with no flags to keep in sync.
+- Dependencies give a valid **order**, show what can overlap or go to async compute, and let the graph **insert barriers** exactly where states change, batched per pass.
+- **Lifetimes** let transient resources **alias** the same memory, with an aliasing barrier and a full overwrite at each change of owner.
+
+## Further reading
+
+- Yuriy O'Donnell, [*FrameGraph: Extensible Rendering Architecture in Frostbite*](https://www.slideshare.net/DICEStudio/framegraph-extensible-rendering-architecture-in-frostbite) (GDC 2017).
+- Epic Games, [*Render Dependency Graph*](https://dev.epicgames.com/documentation/en-us/unreal-engine/render-dependency-graph-in-unreal-engine): setup and execute timelines, culling, split barriers, transient aliasing, async compute.
+- Hans-Kristian Arntzen, [*Render graphs and Vulkan: a deep dive*](https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/) (2017): barriers, reordering and merging passes for tile-based GPUs.
+- Microsoft, [*Using resource barriers to synchronize resource states in Direct3D 12*](https://learn.microsoft.com/en-us/windows/win32/direct3d12/using-resource-barriers-to-synchronize-resource-states-in-direct3d-12) and [*Memory aliasing and data inheritance*](https://learn.microsoft.com/en-us/windows/win32/direct3d12/memory-aliasing-and-data-inheritance).
