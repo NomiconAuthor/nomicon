@@ -64,6 +64,9 @@ import { Player as FeelPlayer, Camera as FeelCamera, makeLevel as feelLevel, jum
 import { CONCEPTS as feelConcepts } from '../src/feel/concepts';
 import { SLIDERS as FEEL_SLIDERS, VIEW_W as FEEL_VIEW_W, VIEW_H as FEEL_VIEW_H } from '../src/feel/app';
 import { FlecsWorld } from '../src/flecs/runtime';
+import { FRAME_SCENARIOS } from '../src/flecs/frame/scenarios';
+import { defaultConfig, record as recordFrame, type Recording as FrameRecording } from '../src/flecs/frame/record';
+import { timeline as frameTimeline, type Timeline as FrameTimeline } from '../src/flecs/frame/model';
 import initJolt from 'jolt-physics/wasm';
 import { affineError as rdAffineError, coverage as rdCoverage, lengthText as rdLength, overdraw as rdOverdraw, pipelineRun as rdPipelineRun, pipelineScene as rdPipelineScene, rasterPoints as rdRasterPoints, resolution as rdResolution, zFight as rdZFight, DEPTH_FAR as RD_DEPTH_FAR } from '../src/render/scenes';
 
@@ -1657,6 +1660,128 @@ function tactics(): void {
   }
 }
 
+// A frame in detail: what each frame scenario really does, recorded from the traced flecs build.
+async function frame(): Promise<void> {
+  const L = 'flecs/a-frame-in-detail.mdx';
+  const wasm = readFileSync(join(here, '..', 'public', 'flecs.wasm'));
+  const prevFetch = globalThis.fetch;
+  (globalThis as { fetch: unknown }).fetch = async () => new Response(wasm, { headers: { 'content-type': 'application/wasm' } });
+  const w = await FlecsWorld.create();
+  (globalThis as { fetch: unknown }).fetch = prevFetch;
+  const run = (id: string, variant = 0, stages?: number): FrameRecording => {
+    const sc = FRAME_SCENARIOS[id];
+    const cfg = defaultConfig(sc, variant);
+    return recordFrame(w, sc, stages ? { ...cfg, stages } : cfg);
+  };
+  const tl = (rec: FrameRecording, step = 0): FrameTimeline => {
+    const st = rec.steps[step];
+    return frameTimeline(rec, step, (e) => rec.names.get(e) ?? w.name(e), (t) => st.types.get(t) ?? st.after.tables.get(t)?.type.map((c) => c.str));
+  };
+  const nm = (rec: FrameRecording, e: number) => rec.names.get(e) ?? rec.systems.get(e)?.name ?? w.name(e);
+  const runNames = (rec: FrameRecording, t: FrameTimeline) => t.runs.map((r) => r.systems.map((s) => nm(rec, s)));
+  const slices = (t: FrameTimeline, run: number, system: string, rec: FrameRecording, table?: number) =>
+    t.runs[run].lanes.map((lane) => lane.filter((b) => nm(rec, b.system) === system).flatMap((b) => b.slices.filter((s) => table === undefined || s.table === table)).reduce((n, s) => n + s.count, 0));
+  const dot = (xs: number[]) => xs.join(' · ');
+
+  // The whole frame, 3 threads.
+  const tour = run('frameTour');
+  const t1 = tl(tour);
+  const runs = runNames(tour, t1);
+  fact(L, runs.length === 6 && runs[0][0] === 'flecs.script.ProgressTasks' && t1.runs[0].kind === 'immediate', 'the first of six runs is flecs.script.ProgressTasks, immediate');
+  fact(L, JSON.stringify(runs.slice(1)) === JSON.stringify([['Input'], ['Move', 'Ignite'], ['Burn'], ['Reap'], ['Render']]), 'runs: Input | Move, Ignite | Burn | Reap | Render');
+  claim(L, 'Six runs: the built-in one, `Input`, `Move` and `Ignite` together, `Burn`, `Reap`, `Render`.');
+  fact(L, t1.runs.filter((r) => !r.threaded).every((r) => r.lanes.slice(1).every((l) => !l.length)), 'workers do nothing in single-threaded and immediate runs');
+  const goblins = t1.runs[2].lanes[0].find((b) => nm(tour, b.system) === 'Move')!.slices.find((s) => s.count === 4)!.table;
+  const moveG = t1.runs[2].lanes.map((l) => l.find((b) => nm(tour, b.system) === 'Move')!.slices.find((s) => s.table === goblins)!);
+  claim(L, `\`Move\` gets rows ${moveG[0].offset}–${moveG[0].offset + moveG[0].count - 1} of the goblins' table on \`main\`, ${moveG[1].offset}–${moveG[1].offset + moveG[1].count - 1} on \`worker 1\` and ${moveG[2].offset}–${moveG[2].offset + moveG[2].count - 1} on \`worker 2\``);
+  const hero = tour.user.has(w.lookup('Hero')) ? tour.steps[0].before.where.get(w.lookup('Hero'))!.table : 0;
+  fact(L, dot(slices(t1, 2, 'Move', tour, hero)) === '1 · 0 · 0', "the hero's one-row table goes to main only");
+  const ignite = t1.runs[2].merge!;
+  claim(L, `\`Ignite\` queues \`set<Burning>\` for the four imps: ${dot(ignite.stages.map((s) => s.count))} commands on the three stages`);
+  const impMoves = ['Imp0', 'Imp1', 'Imp2', 'Imp3'].map((n) => tour.steps[0].events.filter((e) => e.k === 'moveBegin' && e.entity === w.lookup(n)).length);
+  fact(L, impMoves.every((m) => m === 2), 'each imp moves twice in frame 1');
+  const burn = slices(t1, 3, 'Burn', tour);
+  claim(L, `so \`Burn\` now finds ${burn.reduce((a, b) => a + b, 0)} rows and splits them ${dot(burn)}`);
+  const reapEvents = tour.steps[0].events.slice(t1.runs[4].ev, t1.runs[4].merge!.ev);
+  fact(L, reapEvents.some((e) => e.k === 'observer' && e.name === 'ShowLoot'), 'ShowLoot fires inside Reap');
+  fact(L, t1.runs[4].merge!.commands === 2, "Reap's two destructs are flushed when it returns");
+  fact(L, t1.runs[1].reasons.some((r) => r.bits & 4) && t1.runs[2].reasons.some((r) => r.bits & 2) && t1.runs[3].reasons.some((r) => r.bits & 1 && r.terms.some((x) => x.id === 'Burning' && x.writers.includes('Ignite'))) && t1.runs[4].reasons.some((r) => r.bits & 8) && t1.runs[5].reasons.some((r) => r.bits & 4), 'the reasons in the table: kind changes, Burning declared by Ignite, immediate');
+  // Variants.
+  const noAnn = run('frameTour', 1);
+  const tn = tl(noAnn);
+  fact(L, JSON.stringify(runNames(noAnn, tn)[2]) === JSON.stringify(['Move', 'Ignite', 'Burn']), 'without the annotation Burn joins Move and Ignite');
+  claim(L, `and it finds only the orc: ${slices(tn, 2, 'Burn', noAnn).reduce((a, b) => a + b, 0)} row.`);
+  fact(L, tl(noAnn, 1).runs.flatMap((r) => r.lanes.flat()).filter((b) => nm(noAnn, b.system) === 'Burn').reduce((n, b) => n + b.rows, 0) === 4, 'the four imps burn in frame 2 (the orc was reaped in frame 1)');
+  const single = run('frameTour', 2);
+  const ts = tl(single);
+  fact(L, JSON.stringify(runNames(single, ts)[1]) === JSON.stringify(['Input', 'Move', 'Ignite']) && ts.runs.length === t1.runs.length - 1, 'all single-threaded: Input, Move, Ignite share a run, one sync fewer');
+  const one = run('frameTour', 0, 1);
+  fact(L, JSON.stringify(runNames(one, tl(one))) === JSON.stringify(runs), 'one thread: the same six runs');
+  const idle = run('frameTour', 3);
+  const ti = tl(idle);
+  fact(L, ti.rebuilds.length === 1 && ti.rebuilds[0].activated.includes('Reap') && runNames(idle, ti).some((r) => r.includes('Reap')), 'Reap idle: one rebuild mid-frame, and Reap runs');
+
+  // Rows to workers.
+  const chunk = (n: number) => {
+    const rec = run('frameChunking', 0, n);
+    const t = tl(rec);
+    const a = rec.steps[0].before.where.get(w.lookup('a0'))!.table;
+    const b = rec.steps[0].before.where.get(w.lookup('b0'))!.table;
+    const boss = rec.steps[0].before.where.get(w.lookup('boss'))!.table;
+    const after = rec.steps[0].after;
+    const health = after.sortedTables().find((x) => x.type.map((c) => c.str).join() === 'Health,(Identifier,Name)' || x.type.map((c) => c.str).join() === 'Health')!;
+    const calmed = rec.steps[0].events.filter((e) => e.k === 'observer' && e.name === 'Calmed').map((e) => nm(rec, (e as { entity: number }).entity));
+    return { rec, t, a: slices(t, 1, 'Tick', rec, a), b: slices(t, 1, 'Tick', rec, b), boss: slices(t, 1, 'Tick', rec, boss), cool: slices(t, 1, 'Cool', rec, a), queues: t.runs[1].merge!.stages.map((s) => s.count), order: health.rows.map((e) => nm(rec, e)), calmed };
+  };
+  const c3 = chunk(3), c4 = chunk(4), c1 = chunk(1);
+  claim(L, `With 3 threads, the 10 \`a\` rows split ${dot(c3.a)}, the 4 \`b\` rows ${dot(c3.b)}, and the boss's single row goes to \`main\` only. With 4 threads it's ${dot(c4.a)} and ${dot(c4.b)}.`);
+  fact(L, dot(c3.boss) === '1 · 0 · 0' && dot(c3.cool) === dot(c3.a), 'boss on main only; Cool gets the same slices as Tick');
+  claim(L, `(${dot(c3.queues)} commands with 3 threads)`);
+  const range = (xs: string[]) => xs.join(',');
+  fact(L, range(c1.order) === 'a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1,b2,b3', 'one thread: a0…a9, b0…b3');
+  fact(L, range(c3.order) === 'a0,a1,a2,a3,b0,b1,a4,a5,a6,b2,a7,a8,a9,b3' && range(c3.calmed.filter((x) => x !== 'boss')) === range(c3.order), 'three threads: a0–a3, b0, b1, a4–a6, b2, a7–a9, b3, and Calmed in that order');
+  fact(L, c3.rec.steps[0].events.filter((e) => e.k === 'moveBegin' && e.entity === w.lookup('b0')).length === 1, "b0's two removes are one move");
+
+  // Inside a merge.
+  const ch = run('frameChains');
+  const ce = ch.steps[0].events;
+  const A = w.lookup('A'), B = w.lookup('B');
+  fact(L, ce.filter((e) => e.k === 'moveBegin' && e.entity === A).length === 2, 'A moves twice: the batch, then Smoke');
+  // Nesting as the widget draws it: flushes inside flushes in the merge's call tree.
+  type FNode = { kind: string; depth?: number; children: FNode[] };
+  const nest = (ns: FNode[]): number => Math.max(0, ...ns.map((n) => (n.kind === 'flush' && n.depth ? 1 : 0) + nest(n.children)));
+  const chT = tl(ch);
+  fact(L, nest(chT.runs.find((r) => r.systems.some((s) => nm(ch, s) === 'Hit'))!.merge!.tree as FNode[]) === 2, 'two levels of nested flushes');
+  const idx = (pred: (e: (typeof ce)[number]) => boolean) => ce.findIndex(pred);
+  const alarm = idx((e) => e.k === 'cmdRun' && e.id === 'Alert');
+  const watchB = idx((e) => e.k === 'observer' && e.name === 'WatchHealth' && e.entity === B);
+  const watchA = idx((e) => e.k === 'observer' && e.name === 'WatchHealth' && e.entity === A);
+  fact(L, alarm > 0 && alarm < watchB && watchB < watchA, "the chain runs before B's command, and WatchHealth sees B before A");
+  const smolder = ce.find((e) => e.k === 'locals' && e.name === 'Smolder') as { fields: Array<{ values: unknown[] | null }> } | undefined;
+  fact(L, JSON.stringify(smolder?.fields[0]?.values) === JSON.stringify([{ dps: 5 }]), 'in a merge, the OnAdd observer already sees the queued value');
+  const val = run('frameChains', 1);
+  const ve = val.steps[0].events;
+  fact(L, ve.some((e) => e.k === 'validate' && e.entity === A && !e.ok) && !ve.some((e) => e.k === 'observer' && e.name === 'WatchHealth' && e.entity === A), "on_validate rejects A's 1: no WatchHealth for A");
+  const aAfter = val.steps[0].after.tables.get(val.steps[0].after.where.get(A)!.table)!;
+  fact(L, JSON.stringify(aAfter.values.get('Health')?.[val.steps[0].after.where.get(A)!.row]) === JSON.stringify({ hp: 1 }), "A's Health is still 1 after the rejected on_validate");
+  const rep = run('frameChains', 2);
+  const tr = tl(rep);
+  const hitRun = tr.runs.find((r) => r.systems.some((s) => nm(rep, s) === 'Hit'))!;
+  const inHit = rep.steps[0].events.slice(hitRun.ev, hitRun.merge!.ev).filter((e) => e.k === 'replaceHook').length;
+  fact(L, inHit === 2, 'on_replace runs for B and A while Hit runs (when the set is queued)');
+  const locked = run('frameChains', 3).steps[0].events.filter((e) => e.k === 'locked').length;
+  claim(L, `the timeline marks the ${locked} places a debug build would stop with \`ECS_LOCKED_STORAGE\``);
+
+  // Two pipelines.
+  const pp = run('framePipelines');
+  const [p1, p2, p3] = [0, 1, 2].map((i) => tl(pp, i));
+  fact(L, JSON.stringify(runNames(pp, p1)) === JSON.stringify([['Integrate'], ['Collide']]), 'the physics pipeline: Integrate | Collide');
+  fact(L, !runNames(pp, p3).flat().includes('Integrate') && runNames(pp, p3).flat().includes('PlaySound'), 'progress() runs PlaySound, not Integrate');
+  const ball1 = w.lookup('Ball1');
+  fact(L, p1.runs[1].merge!.commands === 1 && pp.steps[0].after.where.get(ball1) !== undefined && pp.steps[1].before.tables.get(pp.steps[1].before.where.get(ball1)!.table)!.rows.length === 1, 'Ball1 bounced in pass 1 and is alone in its table in pass 2');
+  fact(L, p2.runs[0].lanes[1].every((b) => b.slices.every((s) => s.table !== pp.steps[1].before.where.get(ball1)!.table)), "only main moves Ball1's one-row table");
+}
+
 // Rendering: every number the three pipeline lessons quote, from the scenes their widgets draw.
 function rendering(): void {
   // The pipeline.
@@ -1727,8 +1852,8 @@ function rendering(): void {
   fact(D, rdOverdraw('front', 'prepass').stats.shaded === pre.stats.shaded, 'the prepass shades the same either way');
 }
 
-const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast, pathing, tactics, render: rendering };
-const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'spatial', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast', 'pathing', 'tactics', 'render'];
+const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast, pathing, tactics, render: rendering, frame };
+const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'spatial', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast', 'pathing', 'tactics', 'render', 'frame'];
 const args = process.argv.slice(2);
 const chosen = args.includes('--all') ? Object.keys(GROUPS) : args.filter((a) => !a.startsWith('-')).length ? args.filter((a) => !a.startsWith('-')) : FAST;
 for (const name of chosen) {

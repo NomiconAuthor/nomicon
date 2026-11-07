@@ -248,6 +248,10 @@ export function describe(ev: TraceEvent, s: Session, types: (table: number) => s
           ? 'The write goes to whoever occupies that row now. No flecs operation happens, no OnSet fires, and nothing reports the problem.'
           : 'The write lands in freed or unused memory. Nothing visible changes now, but whatever reuses that memory later gets corrupted.',
       };
+    default:
+      // Frame trace events (pipeline build, runs, stages, nesting) belong to the frame widget,
+      // and are only recorded when it asks for them.
+      return { title: ev.k, tone: 'muted' };
   }
 }
 

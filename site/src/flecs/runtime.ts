@@ -61,6 +61,10 @@ export interface Iter {
   setComponent(entity: number, id: string, value: unknown): void;
   delete(entity: number): void;
   spawn(name?: string): number;
+  /** The stage this callback runs on (0 = main thread; workers are 1, 2, …). */
+  stage: number;
+  /** Run `fn` with this callback's operations going to the real world (applied now) instead of the stage. */
+  onWorld<T>(fn: () => T): T;
 }
 
 export type IterCallback = (it: Iter) => void;
@@ -105,7 +109,39 @@ export type TraceEvent =
   | { k: 'refRead'; label: string; comp: string; value: Record<string, number>; owner: { entity: number; table: number; row: number } | null; flecsRef?: boolean }
   | { k: 'refWrite'; label: string; comp: string; value: Record<string, number>; owner: { entity: number; table: number; row: number } | null }
   /** A callback writing a value straight into a column (inPlaceSet: a deferred set of a component the entity already has). */
-  | { k: 'write'; entity: number; id: string; value: unknown; inPlaceSet?: boolean };
+  | { k: 'write'; entity: number; id: string; value: unknown; inPlaceSet?: boolean }
+  // ---- Frame trace (only recorded with frameTrace on; see "A frame in detail") ----
+  /** The pipeline builder starts (re)building its schedule. */
+  | { k: 'pipeBuild'; rebuild: number; matchCount: number; frame: number }
+  /** The builder looked at a system: active, kind, whether a merge goes before it and why (bits: 1 terms, 2 threading kind, 4 immediate kind, 8 is immediate). */
+  | { k: 'pipeSystem'; system: number; name: string; active: boolean; multiThreaded: boolean; immediate: boolean; merge: boolean; reason: number }
+  /** A term of that system needs a merge: 1 = it matches a queued id on its own entities, 2 = it reads a queued id from elsewhere. */
+  | { k: 'pipeTerm'; system: number; term: number; id: string; reason: number }
+  /** That system may queue `id` (0 exact, 1 wildcard id, 2 everything). */
+  | { k: 'pipeWrite'; system: number; id: string; kind: number }
+  /** The builder forgot what was queued (a merge goes here). */
+  | { k: 'pipeReset'; system: number }
+  | { k: 'pipeBuildEnd'; ops: number; systems: number }
+  /** A run of systems (pipeline op) starts. `from`..`to` index the schedule's system list. */
+  | { k: 'opBegin'; op: number; from: number; to: number; multiThreaded: boolean; immediate: boolean; threaded: boolean; stages: number }
+  | { k: 'opJoin'; op: number }
+  | { k: 'mergeBegin'; op: number; immediate: boolean }
+  | { k: 'stageFlush'; stage: number; count: number }
+  | { k: 'mergeEnd'; op: number }
+  | { k: 'workerBegin'; stage: number }
+  | { k: 'workerEnd'; stage: number }
+  /** Which stage a system callback ran on, and the rows it got. */
+  | { k: 'iterAt'; system: number; stage: number; table: number; offset: number; count: number }
+  /** Which stage ran a system (and whether it was split). */
+  | { k: 'systemAt'; system: number; stage: number; stages: number; multiThreaded: boolean; immediate: boolean }
+  /** A command flush on `stage`, `depth` queues deep (0 = the stage's own queue, 1+ = queued by callbacks during a flush). */
+  | { k: 'flushAt'; stage: number; depth: number; count: number }
+  | { k: 'replaceHook'; entity: number; id: string; table: number }
+  | { k: 'validate'; entity: number; id: string; table: number; ok: boolean }
+  /** Rows changed in a locked table: a debug build asserts here (ECS_LOCKED_STORAGE). */
+  | { k: 'locked'; table: number; op: string };
+
+const LOCK_OPS = ['table data cleanup', 'table deletion', 'table reset', 'table append', 'table delete', 'move', 'table bulk append', 'table shrink', 'table swap', 'table merge', 'other'];
 
 /** The default build (the flecs release in version.ts). Other builds (e.g. a PR branch) sit next to it. */
 export const WASM_URL = '/flecs.wasm';
@@ -168,10 +204,19 @@ interface Exports {
   fw_whose(addr: number, comp: Ptr): Ptr;
   fw_is_alive(e: number): number;
   fw_system(name: Ptr, expr: Ptr, phase: Ptr, flags: number): number;
+  fw_set_stages(n: number): void;
+  fw_it_cpp_set(on: number): void;
+  fw_pipeline_schedule(p: number): Ptr;
+  fw_pipeline_force_rebuild(p: number): void;
+  fw_pipeline_new(name: Ptr, expr: Ptr): number;
+  fw_run_pipeline(p: number, dt: number): void;
+  fw_hooks_mask(component: Ptr, mask: number, min: number): number;
+  fw_locked_tables(): number;
   fw_run_system(s: number, dt: number): void;
   fw_observer(name: Ptr, expr: Ptr, events: Ptr, yieldExisting: number): number;
   fw_emit(event: Ptr, entity: number, id: number): void;
   fw_it_count(it: Ptr): number;
+  fw_it_stage?(it: Ptr): number;
   fw_it_entity(it: Ptr, i: number): number;
   fw_it_table(it: Ptr): number;
   fw_it_other_table(it: Ptr): number;
@@ -256,8 +301,8 @@ export class FlecsWorld {
 
   /** A system for `query` that runs `fn` once per matching table each frame. Returns its entity (0 if the query is bad). */
   /** `immediate`: the system runs on a writable world (needed to write through it->world). */
-  system(name: string, query: string, fn: IterCallback, opts: { phase?: string; cached?: boolean; immediate?: boolean } = {}): number {
-    const flags = (opts.cached === false ? 0 : 1) | (opts.immediate ? 2 : 0);
+  system(name: string, query: string, fn: IterCallback, opts: { phase?: string; cached?: boolean; immediate?: boolean; multiThreaded?: boolean } = {}): number {
+    const flags = (opts.cached === false ? 0 : 1) | (opts.immediate ? 2 : 0) | (opts.multiThreaded ? 4 : 0);
     const id = this.withStrings([name, query, opts.phase ?? 'OnUpdate'], ([n, q, p]) => this.x.fw_system(n, q, p, flags));
     if (id) this.callbacks.set(id, fn);
     return id;
@@ -280,6 +325,55 @@ export class FlecsWorld {
   progress(dt = 1 / 60): void {
     this.x.fw_progress(dt);
   }
+
+  // ---------------- Frames: stages, schedule, pipelines ----------------
+
+  /**
+   * Give the world `n` stages, like `world.set_threads(n)`. This build has no
+   * threads: worker stages run their part of each multi-threaded run one after
+   * another on the main thread (see flecs-wasm/instrument.py, "sim workers").
+   */
+  setStages(n: number): void {
+    this.x.fw_set_stages(n);
+  }
+
+  /** Sets made from callbacks behave like C++ `e.set<T>()` (in place for existing components) rather than C `ecs_set`. */
+  cppSet(on: boolean): void {
+    this.x.fw_it_cpp_set(on ? 1 : 0);
+  }
+
+  /** The schedule flecs built for a pipeline (default: the world's). */
+  schedule(pipeline = 0): { rebuilds: number; ops: Array<{ offset: number; count: number; multiThreaded: boolean; immediate: boolean; commands: number }>; systems: number[] } | null {
+    return JSON.parse(this.take(this.x.fw_pipeline_schedule(pipeline)));
+  }
+
+  /** Make the next run of a pipeline rebuild its schedule, so the trace records why each merge is where it is. */
+  forceRebuild(pipeline = 0): void {
+    this.x.fw_pipeline_force_rebuild(pipeline);
+  }
+
+  /** A custom pipeline whose query is `expr` (must start with `flecs.system.System`). */
+  pipeline(name: string, expr: string): number {
+    return this.withStrings([name, expr], ([n, e]) => this.x.fw_pipeline_new(n, e));
+  }
+
+  /** `world.run_pipeline(p)`: run a pipeline once, outside progress(). */
+  runPipeline(p: number, dt = 1 / 60): void {
+    this.x.fw_run_pipeline(p, dt);
+  }
+
+  /** Traced no-op hooks by mask (1 on_add, 2 on_set, 4 on_remove, 8 on_replace) and 16: an on_validate rejecting a first field below `min`. */
+  hooksMask(component: string, mask: number, min = 0): boolean {
+    return this.withStrings([component], ([c]) => this.x.fw_hooks_mask(c, mask, min)) === 0;
+  }
+
+  /** Tables with a non-zero storage lock count (0 between frames). */
+  lockedTables(): number {
+    return this.x.fw_locked_tables();
+  }
+
+  /** Record the frame trace events too (pipeline build, runs, merges, stages, slices, nesting). */
+  frameTrace = false;
 
   /** Run one system now, outside the pipeline. */
   run(system: number, dt = 1 / 60): void {
@@ -376,9 +470,12 @@ export class FlecsWorld {
   set iterOpsOnWorld(on: boolean) {
     this.x.fw_it_use_world(on ? 1 : 0);
     this.opsOnWorld = on;
+    this.opsOnWorldDefault = on;
   }
 
   private opsOnWorld = false;
+  /** What iterOpsOnWorld was set to: callbacks start with it, even when nested inside an onWorld() scope. */
+  private opsOnWorldDefault = false;
 
   // ---------------- Benchmarks (native, in a throwaway world) ----------------
 
@@ -559,6 +656,66 @@ export class FlecsWorld {
         sink.push({ k: 'cmdRun', index: n(a), kind: CMD_KINDS[n(b)] ?? `#${n(b)}`, entity: n(c), id: d ? nm(d) : '' });
         break;
     }
+    if (!this.frameTrace || kind < 25) return;
+    switch (kind) {
+      case 25:
+        sink.push({ k: 'pipeBuild', rebuild: n(a), matchCount: n(b), frame: n(c) });
+        break;
+      case 26:
+        sink.push({ k: 'pipeSystem', system: n(a), name: nm(a), active: !!n(b), multiThreaded: !!(n(c) & 1), immediate: !!(n(c) & 2), merge: !!n(d), reason: n(e) });
+        break;
+      case 27:
+        sink.push({ k: 'pipeTerm', system: n(a), term: n(b), id: nm(c), reason: n(d) });
+        break;
+      case 28:
+        sink.push({ k: 'pipeWrite', system: n(a), id: n(c) === 2 ? '*' : nm(b), kind: n(c) });
+        break;
+      case 29:
+        sink.push({ k: 'pipeReset', system: n(a) });
+        break;
+      case 30:
+        sink.push({ k: 'pipeBuildEnd', ops: n(a), systems: n(b) });
+        break;
+      case 31:
+        sink.push({ k: 'opBegin', op: n(a), from: n(b), to: n(c), multiThreaded: !!(n(d) & 1), immediate: !!(n(d) & 2), threaded: !!(n(d) & 4), stages: n(e) });
+        break;
+      case 32:
+        sink.push({ k: 'opJoin', op: n(a) });
+        break;
+      case 33:
+        sink.push({ k: 'mergeBegin', op: n(a), immediate: !!n(b) });
+        break;
+      case 34:
+        sink.push({ k: 'stageFlush', stage: n(a), count: n(b) });
+        break;
+      case 35:
+        sink.push({ k: 'mergeEnd', op: n(a) });
+        break;
+      case 36:
+        sink.push({ k: 'workerBegin', stage: n(a) });
+        break;
+      case 37:
+        sink.push({ k: 'workerEnd', stage: n(a) });
+        break;
+      case 38:
+        sink.push({ k: 'iterAt', system: n(a), stage: n(b), table: n(c), offset: n(d), count: n(e) });
+        break;
+      case 39:
+        sink.push({ k: 'replaceHook', entity: n(a), id: nm(b), table: n(c) });
+        break;
+      case 40:
+        sink.push({ k: 'validate', entity: n(a), id: nm(b), table: n(c), ok: !!n(d) });
+        break;
+      case 41:
+        sink.push({ k: 'locked', table: n(a), op: LOCK_OPS[n(b)] ?? 'other' });
+        break;
+      case 42:
+        sink.push({ k: 'flushAt', stage: n(a), depth: n(b), count: n(c) });
+        break;
+      case 43:
+        sink.push({ k: 'systemAt', system: n(a), stage: n(b), stages: n(c), multiThreaded: !!n(d), immediate: !!n(e) });
+        break;
+    }
   }
 
   private dst(): string {
@@ -677,6 +834,18 @@ export class FlecsWorld {
         this.opNote(`new entity ${name}`, `ecs_new(${this.dst()})`);
         return this.withStrings([name], ([n]) => x.fw_it_new(it, n));
       },
+      stage: x.fw_it_stage ? x.fw_it_stage(it) : 0,
+      onWorld: <T>(fn: () => T): T => {
+        const prev = this.opsOnWorld;
+        x.fw_it_use_world(1);
+        this.opsOnWorld = true;
+        try {
+          return fn();
+        } finally {
+          x.fw_it_use_world(prev ? 1 : 0);
+          this.opsOnWorld = prev;
+        }
+      },
     };
   }
 
@@ -694,10 +863,20 @@ export class FlecsWorld {
           this.traceSink.push({ k: 'locals', callback: id, name: this.name(id), table: iter.table, entities: iter.entities, event: iter.event, fields });
         }
         this.inCallback++;
+        // A callback flecs runs from inside another one's onWorld() scope starts with the default target.
+        const outer = this.opsOnWorld;
+        if (outer !== this.opsOnWorldDefault) {
+          this.x.fw_it_use_world(this.opsOnWorldDefault ? 1 : 0);
+          this.opsOnWorld = this.opsOnWorldDefault;
+        }
         try {
           fn(iter);
         } finally {
           this.inCallback--;
+          if (outer !== this.opsOnWorld) {
+            this.x.fw_it_use_world(outer ? 1 : 0);
+            this.opsOnWorld = outer;
+          }
         }
       } catch (e) {
         this.pushLog(-4, `Callback threw: ${(e as Error).message}`);
