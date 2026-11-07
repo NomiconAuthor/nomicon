@@ -30,13 +30,22 @@ def patch(text, old, new, what):
 
 
 # ---------------------------------------------------------------- platform
-h = patch(h, "#elif defined(__EMSCRIPTEN__)\n#define ECS_TARGET_EM\n#define ECS_TARGET_POSIX\n#endif",
-          "#elif defined(__EMSCRIPTEN__)\n#define ECS_TARGET_EM\n#define ECS_TARGET_POSIX\n"
-          "#elif defined(__wasi__) /* nomicon: WebAssembly via WASI */\n#define ECS_TARGET_WASI\n#define ECS_TARGET_POSIX\n#endif",
-          'target detection')
-c = patch(c, "#elif !defined(ECS_TARGET_WINDOWS) && !defined(ECS_TARGET_EM) && !defined(ECS_TARGET_ANDROID)",
-          "#elif !defined(ECS_TARGET_WINDOWS) && !defined(ECS_TARGET_EM) && !defined(ECS_TARGET_ANDROID) && !defined(ECS_TARGET_WASI)",
-          'execinfo')
+UPSTREAM_WASM = "#elif defined(__wasm__)\n"
+if UPSTREAM_WASM in h:
+    # flecs 4.2+ detects WebAssembly without Emscripten itself (ECS_TARGET_WASM,
+    # no execinfo); we only add the WASI flag the HTTP include patch below uses.
+    h = patch(h, "#define ECS_TARGET_WASM\n#define ECS_TARGET_POSIX\n",
+              "#define ECS_TARGET_WASM\n#define ECS_TARGET_POSIX\n"
+              "#ifdef __wasi__ /* nomicon: WebAssembly via WASI */\n#define ECS_TARGET_WASI\n#endif\n",
+              'target detection')
+else:
+    h = patch(h, "#elif defined(__EMSCRIPTEN__)\n#define ECS_TARGET_EM\n#define ECS_TARGET_POSIX\n#endif",
+              "#elif defined(__EMSCRIPTEN__)\n#define ECS_TARGET_EM\n#define ECS_TARGET_POSIX\n"
+              "#elif defined(__wasi__) /* nomicon: WebAssembly via WASI */\n#define ECS_TARGET_WASI\n#define ECS_TARGET_POSIX\n#endif",
+              'target detection')
+    c = patch(c, "#elif !defined(ECS_TARGET_WINDOWS) && !defined(ECS_TARGET_EM) && !defined(ECS_TARGET_ANDROID)",
+              "#elif !defined(ECS_TARGET_WINDOWS) && !defined(ECS_TARGET_EM) && !defined(ECS_TARGET_ANDROID) && !defined(ECS_TARGET_WASI)",
+              'execinfo')
 c = patch(c, "#include <strings.h>\n#include <signal.h>\n#include <fcntl.h>\n#ifdef __FreeBSD__",
           "#include <strings.h>\n#ifdef ECS_TARGET_WASI\n#include \"wasi_net_shim.h\"\n#else\n#include <signal.h>\n#endif\n#include <fcntl.h>\n#ifdef __FreeBSD__",
           'http includes')

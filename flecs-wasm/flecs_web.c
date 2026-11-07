@@ -14,6 +14,16 @@
  * entity index plus generation).
  */
 #include "flecs.c" /* one translation unit, so the glue can see table internals */
+
+/* Since flecs 4.2 prefabs, cached queries, query plans, entity ranges and the
+ * constraint traits (Exclusive, OneOf, ...) are separate add-ons. The default
+ * build enables them all; fail here rather than in a lesson if one goes missing. */
+#if !defined(FLECS_PREFAB) || !defined(FLECS_CACHED_QUERIES) || !defined(FLECS_QUERY_PLANS) || \
+    !defined(FLECS_ENTITY_RANGES) || !defined(FLECS_CONSTRAINT_TRAITS) || !defined(FLECS_SCRIPT) || \
+    !defined(FLECS_REST) || !defined(FLECS_META) || !defined(FLECS_PIPELINE) || !defined(FLECS_SYSTEM)
+#error "flecs_web.c needs the PREFAB, CACHED_QUERIES, QUERY_PLANS, ENTITY_RANGES, CONSTRAINT_TRAITS, SCRIPT, REST, META, PIPELINE and SYSTEM add-ons"
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>

@@ -107,7 +107,7 @@ export type TraceEvent =
   /** A callback writing a value straight into a column (inPlaceSet: a deferred set of a component the entity already has). */
   | { k: 'write'; entity: number; id: string; value: unknown; inPlaceSet?: boolean };
 
-/** The default build (flecs master). Other builds (e.g. a PR branch) sit next to it. */
+/** The default build (the flecs release in version.ts). Other builds (e.g. a PR branch) sit next to it. */
 export const WASM_URL = '/flecs.wasm';
 const modules = new Map<string, Promise<WebAssembly.Module>>();
 
