@@ -31,6 +31,7 @@
   "engine--threads-pools-and-fibers",
   "feel-lab",
   "flecs",
+  "flecs--a-frame-in-detail",
   "flecs--archetypes",
   "flecs--command-merging",
   "flecs--commands",
@@ -74,5 +75,9 @@
   "physics--solving-contacts",
   "physics--the-step",
   "physics--when-physics-goes-wrong",
+  "rendering",
+  "rendering--depth",
+  "rendering--rasterisation",
+  "rendering--the-pipeline",
   "tactics-lab"
 ]
