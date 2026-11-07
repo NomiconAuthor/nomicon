@@ -1,7 +1,8 @@
 ---
-/** Mounts one of the rendering lesson widgets (src/render/). */
+/** Mounts one of the rendering lesson widgets (src/render/registry.ts lists them by kind). */
+import type { WidgetKind } from '../render/registry';
 interface Props {
-  kind: 'pipeline' | 'raster' | 'perspective' | 'depth' | 'overdraw';
+  kind: WidgetKind;
 }
 const { kind } = Astro.props;
 ---
@@ -11,18 +12,16 @@ const { kind } = Astro.props;
 <script>
   import '../engine/engine.css';
   import '../render/render.css';
+  import { WIDGETS, type WidgetKind } from '../render/registry';
 
   class RenderWidget extends HTMLElement {
     async connectedCallback() {
       if (this.dataset.ready) return;
       this.dataset.ready = '1';
-      const k = this.dataset.kind;
-      const w = await import('../render/widgets');
-      if (k === 'pipeline') new w.PipelineViz(this);
-      else if (k === 'raster') new w.RasterViz(this);
-      else if (k === 'perspective') new w.PerspectiveViz(this);
-      else if (k === 'depth') new w.DepthViz(this);
-      else if (k === 'overdraw') new w.OverdrawViz(this);
+      const load = WIDGETS[this.dataset.kind as WidgetKind];
+      if (!load) throw new Error(`no rendering widget "${this.dataset.kind}" in src/render/registry.ts`);
+      const Widget = await load();
+      new Widget(this);
     }
   }
   if (!customElements.get('render-widget')) customElements.define('render-widget', RenderWidget);

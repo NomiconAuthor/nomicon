@@ -2,7 +2,7 @@
  * Shared pieces of the rendering widgets: theme colours, drawing a render target as big pixels,
  * and the stepper (next vertex / triangle / pixel, run, reset) that drives the render generator.
  */
-import { h } from '../engine/dom';
+import { type Child, h } from '../engine/dom';
 import { type Draw, type PixelStep, type ScreenTri, type Step, type Target, SUB } from './raster';
 
 // ---------------------------------------------------------------------------------------------
@@ -57,6 +57,11 @@ export function paintTarget(ctx: CanvasRenderingContext2D, t: Target, draws: Dra
   const hot = pal.rgb('--alert');
   const warm = pal.rgb('--warn');
   const S = t.samples;
+  // Fill whole device pixels (edges rounded), so neighbouring squares meet without seams at any scale.
+  const m = ctx.getTransform();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const ex = (x: number) => Math.round(x * k * m.a + m.e);
+  const ey = (y: number) => Math.round(y * k * m.d + m.f);
   for (let y = 0; y < t.h; y++)
     for (let x = 0; x < t.w; x++) {
       const p = y * t.w + x;
@@ -79,8 +84,9 @@ export function paintTarget(ctx: CanvasRenderingContext2D, t: Target, draws: Dra
         c = n === 0 ? bg : n === 1 ? mix(bg, ink, 0.25) : n === 2 ? mix(bg, warm, 0.7) : mix(bg, hot, Math.min(1, 0.55 + 0.15 * (n - 3)));
       }
       ctx.fillStyle = rgbCss(c);
-      ctx.fillRect(x * k, y * k, k + 0.5, k + 0.5);
+      ctx.fillRect(ex(x), ey(y), ex(x + 1) - ex(x), ey(y + 1) - ey(y));
     }
+  ctx.setTransform(m);
 }
 
 /** Outline a screen triangle (positions in 1/SUB pixel). */
@@ -116,8 +122,98 @@ export function chk(label: string, on: boolean, change: (v: boolean) => void): H
   i.checked = on;
   return h('label', { class: 'll-chk' }, i, ` ${label}`);
 }
-export function canvas(w: number, h0: number, label: string, cls = 'rd-canvas'): HTMLCanvasElement {
-  return h('canvas', { class: cls, width: String(w), height: String(h0), 'aria-label': label, role: 'img' }) as HTMLCanvasElement;
+// ---------------------------------------------------------------------------------------------
+// Widget frame and sizing
+//
+// The sizing rule (render.css has the CSS half): a canvas is drawn in fixed *logical* units (the
+// w × h given to canvas()), shown at its aspect ratio no wider than --rd-max-w (640 px by default)
+// and no taller than --rd-max-h (60vh), and never wider than the column. Its backing store follows
+// the size it is shown at times devicePixelRatio, so it stays crisp at any zoom; draw through
+// ctx2d(), which scales logical units to the backing store, and redraw from fit()'s callback.
+// stage() puts a canvas beside a side panel (readouts) when the widget is wide enough, and above
+// it otherwise. Pointer code should map clientX/Y through getBoundingClientRect() to logical
+// units (or to target pixels), never through canvas.width.
+
+/** The widget's root element (`.ll.rd.<cls>`), replacing whatever the host held. */
+export function frame(host: HTMLElement, cls: string): HTMLElement {
+  const root = h('div', { class: `ll rd ${cls}` });
+  host.replaceChildren(root);
+  return root;
+}
+export const stat = (v: string | number, label: string) => h('span', { class: 'll-stat' }, h('b', {}, String(v)), h('span', {}, label));
+export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+
+const logical = new WeakMap<HTMLCanvasElement, { w: number; h: number }>();
+
+export interface CanvasSize {
+  /** Largest width shown, in CSS px (sets --rd-max-w on the canvas). */
+  maxWidth?: number;
+  /** Largest height shown, as a CSS length such as '40vh' (sets --rd-max-h on the canvas). */
+  maxHeight?: string;
+}
+
+/**
+ * A canvas drawn in logical units w × h. Its shown size follows the sizing rule above; call fit()
+ * to keep the backing store matched to it.
+ */
+export function canvas(w: number, h0: number, label: string, cls = 'rd-canvas', size: CanvasSize = {}): HTMLCanvasElement {
+  const c = h('canvas', { class: cls.includes('rd-canvas') ? cls : `rd-canvas ${cls}`, width: String(w), height: String(h0), 'aria-label': label, role: 'img' }) as HTMLCanvasElement;
+  logical.set(c, { w, h: h0 });
+  c.style.setProperty('--rd-ar', String(w / h0));
+  c.style.aspectRatio = `${w} / ${h0}`;
+  if (size.maxWidth) c.style.setProperty('--rd-max-w', `${size.maxWidth}px`);
+  if (size.maxHeight) c.style.setProperty('--rd-max-h', size.maxHeight);
+  return c;
+}
+
+/** The canvas's logical size (what drawing code works in). */
+export function size(c: HTMLCanvasElement): { w: number; h: number } {
+  return logical.get(c) ?? { w: c.width, h: c.height };
+}
+
+/** The 2D context, scaled so that drawing in logical units fills the backing store. */
+export function ctx2d(c: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = c.getContext('2d')!;
+  const { w, h: h0 } = size(c);
+  ctx.setTransform(c.width / w, 0, 0, c.height / h0, 0, 0);
+  return ctx;
+}
+
+/**
+ * Keep the canvas's backing store at the size it is shown at, in device pixels, and redraw when
+ * that changes (resizing a canvas clears it). Until it is laid out it keeps its logical size.
+ */
+export function fit(c: HTMLCanvasElement, redraw: () => void): void {
+  if (typeof ResizeObserver === 'undefined') return;
+  new ResizeObserver((entries) => {
+    const e = entries[entries.length - 1];
+    const dpr = window.devicePixelRatio || 1;
+    // contentRect × devicePixelRatio rather than devicePixelContentBoxSize, which emulated
+    // device scale factors (and some browsers) report in CSS pixels. The border sits inside the
+    // aspect ratio, so the content box can be a hair off w : h; ctx2d scales x and y separately.
+    const bw = Math.round(e.contentRect.width * dpr);
+    const bh = Math.round(e.contentRect.height * dpr);
+    if (bw < 2 || bh < 2) return;
+    if (bw === c.width && bh === c.height) return;
+    c.width = bw;
+    c.height = bh;
+    redraw();
+  }).observe(c);
+}
+
+/**
+ * A canvas (or a group of them) with an optional side panel: beside it when the widget is wide
+ * enough, below it otherwise. `ar` is the figure's aspect ratio when it isn't a single canvas.
+ */
+export function stage(fig: HTMLElement, side: Child[] = [], ar?: number): HTMLElement {
+  const el = h('div', { class: 'rd-stage' }, fig, side.length ? h('div', { class: 'rd-side' }, ...side) : false);
+  const a = ar ?? (fig instanceof HTMLCanvasElement ? size(fig).w / size(fig).h : undefined);
+  if (a) el.style.setProperty('--rd-ar', String(a));
+  for (const p of ['--rd-max-w', '--rd-max-h']) {
+    const v = fig.style.getPropertyValue(p);
+    if (v) el.style.setProperty(p, v);
+  }
+  return el;
 }
 
 /**

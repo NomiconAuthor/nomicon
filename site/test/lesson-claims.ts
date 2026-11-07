@@ -68,48 +68,11 @@ import { FRAME_SCENARIOS } from '../src/flecs/frame/scenarios';
 import { defaultConfig, record as recordFrame, type Recording as FrameRecording } from '../src/flecs/frame/record';
 import { timeline as frameTimeline, type Timeline as FrameTimeline } from '../src/flecs/frame/model';
 import initJolt from 'jolt-physics/wasm';
-import { affineError as rdAffineError, coverage as rdCoverage, lengthText as rdLength, overdraw as rdOverdraw, pipelineRun as rdPipelineRun, pipelineScene as rdPipelineScene, rasterPoints as rdRasterPoints, resolution as rdResolution, zFight as rdZFight, DEPTH_FAR as RD_DEPTH_FAR } from '../src/render/scenes';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const pages = join(here, '..', 'src', 'pages');
-const src = join(here, '..', 'src');
 
-// ------------------------------------------------------------------------------------------
-// Claims
-
-interface Failure {
-  lesson: string;
-  message: string;
-}
-const failures: Failure[] = [];
-let checked = 0;
-const lessonText = new Map<string, string>();
-const norm = (s: string) => s.replace(/\*\*/g, '').replace(/\\(['"])/g, '$1').replace(/\s+/g, ' ');
-/** A lesson's MDX under src/pages, or (for the labs) a .ts source file under src, whose strings are the text the lab shows. */
-function text(lesson: string): string {
-  let t = lessonText.get(lesson);
-  if (t === undefined) {
-    t = norm(readFileSync(lesson.endsWith('.ts') ? join(src, lesson) : join(pages, lesson), 'utf8'));
-    lessonText.set(lesson, t);
-  }
-  return t;
-}
-/** The lesson must contain exactly this text (bold markers and line breaks ignored). */
-function claim(lesson: string, expected: string): void {
-  checked++;
-  if (!text(lesson).includes(norm(expected))) failures.push({ lesson, message: `should say: ${expected}` });
-}
-/** A fact the lesson states in words, checked as a condition. */
-function fact(lesson: string, ok: boolean, what: string): void {
-  checked++;
-  if (!ok) failures.push({ lesson, message: `no longer true: ${what}` });
-}
-
-// Number formats the lessons use.
-const int = (x: number) => Math.round(x).toLocaleString('en-US');
-const d1 = (x: number) => x.toFixed(1);
-const d2 = (x: number) => x.toFixed(2);
-const pct = (x: number) => `${Math.round(x)}%`;
+import { checked, claim, d1, d2, fact, failures, int, pct, text } from './claims/core';
+import { RENDER_LESSONS, rendering } from './claims/render';
 
 // ------------------------------------------------------------------------------------------
 // Groups
@@ -1783,77 +1746,7 @@ async function frame(): Promise<void> {
   fact(L, p2.runs[0].lanes[1].every((b) => b.slices.every((s) => s.table !== pp.steps[1].before.where.get(ball1)!.table)), "only main moves Ball1's one-row table");
 }
 
-// Rendering: every number the three pipeline lessons quote, from the scenes their widgets draw.
-function rendering(): void {
-  // The pipeline.
-  const P = 'rendering/the-pipeline.mdx';
-  const on = rdPipelineRun(0.1, true).stats;
-  const off = rdPipelineRun(0.1, false).stats;
-  const deep = rdPipelineRun(4.6, true).stats;
-  const sc = rdPipelineScene();
-  claim(P, `This frame has ${on.vertices} vertex shader runs: the floor's ${sc[0].mesh.positions.length} and the box's ${sc[1].mesh.positions.length}`);
-  claim(P, `${on.triangles} triangles go in`);
-  fact(P, on.clipped === 2, 'both floor triangles cross the near plane');
-  claim(P, `both floor triangles cross the near plane and come out as ${on.clippedOut} triangles`);
-  claim(P, `${on.backfacing} of the box's ${sc[1].mesh.indices.length / 3} face away from the camera`);
-  claim(P, `${off.fragments} fragments, ${off.depthFailed} of which fail the depth test, against ${on.fragments} fragments with culling on`);
-  claim(P, `${on.rasterised} triangles reach the rasteriser, and between them they produce ${on.fragments} fragments`);
-  fact(P, on.depthFailed === 0, 'with culling on, nothing fails the depth test');
-  fact(P, rdPipelineRun(1, true).stats.clipped === on.clipped, 'at 1 m the near plane still clips only the floor');
-  claim(P, `${deep.clipped} of the ${deep.triangles} triangles are clipped, into ${deep.clippedOut}`);
-
-  // Rasterisation.
-  const R = 'rendering/rasterisation.mdx';
-  const shared = rdRasterPoints('shared');
-  const tl = rdCoverage(shared, 'top-left', 1);
-  const inc = rdCoverage(shared, 'inclusive', 1);
-  const exc = rdCoverage(shared, 'exclusive', 1);
-  claim(R, `${inc.twice} pixels are drawn twice, all on the diagonal`);
-  claim(R, `${exc.missed} pixels are drawn by neither`);
-  claim(R, `A covers ${tl.a} pixels and B covers ${tl.b}, none twice, none missed`);
-  fact(R, tl.twice === 0 && tl.missed === 0, 'the top-left rule draws every pixel once');
-  const ms = rdCoverage(shared, 'top-left', 4);
-  claim(R, `${ms.partial} pixels are partly covered, and the fragment shader runs ${ms.shaded} times, against ${tl.shaded} without MSAA`);
-  const sl1 = rdCoverage(rdRasterPoints('sliver'), 'top-left', 1);
-  const sl4 = rdCoverage(rdRasterPoints('sliver'), 'top-left', 4);
-  claim(R, `the long sliver covers only ${sl1.a} pixels`);
-  fact(R, sl1.b === 0, 'the speck covers no pixel centre');
-  claim(R, `The sliver now covers ${sl4.a} samples and the speck ${sl4.b}`);
-  const aff = rdAffineError();
-  claim(R, `${int(aff.wrong)} of the floor's ${int(aff.pixels)} pixels pick the wrong colour, and texture coordinates are out by up to ${d1(aff.max)} squares`);
-
-  // Depth.
-  const D = 'rendering/depth.mdx';
-  const zf = (format: 'unorm16' | 'unorm24' | 'float32', near: number, reverseZ = false) => rdZFight({ format, near, reverseZ, depthTest: true });
-  const z16 = zf('unorm16', 0.1);
-  claim(D, `the ground shows through on ${z16.fighting} of the road's ${z16.road} pixels`);
-  claim(D, `moving the near plane from 0.1 m to 10 m takes the fighting from ${z16.fighting} pixels down to ${zf('unorm16', 10).fighting}`);
-  fact(D, zf('unorm24', 0.1).fighting === 0, 'with 24 bits the road is clean at 0.1 m');
-  const z24 = zf('unorm24', 0.01);
-  claim(D, `the ground shows through on ${z24.fighting} pixels`);
-  claim(D, `fights on the same ${zf('float32', 0.01).fighting} pixels`);
-  fact(D, zf('float32', 0.01).fighting === z24.fighting, 'plain float32 fights exactly like 24-bit');
-  fact(D, zf('float32', 0.01, true).fighting === 0, 'reverse-Z float32 is clean at 0.01 m');
-  fact(D, zf('unorm16', 0.1, true).fighting === z16.fighting && zf('unorm24', 0.01, true).fighting === z24.fighting, 'reverse-Z changes nothing for integer formats');
-  claim(D, `at 100 m, two surfaces ${rdLength(rdResolution(100, 0.1, RD_DEPTH_FAR, 'unorm16', false))} apart can still get the same 16-bit value`);
-  const row = (label: string, fmt: 'unorm16' | 'unorm24' | 'float32', rz: boolean) => claim(D, `| ${label} | ${[10, 100, 1000].map((z) => rdLength(rdResolution(z, 0.1, RD_DEPTH_FAR, fmt, rz))).join(' | ')} |`);
-  row('16-bit', 'unorm16', false);
-  row('24-bit', 'unorm24', false);
-  row('32-bit float', 'float32', false);
-  row('32-bit float, reverse-Z', 'float32', true);
-  const lateBack = rdOverdraw('back', 'late');
-  const earlyBack = rdOverdraw('back', 'early');
-  const earlyFront = rdOverdraw('front', 'early');
-  const pre = rdOverdraw('back', 'prepass');
-  claim(D, `the fragment shader runs ${int(lateBack.stats.shaded)} times for ${int(lateBack.visible)} pixels on screen, ${d2(lateBack.stats.shaded / lateBack.visible)}× per pixel`);
-  claim(D, `they all pass, still ${int(earlyBack.stats.shaded)}`);
-  claim(D, `front to back with early Z and it drops to ${int(earlyFront.stats.shaded)}`);
-  fact(D, earlyFront.stats.shaded === earlyFront.visible, 'front to back with early Z shades each pixel once');
-  claim(D, `${int(pre.stats.shaded)} runs whatever the order, after ${int(pre.stats.prepassFragments)} depth-only fragments in the prepass`);
-  fact(D, rdOverdraw('front', 'prepass').stats.shaded === pre.stats.shaded, 'the prepass shades the same either way');
-}
-
-const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast, pathing, tactics, render: rendering, frame };
+const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast, pathing, tactics, render: rendering, frame, ...RENDER_LESSONS };
 const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'spatial', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast', 'pathing', 'tactics', 'render', 'frame'];
 const args = process.argv.slice(2);
 const chosen = args.includes('--all') ? Object.keys(GROUPS) : args.filter((a) => !a.startsWith('-')).length ? args.filter((a) => !a.startsWith('-')) : FAST;

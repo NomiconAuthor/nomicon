@@ -1,11 +1,56 @@
-/* Rendering lesson widgets. Colours come from the theme tokens. */
+/* Rendering lesson widgets. Colours come from the theme tokens.
+
+   Sizing rule (view.ts has the JS half: canvas(), fit(), ctx2d(), stage()). A figure is shown at
+   its aspect ratio (--rd-ar, set from the canvas's logical size), no wider than --rd-max-w, no
+   taller than --rd-max-h and never wider than the column. Override the two limits per canvas with
+   canvas(..., { maxWidth, maxHeight }) or per widget on its root class. A .rd-stage puts the figure
+   beside its .rd-side panel once the widget is wide enough, and above it otherwise. */
+.rd {
+  container: rd / inline-size;
+  --rd-max-w: 640px;
+  --rd-max-h: 60vh;
+  --rd-side-min: 16rem;
+}
+.rd-canvas,
+.rd-fig {
+  --rd-fig-w: min(var(--rd-max-w), calc(var(--rd-max-h) * var(--rd-ar, 1.6)));
+  width: min(100%, var(--rd-fig-w));
+  box-sizing: border-box;
+}
 .rd-canvas {
-  width: 100%;
   height: auto;
   display: block;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--bg);
+}
+.rd-fig .rd-canvas {
+  width: 100%;
+}
+.rd-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: start;
+}
+.rd-side {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+@container rd (min-width: 880px) {
+  .rd-stage:has(> .rd-side) {
+    grid-template-columns: min(var(--rd-max-w), calc(var(--rd-max-h) * var(--rd-ar, 1.6)), 100% - var(--rd-side-min) - 14px) minmax(0, 1fr);
+  }
+  .rd-stage:has(> .rd-side) > .rd-canvas,
+  .rd-stage:has(> .rd-side) > .rd-fig {
+    width: 100%;
+  }
+}
+/* The depth widget's side panel holds a chart, so it needs more room. */
+.rd-depth {
+  --rd-side-min: 26rem;
 }
 .rd-two {
   display: grid;
@@ -96,9 +141,6 @@
 .rd-tab th {
   color: var(--muted);
   font-weight: 500;
-}
-.rd-chart {
-  max-height: 260px;
 }
 .rd-heat-legend {
   display: flex;
