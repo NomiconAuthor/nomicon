@@ -1,4 +1,5 @@
 /** The boss fight widget: a party of five against an orc warchief, with its threat table, the cleric's triage and telegraphs, live. */
+import { cellScale, figWidth } from '../ai/fit';
 import { fmt, h, seg } from '../engine/dom';
 import { type Flight, drawFlights, drawSprite, launch, onSprites, spriteSize } from '../sprites/sprites';
 import {
@@ -57,16 +58,24 @@ export class PartyViz {
 
   constructor(host: HTMLElement, preset: Partial<BossSettings> = {}) {
     Object.assign(this.s, preset);
-    this.root = h('div', { class: 'll bf' });
+    this.root = h('div', { class: 'll bf ai-fit' });
     host.replaceChildren(this.root);
     this.playBtn = h('button', { type: 'button', class: 'll-btn primary', onclick: () => this.toggle() }, 'Pause') as HTMLButtonElement;
     const restart = () => this.reset();
     const set = <K extends keyof BossSettings>(k: K) => (v: BossSettings[K]) => ((this.s[k] = v), restart());
     this.root.append(
-      h('div', { class: 'll-row' }, seg<Targeting>('Boss hits', [['nearest', 'Nearest'], ['top', 'Top threat'], ['margin', 'Threat + 110/130%']], this.s.targeting, set('targeting')).el),
-      h('div', { class: 'll-row' }, seg<HealPolicy>('Cleric', [['lowest', 'Lowest %'], ['triage', 'Triage']], this.s.heal, set('heal')).el),
-      h('div', { class: 'll-row' }, seg<DpsPolicy>('Damage', [['nuke', 'Full speed'], ['careful', 'Careful']], this.s.dps, set('dps')).el),
-      h('div', { class: 'll-row' }, seg<'0' | '1'>('Telegraphs', [['0', 'Ignore'], ['1', 'Dodge']], this.s.dodge ? '1' : '0', (v) => ((this.s.dodge = v === '1'), restart())).el),
+      h(
+        'div',
+        { class: 'll-row' },
+        seg<Targeting>('Boss hits', [['nearest', 'Nearest'], ['top', 'Top threat'], ['margin', 'Threat + 110/130%']], this.s.targeting, set('targeting')).el,
+        seg<HealPolicy>('Cleric', [['lowest', 'Lowest %'], ['triage', 'Triage']], this.s.heal, set('heal')).el,
+      ),
+      h(
+        'div',
+        { class: 'll-row' },
+        seg<DpsPolicy>('Damage', [['nuke', 'Full speed'], ['careful', 'Careful']], this.s.dps, set('dps')).el,
+        seg<'0' | '1'>('Telegraphs', [['0', 'Ignore'], ['1', 'Dodge']], this.s.dodge ? '1' : '0', (v) => ((this.s.dodge = v === '1'), restart())).el,
+      ),
       h(
         'div',
         { class: 'll-row' },
@@ -76,9 +85,7 @@ export class PartyViz {
         h('button', { type: 'button', class: 'll-btn', onclick: () => ((this.s.seed = 1 + Math.floor(Math.random() * 999)), restart()) }, 'New fight'),
         seg<string>('Speed', ['1', '3'].map((x) => [x, `×${x}`] as [string, string]), '1', (v) => (this.speed = Number(v))).el,
       ),
-      h('div', { class: 'bf-wrap' }, this.cnv),
-      this.stats,
-      h('div', { class: 'bf-panels' }, this.frames, this.cleric),
+      h('div', { class: 'ai-stage' }, h('div', { class: 'bf-wrap' }, this.cnv), h('div', { class: 'ai-side' }, this.stats, h('div', { class: 'bf-panels' }, this.frames, this.cleric))),
       h(
         'p',
         { class: 'll-muted bf-key' },
@@ -88,6 +95,7 @@ export class PartyViz {
       this.batch,
     );
     new ResizeObserver(() => this.draw()).observe(this.root);
+    addEventListener('resize', () => this.draw());
     new IntersectionObserver((es) => {
       this.visible = es.some((e) => e.isIntersecting);
       if (this.visible && this.playing) this.loop();
@@ -170,8 +178,7 @@ export class PartyViz {
     const sim = this.sim;
     if (!sim) return;
     const c = css(this.root);
-    const wpx = Math.max(280, this.cnv.parentElement!.clientWidth);
-    const S = Math.max(7, Math.min(20, Math.floor(wpx / AW)));
+    const S = cellScale(Math.max(280, figWidth(this.root)), AW, AH, { min: 7, max: 20, int: true });
     const dpr = window.devicePixelRatio || 1;
     if (this.cnv.width !== AW * S * dpr) {
       this.cnv.width = AW * S * dpr;

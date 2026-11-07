@@ -1,4 +1,5 @@
 import { h, seg, fmt } from './dom';
+import { llCanvas, llCtx, llFig, llFit, llStage } from './fit';
 
 /**
  * Game loop laboratory. A virtual clock produces "frames" (with a chosen frame
@@ -21,6 +22,9 @@ interface Ball {
   vy: number;
 }
 const W = 10; // world width (m)
+const SW = 800; // scene canvas, logical units
+const SH = 480;
+const TH = 120; // timeline strip height, CSS px
 const G = -9.81;
 const R = 0.25;
 const REST = 0.85;
@@ -176,8 +180,8 @@ export class LoopViz {
       costOut.textContent = `${this.stepCost} ms`;
     });
     this.pauseBtn = h('button', { type: 'button', class: 'll-btn', onclick: () => this.togglePause() }, 'Pause');
-    this.canvas = h('canvas', { class: 'lp-scene', width: '800', height: '480', 'aria-label': 'Simulation' });
-    this.timeline = h('canvas', { class: 'lp-time', width: '800', height: '120', 'aria-label': 'Frames and simulation steps over time' });
+    this.canvas = llCanvas(SW, SH, 'Simulation', 'lp-scene');
+    this.timeline = h('canvas', { class: 'lp-time', width: '800', height: String(TH), 'aria-label': 'Frames and simulation steps over time' });
     this.stats = h('div', { class: 'll-stats' });
     this.codeEl = h('pre', { class: 'll-code lp-code' });
     this.headlessEl = h('div', { class: 'lp-headless' });
@@ -193,13 +197,15 @@ export class LoopViz {
         h('label', { class: 'll-chk' }, cl, ' max 5 steps per frame'),
       ),
       h('div', { class: 'll-row' }, speedSeg.el, this.pauseBtn, h('button', { type: 'button', class: 'll-btn', onclick: () => this.reset() }, 'Restart')),
-      this.canvas,
-      this.stats,
-      h('div', { class: 'll-h' }, 'Last second: frames (top) and sim steps (bottom)'),
-      this.timeline,
-      this.codeEl,
-      this.headlessEl,
+      // The scene with the timeline under it (one figure, 45vh for the scene so both fit a screen),
+      // and the readouts and the loop's code beside it when there is room.
+      llStage(
+        llFig(SW / SH, [this.canvas, h('div', { class: 'll-h' }, 'Last second: frames (top) and sim steps (bottom)'), this.timeline], { maxHeight: '45vh' }),
+        [this.stats, this.codeEl, this.headlessEl],
+        '20rem',
+      ),
     );
+    llFit(this.canvas, () => this.draw());
   }
 
   private reset(): void {
@@ -349,9 +355,9 @@ while (running) {
 
   private draw(): void {
     const c = this.canvas;
-    const ctx = c.getContext('2d')!;
-    const cw = c.width;
-    const ch = c.height;
+    const ctx = llCtx(c);
+    const cw = SW;
+    const ch = SH;
     const s = cw / W;
     const X = (x: number) => x * s;
     const Y = (y: number) => ch - y * s;
@@ -387,10 +393,17 @@ while (running) {
   }
 
   private drawTimeline(): void {
+    // Drawn in CSS pixels at the strip's displayed width (fixed height), so the text stays readable.
     const c = this.timeline;
+    const dpr = window.devicePixelRatio || 1;
+    const cw = c.clientWidth || 800;
+    const ch = c.clientHeight || TH;
+    if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) {
+      c.width = Math.round(cw * dpr);
+      c.height = Math.round(ch * dpr);
+    }
     const ctx = c.getContext('2d')!;
-    const cw = c.width;
-    const ch = c.height;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = this.col('--bg');
     ctx.fillRect(0, 0, cw, ch);
     if (!this.frames.length) return;

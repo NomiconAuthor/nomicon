@@ -4,6 +4,7 @@
  * steering force; behaviours return a desired change in velocity.
  */
 import { seg, fmt } from '../engine/dom';
+import { textPx } from './fit';
 import { h, onTheme } from './ui';
 import { type V, v, add, sub, mul, len, norm, trunc, dot, rng } from './vec';
 import type { SpriteId } from '../sprites/sprites';
@@ -165,7 +166,7 @@ const H = 540;
 /** The behaviours playground is shorter: one vehicle doesn't need the formation field's room. */
 const SH = 400;
 function canvas(label: string, w = W, hgt = H): HTMLCanvasElement {
-  return h('canvas', { class: 'ai-steer', width: String(w), height: String(hgt), 'aria-label': label });
+  return h('canvas', { class: 'ai-steer ai-fitc', width: String(w), height: String(hgt), style: `--ar: ${w / hgt}`, 'aria-label': label });
 }
 export function pointer(cnv: HTMLCanvasElement, e: PointerEvent): V {
   const r = cnv.getBoundingClientRect();
@@ -210,7 +211,7 @@ export class SteerLab {
   private loop: Loop;
 
   constructor(host: HTMLElement) {
-    this.root = h('div', { class: 'll ai st' });
+    this.root = h('div', { class: 'll ai st ai-fit' });
     host.replaceChildren(this.root);
     const m = seg<Mode>(
       'Behaviour',
@@ -470,9 +471,18 @@ export class SteerLab {
       arrow(ctx, a.p, a.vel, c.c7, 0.5); // --c7 is blue in every theme, as the lesson says
       if (L.desired) arrow(ctx, a.p, L.desired, c.good, 0.5, true);
       if (L.steer) arrow(ctx, add(a.p, mul(a.vel, 0.5)), L.steer, c.warn, 0.25);
-      ctx.font = `12px ${c.mono}`;
+      // Readable at any displayed size: on a narrow canvas the key goes on a line of its own, shrunk to fit.
+      const fs = textPx(this.cnv, 12);
+      ctx.font = `${fs}px ${c.mono}`;
       ctx.fillStyle = c.muted;
-      ctx.fillText(`speed ${fmt(len(a.vel))}   ${this.mode === 'seek' || this.mode === 'arrive' || this.mode === 'flee' ? 'green dashed: desired velocity · ' : ''}blue: velocity · yellow: steering force`, 10, SH - 10);
+      const speed = `speed ${fmt(len(a.vel))}`;
+      const key = `${this.mode === 'seek' || this.mode === 'arrive' || this.mode === 'flee' ? 'green dashed: desired velocity · ' : ''}blue: velocity · yellow: steering force`;
+      if (ctx.measureText(`${speed}   ${key}`).width <= W - 20) ctx.fillText(`${speed}   ${key}`, 10, SH - 10);
+      else {
+        ctx.fillText(speed, 10, SH - 14 - fs);
+        ctx.font = `${Math.min(fs, (fs * (W - 20)) / ctx.measureText(key).width)}px ${c.mono}`;
+        ctx.fillText(key, 10, SH - 10);
+      }
     }
   }
 }
@@ -494,7 +504,7 @@ export class CrowdLab {
   private loop: Loop;
 
   constructor(host: HTMLElement) {
-    this.root = h('div', { class: 'll ai st' });
+    this.root = h('div', { class: 'll ai st ai-fit' });
     host.replaceChildren(this.root);
     const m = seg<AvoidMethod>(
       'Avoidance',
@@ -523,12 +533,20 @@ export class CrowdLab {
     this.root.append(
       h('div', { class: 'll-row' }, m.el),
       h('div', { class: 'll-row' }, sc.el, n.el, h('button', { type: 'button', class: 'll-btn', onclick: () => this.reset() }, 'Restart')),
-      h('div', { class: 'st-crowd' }, this.cnv),
-      this.stats,
       h(
-        'p',
-        { class: 'll-muted sp-note' },
-        'The highlighted agent shows its velocity space: the circle is its top speed, the hollow dot the velocity it would like, the arrow the one it chose. For the sampling methods, the dots are the candidate velocities it tried, green for cheap and red for costly; for ORCA, each line is the edge of the half-plane of velocities one neighbour leaves it.',
+        'div',
+        { class: 'ai-stage ai-ar', style: '--ar: 1' },
+        h('div', { class: 'st-crowd ai-fig' }, this.cnv),
+        h(
+          'div',
+          { class: 'ai-side' },
+          this.stats,
+          h(
+            'p',
+            { class: 'll-muted sp-note' },
+            'The highlighted agent shows its velocity space: the circle is its top speed, the hollow dot the velocity it would like, the arrow the one it chose. For the sampling methods, the dots are the candidate velocities it tried, green for cheap and red for costly; for ORCA, each line is the edge of the half-plane of velocities one neighbour leaves it.',
+          ),
+        ),
       ),
     );
     this.loop = new Loop(this.root, () => this.step(), () => this.draw());
@@ -945,7 +963,7 @@ export class FormationLab {
   private loop: Loop;
 
   constructor(host: HTMLElement) {
-    this.root = h('div', { class: 'll ai st' });
+    this.root = h('div', { class: 'll ai st ai-fit' });
     host.replaceChildren(this.root);
     const mode = seg<FMode>(
       'When a slot is blocked',
@@ -974,9 +992,7 @@ export class FormationLab {
     this.root.append(
       h('div', { class: 'll-row' }, mode.el),
       h('div', { class: 'll-row' }, shape.el, n.el, h('label', { class: 'ai-check' }, wait, 'Leader waits for stragglers')),
-      this.cnv,
-      this.stats,
-      h('p', { class: 'll-muted sp-note' }, 'The shield knight in front leads. Rings are slots (red when blocked by a wall or out of sight of the leader). Followers in single file get a gold ring. Dotted line: the leader\'s recent path; dashed: its patrol route, with the next waypoint circled. Lines join each follower to where it is heading.'),
+      h('div', { class: 'ai-stage ai-ar', style: `--ar: ${W / H}` }, h('div', { class: 'ai-fig' }, this.cnv), h('div', { class: 'ai-side' }, this.stats, h('p', { class: 'll-muted sp-note' }, 'The shield knight in front leads. Rings are slots (red when blocked by a wall or out of sight of the leader). Followers in single file get a gold ring. Dotted line: the leader\'s recent path; dashed: its patrol route, with the next waypoint circled. Lines join each follower to where it is heading.'))),
     );
     this.loop = new Loop(this.root, (dt) => this.sim.step(dt), () => this.draw());
     this.reset();

@@ -23,9 +23,9 @@ export class CourseLab {
 
   constructor(host: HTMLElement, preset: Partial<CourseSettings> = {}) {
     Object.assign(this.s, preset);
-    this.root = h('div', { class: 'll ai st' });
+    this.root = h('div', { class: 'll ai st ai-fit' });
     host.replaceChildren(this.root);
-    this.cnv = h('canvas', { class: 'ai-steer', width: String(COURSE_W), height: String(COURSE_H), 'aria-label': 'A party of six following a path through walls, led by a shield knight; click a member to inspect it' });
+    this.cnv = h('canvas', { class: 'ai-steer ai-fitc', width: String(COURSE_W), height: String(COURSE_H), 'aria-label': 'A party of six following a path through walls, led by a shield knight; click a member to inspect it' });
     const restart = () => this.reset();
     const map = seg<string>('Map', COURSES.map((c) => [c.id, c.name] as [string, string]), this.s.course, (x) => ((this.s.course = x), restart()));
     const crates = h('input', { type: 'checkbox', checked: this.s.crates });
@@ -72,12 +72,20 @@ export class CourseLab {
       h('div', { class: 'll-row' }, sense.el),
       this.ctxRow,
       h('div', { class: 'll-row' }, follow.el, motion.el, seg<string>('Speed', [['0.5', 'Walk'], ['1', 'Run']], String(this.pace), (x) => (this.pace = Number(x))).el),
-      this.cnv,
-      this.stats,
       h(
-        'p',
-        { class: 'll-muted sp-note' },
-        'Click a party member to inspect it (the shield knight in front, purple, is selected first). Its rays show what it noticed; for context steering, the ring shows interest (green) and danger (red) per direction, and the yellow arrow is the direction it chose. The cross is where the path follower is aiming.',
+        'div',
+        { class: 'ai-stage ai-ar', style: `--ar: ${COURSE_W / COURSE_H}` },
+        h('div', { class: 'ai-fig' }, this.cnv),
+        h(
+          'div',
+          { class: 'ai-side' },
+          this.stats,
+          h(
+            'p',
+            { class: 'll-muted sp-note' },
+            'Click a party member to inspect it (the shield knight in front, purple, is selected first). Its rays show what it noticed; for context steering, the ring shows interest (green) and danger (red) per direction, and the yellow arrow is the direction it chose. The cross is where the path follower is aiming.',
+          ),
+        ),
       ),
     );
     this.cnv.addEventListener('pointerdown', (e) => {

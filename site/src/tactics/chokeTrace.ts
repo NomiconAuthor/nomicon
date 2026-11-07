@@ -372,7 +372,7 @@ export class ChokeTrace extends EventTrace<Ev> {
       ctx.lineWidth = 1;
       if (cs >= 6) {
         ctx.fillStyle = col.get('--ink');
-        ctx.font = `600 ${Math.max(9, cs * 0.9)}px ${col.get('--f-mono')}`;
+        ctx.font = `600 ${Math.max(11, cs * 0.9)}px ${col.get('--f-mono')}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${c.width} m`, x + r + 3, y);

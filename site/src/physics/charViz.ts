@@ -5,7 +5,7 @@ import { box, polygon } from './collide';
 import { type V, add, scale, sub, v } from './math';
 import { type Scene, bin } from './scenes';
 import { World } from './world';
-import { PhysicsView, statLine } from './view';
+import { PhysicsView, phStage, statLine } from './view';
 import { DynamicCharacter, KinematicMover, type MoveInput } from './character';
 
 function chk(label: string, on: boolean, change: (v: boolean) => void): HTMLElement {
@@ -51,9 +51,7 @@ export class QueryViz {
         this.kind = k;
         this.view.draw();
       }).el,
-      h('p', { class: 'll-muted ph-note' }, 'Drag either end of the cast.'),
-      c,
-      this.out,
+      phStage(c, [h('p', { class: 'll-muted ph-note' }, 'Drag either end of the cast.'), this.out]),
     );
     this.view.draw();
   }
@@ -176,7 +174,7 @@ export class CharacterViz {
     const root = h('div', { class: 'll ph ph-char', tabindex: '0' });
     host.replaceChildren(root);
     const sc = level();
-    this.view = new PhysicsView(sc.world, { view: sc.view, label: 'A level with two characters' });
+    this.view = new PhysicsView(sc.world, { view: sc.view, label: 'A level with two characters', maxWidth: 820 });
     this.view.ground = sc.ground;
     this.place(sc.world, sc.start);
     this.view.beforeStep = (dt) => this.control(dt);
@@ -214,8 +212,7 @@ export class CharacterViz {
         chk('Show the mover\'s casts', true, (on) => (this.showCasts = on)),
         h('button', { type: 'button', class: 'll-btn', onclick: () => this.reset() }, 'Reset'),
       ),
-      this.view.canvas,
-      this.out,
+      phStage(this.view.canvas, [this.out]),
     );
     this.stats();
   }

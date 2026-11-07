@@ -3,6 +3,7 @@
  * and why, and where the board now says its quarry is; the cards show the guild, party and adventurer boards;
  * the flow diagram shows what moves between them, a second at a time. Parties only post and read at waystones.
  */
+import { cellScale, figWidth } from '../ai/fit';
 import { fmt, h, seg } from '../engine/dom';
 import { type SpriteId, drawSprite, onSprites, spriteSize } from '../sprites/sprites';
 import { DURATION, PLACES, REACH, VH, VW, mmssOf as mmss, runGuild, staleSeconds, type BoardRow, type Preset, type Role, type VRun } from './village';
@@ -68,12 +69,15 @@ export class KnowledgeViz {
   private panHint = h('p', { class: 'll-muted kn-pan', hidden: true }, 'Swipe the map sideways to see the rest; it follows the chosen adventurer.');
   /** The time step the map last scrolled to follow the chosen adventurer at. */
   private followedAt = -1;
+  /** Beside (or under) the map: the boards, or this second's traffic between them. */
+  private view: 'boards' | 'flow' = 'boards';
+  private side!: HTMLElement;
 
   constructor(host: HTMLElement, opts: { preset?: Preset } = {}) {
     this.preset = opts.preset ?? 'simple';
     this.run = this.simulate();
     this.selectDefault();
-    this.root = h('div', { class: 'll kn' });
+    this.root = h('div', { class: 'll kn ai-fit' });
     this.mapWrap = h('div', { class: 'kn-mapwrap' }, this.map);
     host.replaceChildren(this.root);
     this.slider = h('input', { type: 'range', min: 0, max: DURATION, value: 0, 'aria-label': 'Time' }) as HTMLInputElement;
@@ -118,20 +122,32 @@ export class KnowledgeViz {
       h('span', { class: 'im-key ring', style: `--k: var(--alert)` }, 'red rings: last known place of a monster, with age'),
       h('span', { class: 'im-key dot', style: `--k: var(--muted)` }, 'grey stones: waystones'),
     );
+    const show = seg<'boards' | 'flow'>(
+      'Show',
+      [
+        ['boards', 'The boards'],
+        ['flow', 'What moves between them'],
+      ],
+      this.view,
+      (v) => {
+        this.view = v;
+        this.cards.hidden = v !== 'boards';
+        this.flow.hidden = v !== 'flow';
+        if (v === 'flow') this.drawFlow(css(this.root));
+      },
+    );
+    this.flow.hidden = true;
+    this.side = h('div', { class: 'ai-side kn-side' }, h('div', { class: 'll-row' }, show.el), h('div', { class: 'kn-scroll' }, this.cards, this.flow));
     this.root.append(
       ...rows,
       h('div', { class: 'll-row kn-time' }, this.playBtn, h('button', { type: 'button', class: 'll-btn', onclick: () => this.step() }, 'Step'), this.slider, this.timeLbl),
       h('div', { class: 'll-row' }, speed.el, h('span', { class: 'll-muted' }, 'Click an adventurer on the map to read its boards.'), this.stageLbl),
       this.note,
-      this.mapWrap,
-      this.panHint,
-      key,
-      this.cards,
-      this.flow,
-      this.stats,
+      h('div', { class: 'ai-stage kn-stagebox' }, h('div', { class: 'kn-mapcol' }, this.mapWrap, this.panHint, key, this.stats), this.side),
     );
     this.map.addEventListener('pointerdown', (e) => this.pick(e));
     new ResizeObserver(() => this.draw()).observe(this.root);
+    addEventListener('resize', () => this.draw());
     new MutationObserver(() => this.draw()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     onSprites(() => this.draw());
     this.draw();
@@ -281,7 +297,7 @@ export class KnowledgeViz {
       else if (clerk.length) notes.push(`The guild clerk edits the board: ${clerk.map((r) => `“${r.text}”`).join(' and ')}.`);
       else if (t === 0) notes.push('Both parties are at the guild hall: each reads the board, picks the best quest it can take that nobody has claimed, and posts its claim.');
     }
-    // Always shown, with a placeholder, so the map below doesn't jump as notes come and go.
+    // Always shown, with a placeholder, so the map doesn't jump as notes come and go.
     if (!notes.length) notes.push(h('span', { class: 'll-muted' }, 'Turning points are explained here as they happen.'));
     this.note.replaceChildren(...notes);
   }
@@ -289,11 +305,14 @@ export class KnowledgeViz {
   private drawMap(c: Cols): void {
     const t = this.t();
     const st = this.run.steps[t];
-    const wpx = Math.max(280, this.root.clientWidth - 4);
-    // Desktop fits the whole map. A phone would shrink it to under 3 px a cell, so there it keeps
-    // a readable scale, scrolls sideways in its frame, and follows the chosen party.
-    const S = Math.min(7, Math.max(wpx / VW, MIN_CELL));
+    const wpx = Math.max(280, figWidth(this.root) - 2);
+    // Desktop fits the whole map (within fit.ts's budget). A phone would shrink it to under 3 px a
+    // cell, so there it keeps a readable scale, scrolls sideways in its frame, and follows the chosen party.
+    const S = cellScale(wpx, VW, VH, { min: MIN_CELL, max: 7 });
     this.S = S;
+    // The side panel scrolls rather than growing past the map beside it (ai.css).
+    this.side.style.setProperty('--kn-map-h', `${Math.round(VH * S)}px`);
+    this.side.parentElement!.style.setProperty('--fig-w', `${Math.min(wpx, Math.ceil(VW * S)) + 2}px`);
     this.panHint.hidden = S * VW <= wpx + 1;
     const dpr = window.devicePixelRatio || 1;
     const cnv = this.map;
@@ -336,7 +355,7 @@ export class KnowledgeViz {
         ctx.arc((x + 0.5) * S, (y + 0.5) * S, S * 0.85, 0, Math.PI * 2);
         ctx.fill();
       }
-    const fs = Math.max(9, Math.round(S * 1.55));
+    const fs = Math.max(10, Math.round(S * 1.55));
     const P = (v: number) => (v + 0.5) * S;
     // Place names.
     ctx.font = `${fs}px ${c.mono}`;
@@ -374,7 +393,7 @@ export class KnowledgeViz {
     }
     // What the selected party believes about the monsters: last known places, with their age.
     const sel = st.parties[this.party];
-    ctx.font = `${Math.max(8, Math.round(S * 1.3))}px ${c.mono}`;
+    ctx.font = `${Math.max(10, Math.round(S * 1.3))}px ${c.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     for (const r of sel.rows) {
@@ -508,6 +527,7 @@ export class KnowledgeViz {
     const prev = t ? this.run.steps[t - 1] : st;
     const tr = st.traffic;
     const cnv = this.flow;
+    if (cnv.hidden) return;
     const dpr = window.devicePixelRatio || 1;
     const Wd = cnv.clientWidth || 700;
     const Hh = 236;

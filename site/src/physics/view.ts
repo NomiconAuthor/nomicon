@@ -21,8 +21,8 @@ export interface ViewOptions {
   view: [number, number, number, number];
   hz?: number;
   interpolate?: boolean;
-  /** Canvas pixel width (CSS scales it to fit). */
-  width?: number;
+  /** Largest width shown, in CSS px (default 640; the canvas is also capped at --ph-max-h tall). */
+  maxWidth?: number;
   label?: string;
 }
 
@@ -64,8 +64,8 @@ export class PhysicsView {
     this.hz = o.hz ?? 60;
     this.interpolate = o.interpolate ?? true;
     const [x0, y0, x1, y1] = o.view;
-    const W = o.width ?? 960;
-    this.canvas = h('canvas', { class: 'ph-canvas', width: String(W), height: String(Math.round((W * (y1 - y0)) / (x1 - x0))), 'aria-label': o.label ?? 'Physics simulation' });
+    this.canvas = phCanvas((x1 - x0) / (y1 - y0), o.label ?? 'Physics simulation', o.maxWidth);
+    fitCanvas(this.canvas, () => this.draw());
     touchScroll(this.canvas, { grab: (e) => this.draggable && !!this.bodyAt(this.toWorld(e)) });
     this.canvas.addEventListener('pointerdown', (e) => this.down(e));
     this.canvas.addEventListener('pointermove', (e) => this.move(e));
@@ -91,7 +91,7 @@ export class PhysicsView {
     if (view && view.join() !== this.view.join()) {
       this.view = view;
       const [x0, y0, x1, y1] = view;
-      this.canvas.height = Math.round((this.canvas.width * (y1 - y0)) / (x1 - x0));
+      setAspect(this.canvas, (x1 - x0) / (y1 - y0));
     }
     this.draw();
   }
@@ -151,14 +151,16 @@ export class PhysicsView {
   // ----------------------------------------------------------------------------------------
   // Coordinates and input
 
+  /** Logical (CSS) pixels per metre. Drawing works in CSS px; the backing store is at devicePixelRatio. */
   get scaleK(): number {
-    return this.canvas.width / (this.view[2] - this.view[0]);
+    return logicalSize(this.canvas).w / (this.view[2] - this.view[0]);
   }
   px = (p: V): V => v((p.x - this.view[0]) * this.scaleK, (this.view[3] - p.y) * this.scaleK);
   toWorld(e: PointerEvent | MouseEvent): V {
     const r = this.canvas.getBoundingClientRect();
-    const x = ((e.clientX - r.left) / r.width) * this.canvas.width;
-    const y = ((e.clientY - r.top) / r.height) * this.canvas.height;
+    const L = logicalSize(this.canvas);
+    const x = ((e.clientX - r.left) / r.width) * L.w;
+    const y = ((e.clientY - r.top) / r.height) * L.h;
     return v(this.view[0] + x / this.scaleK, this.view[3] - y / this.scaleK);
   }
   bodyAt(p: V): Body | null {
@@ -200,16 +202,14 @@ export class PhysicsView {
   }
 
   draw(): void {
-    const ctx = this.canvas.getContext('2d')!;
+    const ctx = phCtx(this.canvas);
     const k = this.scaleK;
-    const W = this.canvas.width;
-    const H = this.canvas.height;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const { w: W, h: H } = logicalSize(this.canvas);
     ctx.fillStyle = this.col('--bg');
     ctx.fillRect(0, 0, W, H);
     const w = this.world;
     const o = this.overlays;
-    const lw = Math.max(1, W / 700);
+    const lw = Math.max(1, Math.min(1.6, W / 420));
     // Islands get colours by root index.
     const islandCol = (b: Body) => `--c${(Math.abs(b.island) % 8) + 1}`;
 
@@ -381,6 +381,80 @@ export class PhysicsView {
     }
     this.onDraw?.(ctx, this.px, k);
   }
+}
+
+// ------------------------------------------------------------------------------------------
+// Sizing (physics.css has the CSS half). A canvas is shown at its aspect ratio (--ph-ar), no wider
+// than --ph-max-w (640 px), no taller than --ph-max-h (60vh) and never wider than the column. Its
+// logical size, which drawing works in, is the size it is shown at in CSS px, so line widths and
+// fonts given in px stay that size on a phone; the backing store is that × devicePixelRatio.
+
+const logical = new WeakMap<HTMLCanvasElement, { w: number; h: number; ar: number }>();
+
+/** A physics canvas of aspect ratio `ar` (width / height). */
+export function phCanvas(ar: number, label: string, maxWidth?: number, cls = ''): HTMLCanvasElement {
+  const w = 640;
+  const c = h('canvas', { class: `ph-canvas ph-fit${cls ? ` ${cls}` : ''}`, width: String(w), height: String(Math.round(w / ar)), 'aria-label': label }) as HTMLCanvasElement;
+  if (maxWidth) c.style.setProperty('--ph-max-w', `${maxWidth}px`);
+  setAspect(c, ar);
+  return c;
+}
+
+/** Change a canvas's aspect ratio (a new scene); fitCanvas picks up the new size. */
+export function setAspect(c: HTMLCanvasElement, ar: number): void {
+  const old = logical.get(c);
+  const w = old?.w ?? c.width;
+  logical.set(c, { w, h: w / ar, ar });
+  c.style.setProperty('--ph-ar', String(ar));
+  c.style.aspectRatio = String(ar);
+  const st = c.closest<HTMLElement>('.ph-stage');
+  if (st && !st.dataset.ar) st.style.setProperty('--ph-ar', String(ar));
+}
+
+/** The size drawing code works in: the canvas's shown size in CSS px. */
+export function logicalSize(c: HTMLCanvasElement): { w: number; h: number } {
+  return logical.get(c) ?? { w: c.width, h: c.height };
+}
+
+/** The 2D context, scaled so that drawing in logical units fills the backing store. */
+export function phCtx(c: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = c.getContext('2d')!;
+  const L = logicalSize(c);
+  ctx.setTransform(c.width / L.w, 0, 0, c.height / L.h, 0, 0);
+  return ctx;
+}
+
+/** Keep the backing store at the shown size × devicePixelRatio, and redraw when it changes. */
+export function fitCanvas(c: HTMLCanvasElement, redraw: () => void): void {
+  if (typeof ResizeObserver === 'undefined') return;
+  new ResizeObserver((entries) => {
+    const r = entries[entries.length - 1].contentRect;
+    if (r.width < 2 || r.height < 2) return;
+    const ar = logical.get(c)?.ar ?? r.width / r.height;
+    logical.set(c, { w: r.width, h: r.width / ar, ar });
+    const dpr = window.devicePixelRatio || 1;
+    const bw = Math.round(r.width * dpr);
+    const bh = Math.round(r.height * dpr);
+    if (bw !== c.width || bh !== c.height) {
+      c.width = bw;
+      c.height = bh;
+    }
+    redraw();
+  }).observe(c);
+}
+
+/**
+ * A canvas (or a group of them) with a side panel: beside it once the widget is wide enough
+ * (physics.css), below it otherwise. `ar` is the figure's aspect ratio when it isn't one canvas.
+ */
+export function phStage(fig: HTMLElement, side: Array<Node | false | null | undefined>, ar?: number): HTMLElement {
+  const el = h('div', { class: 'ph-stage' }, fig, h('div', { class: 'ph-side' }, ...side.filter((x): x is Node => !!x)));
+  const a = ar ?? (fig instanceof HTMLCanvasElement ? logical.get(fig)?.ar : undefined);
+  if (ar) el.dataset.ar = '1';
+  if (a) el.style.setProperty('--ph-ar', String(a));
+  const mw = fig.style.getPropertyValue('--ph-max-w');
+  if (mw) el.style.setProperty('--ph-max-w', mw);
+  return el;
 }
 
 /** A row of small stats under a view. */
