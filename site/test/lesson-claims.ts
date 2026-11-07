@@ -1,4 +1,4 @@
-// Checks that the numbers the lessons quote are what the simulations behind their widgets produce.
+// Checks that the numbers the lessons and the three labs quote are what the simulations behind their widgets produce.
 //
 // Each claim computes a value from the same code the widget runs, formats it the way the lesson
 // writes it, and asserts that exact text is in the lesson. Change a simulation and the lessons
@@ -18,8 +18,29 @@ import { HtnBrain, htnPlan } from '../src/ai/htn';
 import { CourseSim, DEFAULT_SETTINGS, TIME_LIMIT, type CourseSettings } from '../src/ai/course';
 import { AvoidSim, type AvoidMethod, type AvoidScene } from '../src/ai/avoid';
 import { FormationSim } from '../src/ai/steer';
-import { PRESETS as TACTICS_PRESETS, SIZES as TACTICS_SIZES } from '../src/tactics/world';
-import { samplePoints, coverTruth } from '../src/tactics/coverTraces';
+import { PRESETS as TACTICS_PRESETS, SIZES as TACTICS_SIZES, KINDS as TACTICS_KINDS, LOW as T_LOW, BUILDING as T_BUILDING, RAVINE as T_RAVINE, EYE as T_EYE, STANDING as T_STANDING, CROUCHED as T_CROUCHED, los as tacticsLos, makeWorld as makeTacticsWorld } from '../src/tactics/world';
+import { samplePoints, coverTruth, WalkTrace } from '../src/tactics/coverTraces';
+import { ChokeTrace } from '../src/tactics/chokeTrace';
+import { exposureKnown, probeOpenness } from '../src/tactics/analysis';
+import { CONCEPTS as TACTICS_CONCEPTS } from '../src/tactics/concepts';
+import { CONCEPTS as PATH_CONCEPTS } from '../src/lab/learn/concepts';
+import { GridSpace } from '../src/lab/graph/gridSpace';
+import { computeClearance, computeComponents } from '../src/lab/world/clearance';
+import { makeLayer as makeLabLayer } from '../src/lab/world/world';
+import { presetById as labPreset } from '../src/lab/world/presets';
+import { makeRng as makeLabRng } from '../src/lab/core/rng';
+import { Recorder, type SearchOptions } from '../src/lab/search/types';
+import type { HeuristicId } from '../src/lab/search/heuristics';
+import { bestFirst } from '../src/lab/search/bestFirst';
+import { jumpPointSearch } from '../src/lab/search/jps';
+import { thetaStar } from '../src/lab/search/theta';
+import { measurePath, shortcut } from '../src/lab/post/smooth';
+import { HpaGraph } from '../src/lab/rep/hpaGraph';
+import { hpaQuery } from '../src/lab/rep/hpaPlanner';
+import { RoadmapPlanner } from '../src/lab/rep/roadmapPlanner';
+import { dubinsAll, reedsSheppAll, cusps } from '../src/lab/vehicle/curves';
+import { FootprintChecker, VEHICLES, distanceField as vehicleDistance, holonomicField, innerDisc, vehicleById } from '../src/lab/vehicle/geometry';
+import { LATTICE_ANGLES, hybridAStar, latticeAStar, latticeTable, measurePoses } from '../src/lab/vehicle/search';
 import { FRAME, frameJobs, itemCosts, parallelFor, simulate, type GraphMode, type Policy } from '../src/engine/jobsim';
 import { frameWorkload, simulateWait, type Mode as WaitMode } from '../src/engine/waitsim';
 import { pipeline } from '../src/engine/waiting';
@@ -39,12 +60,15 @@ import { averageLatency } from '../src/physics/asyncTick';
 import { PhysicsBridge } from '../src/physics/ecsBridge';
 import { runTrouble } from '../src/physics/trouble';
 import { DumbTerminal, SnapshotClient, PredictedClient, LagCompensation, PeerToPeer } from '../src/net/models';
-import { Player as FeelPlayer, makeLevel as feelLevel, TIGHT as FEEL_TIGHT, type Settings as FeelSettings } from '../src/feel/controller';
+import { Player as FeelPlayer, Camera as FeelCamera, makeLevel as feelLevel, jumpPhysics as feelJumpPhysics, landingTrauma, DT as FEEL_DT, PRESETS as FEEL_PRESETS, TIGHT as FEEL_TIGHT, type Settings as FeelSettings } from '../src/feel/controller';
+import { CONCEPTS as feelConcepts } from '../src/feel/concepts';
+import { SLIDERS as FEEL_SLIDERS, VIEW_W as FEEL_VIEW_W, VIEW_H as FEEL_VIEW_H } from '../src/feel/app';
 import { FlecsWorld } from '../src/flecs/runtime';
 import initJolt from 'jolt-physics/wasm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pages = join(here, '..', 'src', 'pages');
+const src = join(here, '..', 'src');
 
 // ------------------------------------------------------------------------------------------
 // Claims
@@ -56,11 +80,12 @@ interface Failure {
 const failures: Failure[] = [];
 let checked = 0;
 const lessonText = new Map<string, string>();
-const norm = (s: string) => s.replace(/\*\*/g, '').replace(/\s+/g, ' ');
+const norm = (s: string) => s.replace(/\*\*/g, '').replace(/\\(['"])/g, '$1').replace(/\s+/g, ' ');
+/** A lesson's MDX under src/pages, or (for the labs) a .ts source file under src, whose strings are the text the lab shows. */
 function text(lesson: string): string {
   let t = lessonText.get(lesson);
   if (t === undefined) {
-    t = norm(readFileSync(join(pages, lesson), 'utf8'));
+    t = norm(readFileSync(lesson.endsWith('.ts') ? join(src, lesson) : join(pages, lesson), 'utf8'));
     lessonText.set(lesson, t);
   }
   return t;
@@ -1023,10 +1048,616 @@ function feel(): void {
     return on;
   };
   fact(F, corner(FEEL_TIGHT) && !corner({ ...FEEL_TIGHT, cornerCorrection: 0 }), 'corner correction gets you onto the low ledge; without it the jump dies');
+  // --- The concept cards' other statements.
+  const FC = 'feel/concepts.ts';
+  // A jump's height from a start on flat ground, holding jump for `hold` ticks.
+  const jumpFrom = (s: FeelSettings, hold: number, pressAt = 0, x = 57.5) => {
+    const q = new FeelPlayer(L, s);
+    q.teleport(x, 15);
+    for (let i = 0; i < 5; i++) q.step(K());
+    const y0 = q.y;
+    let top = y0, apexTick = -1, jumped = '';
+    for (let i = 0; i < 120; i++) {
+      const before = q.y;
+      const e = q.step(K(false, false, i >= pressAt && i < pressAt + hold));
+      if (e.jumped) jumped = e.jumped;
+      if (q.y < top) top = q.y;
+      if (apexTick < 0 && jumped && q.y >= before && i > pressAt) apexTick = i - pressAt;
+    }
+    return { height: y0 - top, apexTick, jumped };
+  };
+  // Run: a tenth of a second to top speed, stopping faster than starting.
+  {
+    const q = new FeelPlayer(L, FEEL_TIGHT);
+    q.teleport(57.5, 15);
+    for (let i = 0; i < 5; i++) q.step(K());
+    let ticks = 0;
+    while (q.vx < FEEL_TIGHT.maxSpeed && ticks < 100) (q.step(K(false, true)), ticks++);
+    fact(FC, Math.abs(ticks * FEEL_DT - 0.1) < 1e-9 && FEEL_TIGHT.decelTime < FEEL_TIGHT.accelTime, `Tight reaches top speed in a tenth of a second (${ticks} ticks) and stops faster than it starts`);
+    claim(FC, 'a tenth of a second to top speed reads as "responsive"');
+  }
+  // Jumps from height and time: the time to the top doesn't depend on the height.
+  {
+    const sym = { ...FEEL_TIGHT, apexHang: 1, jumpCut: 1, fallGravity: 1 };
+    const t2 = jumpFrom({ ...sym, jumpHeight: 2 }, 90).apexTick, t5 = jumpFrom({ ...sym, jumpHeight: 5 }, 90).apexTick;
+    fact(FC, Math.abs(t2 - t5) <= 1 && Math.abs(t2 * FEEL_DT - sym.timeToApex) <= 2 * FEEL_DT, `change the height and the jump takes the same time to the top (${t2} and ${t5} ticks for 2 and 5 tiles)`);
+    const { gravity, takeOff } = feelJumpPhysics(sym);
+    let y = 0, v = takeOff, top = 0;
+    for (let i = 0; i < 120; i++) ((v -= gravity * FEEL_DT), (y += v * FEEL_DT), (top = Math.max(top, y)));
+    fact(FC, top < sym.jumpHeight - 0.01, `the simplest update (velocity, then position) undershoots the height (${top.toFixed(3)} of ${sym.jumpHeight})`);
+    const hang = jumpFrom(FEEL_TIGHT, 90).height;
+    fact(FC, hang > FEEL_TIGHT.jumpHeight && hang < 1.1 * FEEL_TIGHT.jumpHeight, `apex hang takes a held jump a little higher (${hang.toFixed(3)} of ${FEEL_TIGHT.jumpHeight})`);
+    const falls = Object.values(FEEL_PRESETS).map((p) => p.s.fallGravity).filter((g) => g !== 1);
+    const heavy = feelConcepts.find((c) => c.id === 'jump')!.tries.find((t) => t.label === 'Heavy fall')!.scenario.set!.fallGravity!;
+    fact(FC, [...falls, heavy].every((g) => g >= 1.5 && g <= 3), 'every preset with heavier fall gravity, and the "Heavy fall" try, is within 1.5 to 3 times');
+    claim(FC, 'Heavier gravity on the way down (1.5 to 3 times)');
+  }
+  // Variable jump height: a tap is a small hop, held is a full jump, and a buffered tap is a short hop too.
+  {
+    const tap = jumpFrom(FEEL_TIGHT, 1).height, held = jumpFrom(FEEL_TIGHT, 90).height;
+    fact(FC, tap < 1 && held > 3, `a tap makes a small hop (${tap.toFixed(3)} tiles), a held button a full jump (${held.toFixed(3)})`);
+    const probe = new FeelPlayer(L, FEEL_TIGHT);
+    probe.teleport(33.5, 10);
+    let land = -1;
+    for (let i = 0; i < 200 && land < 0; i++) if (probe.step(K()).landed !== undefined) land = i;
+    const q = new FeelPlayer(L, FEEL_TIGHT);
+    q.teleport(33.5, 10);
+    let ground = 0, top = Infinity, kind = '';
+    for (let i = 0; i < 200; i++) {
+      const e = q.step(K(false, false, i === land - 4));
+      if (e.jumped) ((kind = e.jumped), (ground = q.y + 0)); // y just after take-off is within a tick of the floor
+      if (kind) top = Math.min(top, q.y);
+    }
+    fact(FC, kind === 'buffered' && ground - top < 1, `a buffered tap is a short hop, not a full jump (${(ground - top).toFixed(3)} tiles)`);
+  }
+  // Forgiveness: the typical windows the cards quote hold for Tight, and a press 50 ms before landing is eaten without a buffer.
+  {
+    fact(FC, FEEL_TIGHT.coyoteTime >= 0.08 && FEEL_TIGHT.coyoteTime <= 0.15 && FEEL_TIGHT.jumpBuffer >= 0.1 && FEEL_TIGHT.jumpBuffer <= 0.15, 'Tight’s coyote time is within 80–150 ms and its buffer within 100–150 ms');
+    claim(FC, '80 to 150 ms is typical');
+    claim(FC, 'a short window (100 to 150 ms)');
+    const early = (s: FeelSettings, ticks: number) => {
+      const probe = new FeelPlayer(L, s);
+      probe.teleport(33.5, 10);
+      let land = -1;
+      for (let i = 0; i < 200 && land < 0; i++) if (probe.step(K()).landed !== undefined) land = i;
+      const q = new FeelPlayer(L, s);
+      q.teleport(33.5, 10);
+      const out: string[] = [];
+      for (let i = 0; i < 200; i++) {
+        const e = q.step(K(false, false, i === land - ticks));
+        if (e.jumped) out.push(e.jumped);
+        if (e.eaten) out.push('eaten');
+      }
+      return out.join(',');
+    };
+    const ms = Math.round(3 * FEEL_DT * 1000);
+    fact(FC, early({ ...FEEL_TIGHT, jumpBuffer: 0 }, 3) === 'eaten' && early(FEEL_TIGHT, 3) === 'buffered', `without a buffer a press ${ms} ms before landing is eaten; with one it jumps`);
+    claim(FC, `a press made ${ms} ms before landing does nothing`);
+    // Try labels quote the setting they apply.
+    let labels = true;
+    for (const c of feelConcepts)
+      for (const t of c.tries) {
+        const set = t.scenario.set ?? {};
+        const m = /(\d+) ms/.exec(t.label), f = /(\d+) frames/.exec(t.label), p = /(\d+)%/.exec(t.label);
+        if (m && ![set.coyoteTime, set.jumpBuffer].some((v) => v !== undefined && Math.round(v * 1000) === Number(m[1]))) labels = false;
+        if (f && set.inputDelay !== Number(f[1])) labels = false;
+        if (p && Math.round((set.jumpCut ?? NaN) * 100) !== Number(p[1])) labels = false;
+      }
+    fact(FC, labels, 'the "Try it" labels quote the values they set');
+  }
+  // Camera: the spring never overshoots and stays stable across the whole Smoothing slider; dead zone, look-ahead, snapping.
+  {
+    const slider = Object.values(FEEL_SLIDERS).flatMap((g) => g.sliders).find((x) => x.key === 'cameraRate')!;
+    let noOvershoot = true, bounded = true;
+    for (let rate = slider.min; rate <= slider.max + 1e-9; rate += slider.step)
+      for (const camera of ['spring', 'lerp'] as const) {
+        const s = { ...FEEL_TIGHT, camera, cameraRate: rate, deadZone: 0, lookAhead: 0, platformSnap: false };
+        const q = new FeelPlayer(L, s);
+        q.teleport(57.5, 15);
+        for (let i = 0; i < 5; i++) q.step(K());
+        const cam = new FeelCamera(q, FEEL_VIEW_W, FEEL_VIEW_H);
+        cam.x = q.x - 6;
+        cam.y = cam.target(q, s).y - 4;
+        for (let i = 0; i < 300; i++) {
+          cam.step(q, s, L);
+          if (cam.x > q.x + 1e-9 || cam.y > cam.target(q, s).y + 1e-9) noOvershoot = false;
+        }
+        // Run right and back left across the level, jumping now and then.
+        const r = new FeelPlayer(L, { ...FEEL_TIGHT, camera, cameraRate: rate });
+        const c2 = new FeelCamera(r, FEEL_VIEW_W, FEEL_VIEW_H);
+        for (let i = 0; i < 1200; i++) {
+          r.step(K(i >= 600, i < 600, i % 50 < 15));
+          c2.step(r, r.s, L);
+          if (!(Math.abs(c2.vx) < 100 && Math.abs(c2.vy) < 100)) bounded = false;
+        }
+      }
+    fact(FC, noOvershoot, `the spring and lerp cameras never overshoot, at every Smoothing setting from ${slider.min} to ${slider.max}`);
+    fact(FC, bounded, 'the camera stays stable at every Smoothing setting');
+    const s = { ...FEEL_TIGHT };
+    const q = new FeelPlayer(L, s);
+    q.teleport(57.5, 15);
+    for (let i = 0; i < 5; i++) q.step(K());
+    const cam = new FeelCamera(q, FEEL_VIEW_W, FEEL_VIEW_H);
+    for (let i = 0; i < 120; i++) cam.step(q, s, L);
+    const cx = cam.x;
+    q.x += 0.5 * s.deadZone;
+    for (let i = 0; i < 30; i++) cam.step(q, s, L);
+    fact(FC, Math.abs(cam.x - cx) < 1e-9, 'inside the dead zone the camera does not move');
+    // A held jump with platform snapping: the view doesn't move up and down.
+    let ys = 0;
+    const y0 = cam.y;
+    for (let i = 0; i < 60; i++) {
+      q.step(K(false, false, i < 30));
+      cam.step(q, s, L);
+      ys = Math.max(ys, Math.abs(cam.y - y0));
+    }
+    fact(FC, ys < 1e-9, 'with platform snapping a jump doesn’t move the view up and down');
+    for (let i = 0; i < 90; i++) (q.step(K(false, true)), cam.step(q, s, L));
+    fact(FC, cam.target(q, s).x > q.x + 1, 'look-ahead leads the view in the direction of travel');
+  }
+  // Shake: none for a hop or an ordinary jump, some for the drop down the shaft; offset goes as trauma squared.
+  {
+    const landings = (s: FeelSettings, x: number, y: number, keys: (i: number) => ReturnType<typeof K>) => {
+      const q = new FeelPlayer(L, s);
+      q.teleport(x, y - 0.01);
+      const out: number[] = [];
+      for (let i = 0; i < 400; i++) {
+        const e = q.step(keys(i));
+        if (e.landed !== undefined) out.push(landingTrauma(e.drop, s));
+      }
+      return out;
+    };
+    const hop = landings(FEEL_TIGHT, 57.5, 15, (i) => K(false, false, i === 10));
+    const jump = landings(FEEL_TIGHT, 57.5, 15, (i) => K(false, false, i % 90 < 30));
+    const shaft = landings(FEEL_TIGHT, 85.5, 6, (i) => K(false, i < 60));
+    fact(FC, hop.length > 0 && jump.length > 1 && [...hop, ...jump].every((x) => x === 0) && shaft.some((x) => x > 0), 'a short hop and an ordinary jump don’t shake the screen; the drop down the shaft does');
+    claim(FC, 'a short hop shouldn’t shake the screen; a fall down the shaft should');
+    const c = new FeelCamera(new FeelPlayer(L, FEEL_TIGHT), FEEL_VIEW_W, FEEL_VIEW_H);
+    c.trauma = 1;
+    const full = c.shake(0.3).x;
+    c.trauma = 0.5;
+    fact(FC, Math.abs(c.shake(0.3).x - full / 4) < 1e-12, 'the shake offset is proportional to trauma squared');
+  }
 }
 
-const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast };
-const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'spatial', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast'];
+// The pathing lab: its concept cards, chips and notes against the planners they describe.
+function pathing(): void {
+  const C = 'lab/learn/concepts.ts';
+  const APP = 'lab/ui/app.ts';
+  const REG = 'lab/search/registry.ts';
+  const VEH = 'lab/rep/vehiclePlanner.ts';
+  const SIZE: Record<string, [number, number]> = { small: [32, 20], medium: [48, 30], large: [80, 50], huge: [128, 80], xl: [256, 160], xxl: [512, 320] };
+  // A map as a concept card's scenario sets it up: preset, size, seed 7, no terrain, no-corner-cutting diagonals.
+  const setup = (preset: string, size: string, o: { seed?: number; need?: number; ends?: { start: [number, number]; goal: [number, number] } } = {}) => {
+    const [w, h] = SIZE[size];
+    const world = labPreset(preset).build(w, h, o.seed ?? 7);
+    const l = world.layers[0];
+    if (o.ends) {
+      const at = ([fx, fy]: [number, number]) => ({ x: Math.max(0, Math.min(w - 1, Math.floor(fx * w))), y: Math.max(0, Math.min(h - 1, Math.floor(fy * h))) });
+      Object.assign(world.start, at(o.ends.start));
+      Object.assign(world.goal, at(o.ends.goal));
+    }
+    const cl = computeClearance(l);
+    const sp = new GridSpace(l, cl, { diagonal: 'noCorner', need: o.need ?? 1, useTerrain: false });
+    return { world, l, cl, sp, s: world.start.y * w + world.start.x, g: world.goal.y * w + world.goal.x };
+  };
+  const opts = (heuristic: HeuristicId, weight = 2) => ({ heuristic, weight }) as SearchOptions;
+  const astar = (sp: GridSpace, s: number, g: number) => bestFirst('astar', sp, s, g, opts('octile'), new Recorder(false));
+  const cost = (sp: GridSpace, path: number[]) => measurePath(sp, path).cost;
+  const len = (sp: GridSpace, path: number[]) => measurePath(sp, path).length;
+  const hpa = (sp: GridSpace, s: number, g: number, weight: number, lazy = false, graph = new HpaGraph(sp, 16, lazy)) => hpaQuery(graph, sp, s, g, 'octile', new Recorder(false), weight);
+
+  // Weighted A* on the card's big town (w = 2): far fewer expansions, cost within w of optimal.
+  {
+    const { sp, s, g } = setup('city', 'xl');
+    const a = astar(sp, s, g);
+    const w = bestFirst('weighted', sp, s, g, opts('octile', 2), new Recorder(false));
+    claim(C, `often expands far fewer nodes (${int(a.expanded / w.expanded)} times fewer on the big town below)`);
+    fact(C, cost(sp, w.path) <= 2 * cost(sp, a.path), 'Weighted A* (w = 2) costs at most w times the optimum on the big town');
+    // Greedy in the U-trap: fewer expansions, a longer path.
+    const u = setup('ushape', 'medium');
+    const ua = astar(u.sp, u.s, u.g);
+    const ug = bestFirst('greedy', u.sp, u.s, u.g, opts('octile'), new Recorder(false));
+    fact(C, cost(u.sp, ug.path) > cost(u.sp, ua.path), 'greedy best-first walks into the U-trap: its path is longer than A*’s');
+  }
+  // Random small maps: JPS matches A*'s path length, Theta* is never longer, Weighted A* stays within w.
+  {
+    let jpsSame = true, thetaOk = true, weightedOk = true, n = 0;
+    for (let t = 0; t < 400; t++) {
+      const W = 30, H = 30, l = makeLabLayer(W, H);
+      const r = makeLabRng(t + 7);
+      const d = 0.1 + 0.3 * r();
+      for (let i = 0; i < W * H; i++) if (r() < d) l.blocked[i] = 1;
+      const sp = new GridSpace(l, computeClearance(l), { diagonal: 'noCorner', need: 1, useTerrain: false });
+      const s = Math.floor(r() * W * H), g = Math.floor(r() * W * H);
+      if (!sp.passable(s) || !sp.passable(g) || s === g) continue;
+      const a = astar(sp, s, g);
+      const j = jumpPointSearch(sp, s, g, opts('octile'), new Recorder(false));
+      if (a.status !== j.status) jpsSame = false;
+      if (a.status !== 'found') continue;
+      n++;
+      const la = len(sp, a.path);
+      if (Math.abs(la - len(sp, j.path)) > 1e-6) jpsSame = false;
+      if (len(sp, thetaStar(false, sp, s, g, opts('euclidean'), new Recorder(false)).path) > la + 1e-6) thetaOk = false;
+      if (cost(sp, bestFirst('weighted', sp, s, g, opts('octile', 2), new Recorder(false)).path) > 2 * cost(sp, a.path) + 1e-6) weightedOk = false;
+    }
+    fact(REG, n > 200 && jpsSame, `JPS finds the same path length as A* (${n} random maps)`);
+    fact(C, thetaOk, 'Theta*’s path is never longer than A*’s grid path');
+    fact(REG, weightedOk, 'Weighted A* stays within a factor w of optimal');
+  }
+  // JPS on the card's scattered map: same cost; on a town it expands an order of magnitude fewer nodes.
+  {
+    const { sp, s, g } = setup('scatter', 'large');
+    fact(C, Math.abs(cost(sp, astar(sp, s, g).path) - cost(sp, jumpPointSearch(sp, s, g, opts('octile'), new Recorder(false)).path)) < 1e-6, 'JPS is optimal on the JPS card’s map');
+    const c = setup('city', 'large');
+    fact(C, astar(c.sp, c.s, c.g).expanded >= 10 * jumpPointSearch(c.sp, c.s, c.g, opts('octile'), new Recorder(false)).expanded, 'JPS expands an order of magnitude fewer nodes than A* on a town');
+  }
+  // Lazy Theta* on the any-angle card's rooms: several times fewer line-of-sight checks.
+  {
+    const { sp, s, g } = setup('rooms', 'medium');
+    const checks = (lazy: boolean) => Number(/([\d,]+) line-of-sight checks/.exec(thetaStar(lazy, sp, s, g, opts('euclidean'), new Recorder(false)).note ?? '')![1].replace(/,/g, ''));
+    fact(REG, checks(false) >= 2 * checks(true), `Lazy Theta* does several times fewer line-of-sight checks (${checks(true)} against ${checks(false)})`);
+  }
+  // Clearance: a cell with clearance k has a clear (2k−1)×(2k−1) square centred on it, and no bigger one.
+  {
+    const { l, cl } = setup('rooms', 'large');
+    const clearSquare = (x: number, y: number, r: number) => {
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          const cx = x + dx, cy = y + dy;
+          if (cx < 0 || cy < 0 || cx >= l.w || cy >= l.h || l.blocked[cy * l.w + cx]) return false;
+        }
+      return true;
+    };
+    let ok = true;
+    for (let i = 0; i < l.w * l.h; i++) {
+      const k = cl[i];
+      if (!k) continue;
+      const x = i % l.w, y = (i - x) / l.w;
+      if (!clearSquare(x, y, k - 1) || clearSquare(x, y, k)) ok = false;
+    }
+    fact(C, ok, 'clearance k means a clear (2k−1)×(2k−1) square centred on the cell, and no larger one');
+    claim(C, 'so a 1×1 unit needs 1, a 3×3 unit needs 2');
+    // A 3×3 unit in rooms: the one-cell doors close and the rooms split into islands.
+    fact(C, computeComponents(l, cl, 1, 'noCorner').count === 1 && computeComponents(l, cl, 2, 'noCorner').count > 1, 'with a 3×3 unit the rooms split into islands');
+    // Reachability off: A* expands every cell it can reach before saying no.
+    const big = setup('rooms', 'large', { need: 2 });
+    const comp = computeComponents(l, cl, 2, 'noCorner');
+    let s = -1;
+    for (let i = 0; i < l.w * l.h && s < 0; i++) if (cl[i] >= 2) s = i;
+    let g = -1;
+    for (let i = l.w * l.h - 1; i >= 0 && g < 0; i--) if (cl[i] >= 2 && comp.labels[i] !== comp.labels[s]) g = i;
+    let area = 0;
+    for (let i = 0; i < l.w * l.h; i++) if (comp.labels[i] === comp.labels[s]) area++;
+    const r = astar(big.sp, s, g);
+    fact(C, r.status !== 'found' && r.expanded === area, `an unreachable goal makes A* expand every reachable cell (${r.expanded} of ${area})`);
+  }
+  // HPA*: doors, not cells. The card's big town, and the 512 × 320 map the chip suggests.
+  {
+    const { sp, s, g } = setup('city', 'xl');
+    const a = astar(sp, s, g);
+    const h = hpa(sp, s, g, 1.05, true);
+    const ratio = a.expanded / h.expanded;
+    fact(C, ratio >= 10 && ratio <= 30, `HPA* touches ten to thirty times fewer nodes than A* on the big town (${ratio.toFixed(1)}×)`);
+    claim(C, 'often ten to thirty times fewer nodes on a big map');
+    // Door weight 1.05 against 1.00: the path it breaks ties into.
+    const h1 = hpa(sp, s, g, 1);
+    const h105 = hpa(sp, s, g, 1.05);
+    claim(APP, `A weight of 1.05 breaks the tie for paths about ${d1((cost(sp, h105.cells) / cost(sp, h1.cells) - 1) * 100)}% longer.`);
+  }
+  {
+    const { sp, s, g } = setup('empty', 'xl', { ends: { start: [0.05, 0.08], goal: [0.95, 0.92] } });
+    const h1 = hpa(sp, s, g, 1), h105 = hpa(sp, s, g, 1.05);
+    fact(C, h1.expanded >= 3 * h105.expanded && cost(sp, h1.cells) < 1.01 * cost(sp, h105.cells), `with door weight 1.00 HPA* expands several times more doors for almost the same path (${h1.expanded} against ${h105.expanded})`);
+  }
+  // HPA* path length before smoothing, over random queries on five big maps: the chip quotes the range of the averages.
+  {
+    const avg: number[] = [];
+    let recovered = true;
+    for (const preset of ['city', 'rooms', 'caves', 'scatter', 'empty']) {
+      let n = 0, sum = 0, smooth = 0;
+      for (const seed of [1, 2, 3, 4]) {
+        const { sp } = setup(preset, 'xl', { seed });
+        const graph = new HpaGraph(sp, 16, true);
+        const r = makeLabRng(seed * 101);
+        for (let q = 0; q < 6; ) {
+          const s = Math.floor(r() * sp.count), g = Math.floor(r() * sp.count);
+          if (!sp.passable(s) || !sp.passable(g)) continue;
+          q++;
+          const a = astar(sp, s, g);
+          const h = hpa(sp, s, g, 1.05, true, graph);
+          if (a.status !== 'found' || !h.found) continue;
+          const opt = cost(sp, a.path);
+          n++;
+          sum += cost(sp, h.cells) / opt;
+          smooth += cost(sp, shortcut(sp, h.cells)) / opt;
+        }
+      }
+      avg.push((sum / n - 1) * 100);
+      if (smooth / n > 1) recovered = false;
+    }
+    claim(APP, `['Optimal', 'Near: ${Math.round(Math.min(...avg))}–${Math.round(Math.max(...avg))}% longer on average before smoothing']`);
+    fact(C, recovered, 'smoothing recovers HPA*’s extra length');
+  }
+  // PRM at 1,000 samples misses the one-cell doors of the rooms map; the feature roadmap finds the path.
+  {
+    const { sp, s, g } = setup('rooms', 'large');
+    const pal = { get: () => '#000', packed: () => 0 } as unknown as Parameters<RoadmapPlanner['plan']>[2];
+    const plan = (method: 'prm' | 'feature') => new RoadmapPlanner().plan({ space: sp, start: s, goal: g, changed: 'all', structureKey: 'k' } as Parameters<RoadmapPlanner['plan']>[0], { method, samples: 1000, iterations: 5000, step: 3, spacing: 8, seed: 1, smoothing: 'none' }, pal).status;
+    fact(C, plan('prm') !== 'found' && plan('feature') === 'found', 'PRM misses the one-cell doors at 1,000 samples; the feature roadmap finds the path');
+    claim(C, 'PRM misses one-cell doors at 1,000 samples; the feature roadmap never does.');
+  }
+  // Curves: Dubins has six words; Reeds–Shepp paths have up to five pieces and two gear changes.
+  {
+    const dub = new Set<string>();
+    let pieces = 0, gears = 0;
+    const r = makeLabRng(5);
+    for (let i = 0; i < 2000; i++) {
+      const a = { x: 0, y: 0, theta: r() * 2 * Math.PI };
+      const b = { x: (r() - 0.5) * 20, y: (r() - 0.5) * 20, theta: r() * 2 * Math.PI };
+      for (const p of dubinsAll(a, b, 2)) dub.add(p.pieces.map((q) => 'RSL'[q.steer + 1]).join(''));
+      for (const p of reedsSheppAll(a, b, 2)) ((pieces = Math.max(pieces, p.pieces.length)), (gears = Math.max(gears, cusps(p))));
+    }
+    claim(C, `forward-only, it is one of ${['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'][dub.size]} words (${[...dub].sort((x, y) => 'LSL,RSR,LSR,RSL,RLR,LRL'.indexOf(x) - 'LSL,RSR,LSR,RSL,RLR,LRL'.indexOf(y)).join(', ')})`);
+    claim(C, `one of 48 words of up to ${['', '', '', 'three', 'four', 'five'][pieces]} pieces, with at most ${['', 'one', 'two', 'three'][gears]} gear changes`);
+  }
+  // Vehicles: the lattice's headings, the vehicle names, the analytic shot, and lattice optimality.
+  {
+    claim(C, `cell centres with ${LATTICE_ANGLES.length} headings`);
+    claim(VEH, `['Path', 'Drivable, but only ${LATTICE_ANGLES.length} headings']`);
+    fact(VEH, VEHICLES.every((v) => v.name.endsWith(`${v.length} × ${v.width}`)), 'vehicle names give their real length × width');
+    // The curves card's scenario: the goal faces back toward the start. With reverse the car backs in; forward-only drives further.
+    const sc = PATH_CONCEPTS.find((c) => c.id === 'curves')!.tries[0].scenario;
+    const { world, sp, s, g } = setup(sc.preset, sc.size!, { ends: sc.ends });
+    const W = sp.w;
+    const sh = Math.round((Math.atan2(world.goal.y - world.start.y, world.goal.x - world.start.x) * 180) / Math.PI / 5) * 5;
+    const start = { x: (s % W) + 0.5, y: Math.floor(s / W) + 0.5, theta: (sh * Math.PI) / 180 };
+    const goal = { x: (g % W) + 0.5, y: Math.floor(g / W) + 0.5, theta: (((sh + 180) % 360) * Math.PI) / 180 };
+    const spec = vehicleById('car');
+    const dist = vehicleDistance(sp.w, sp.h, sp.layer.blocked);
+    const check = new FootprintChecker(sp.w, sp.h, sp.layer.blocked, dist, spec);
+    const field = holonomicField(sp, dist, innerDisc(spec), g);
+    const drive = (reverse: boolean, shots: boolean) => hybridAStar({ space: sp, check, spec, radius: spec.radius, reverse, start, goal, anyHeading: false, field, rec: new Recorder(false) }, { bins: 72, shots, limit: 20000 });
+    const rev = drive(true, true), fwd = drive(false, true), noShot = drive(true, false);
+    const m = (r: ReturnType<typeof drive>) => measurePoses(sp, r.poses);
+    fact(C, rev.found && fwd.found && m(rev).reverse > 0 && m(fwd).reverse === 0 && m(fwd).length > m(rev).length, 'with the goal facing back, the car with reverse backs in; forward-only drives further');
+    const end = (r: ReturnType<typeof drive>) => {
+      const k = r.poses.length - 4;
+      return { d: Math.hypot(r.poses[k] - goal.x, r.poses[k + 1] - goal.y), a: Math.abs(Math.atan2(Math.sin(r.poses[k + 2] - goal.theta), Math.cos(r.poses[k + 2] - goal.theta))) };
+    };
+    fact(VEH, rev.shot !== null && end(rev).d < 1e-6 && end(rev).a < 1e-6, 'Hybrid A* ends exactly on the goal pose when the analytic shot finishes it');
+    fact(VEH, noShot.found && end(noShot).d <= Math.SQRT2 && (end(noShot).d > 1e-6 || end(noShot).a > 1e-6), 'without the shot, Hybrid A* stops near the goal pose, not on it');
+    // The lattice is optimal over its primitives (terrain off): compare with the same search using a plain
+    // straight-line heuristic, which is admissible and consistent, on open, scattered and town maps.
+    class CostRec extends Recorder {
+      g = new Map<number, number>();
+      last = -1;
+      constructor() {
+        super(false);
+      }
+      override open(node: number, _parent: number, g = NaN): void {
+        this.g.set(node, g);
+      }
+      override close(node: number): void {
+        this.last = node;
+      }
+    }
+    let n = 0, worse = 0;
+    const query = (layer: ReturnType<typeof makeLabLayer>, vehicle: string, reverse: boolean, r: () => number) => {
+      const W = layer.w, H = layer.h;
+      const space = new GridSpace(layer, computeClearance(layer), { diagonal: 'noCorner', need: 1, useTerrain: false });
+      const spec = vehicleById(vehicle);
+      const dist = vehicleDistance(W, H, layer.blocked);
+      const check = new FootprintChecker(W, H, layer.blocked, dist, spec);
+      const table = latticeTable(spec, spec.radius, reverse);
+      for (let tries = 0; tries < 50; tries++) {
+        const sx = 3 + Math.floor(r() * (W - 6)), sy = 3 + Math.floor(r() * (H - 6)), gx = 3 + Math.floor(r() * (W - 6)), gy = 3 + Math.floor(r() * (H - 6));
+        const start = { x: sx + 0.5, y: sy + 0.5, theta: LATTICE_ANGLES[Math.floor(r() * 16)] };
+        const goal = { x: gx + 0.5, y: gy + 0.5, theta: LATTICE_ANGLES[Math.floor(r() * 16)] };
+        if (!check.free(start.x, start.y, start.theta) || !check.free(goal.x, goal.y, goal.theta)) continue;
+        const field = holonomicField(space, dist, innerDisc(spec), gy * W + gx);
+        if (!Number.isFinite(field[sy * W + sx])) continue;
+        const run = (f: Float64Array) => {
+          const rec = new CostRec();
+          const res = latticeAStar({ space, check, spec, radius: spec.radius, reverse, start, goal, anyHeading: false, field: f, rec }, table, 2_000_000);
+          return res.found ? rec.g.get(rec.last)! : NaN;
+        };
+        const opt = run(field.map((v) => (Number.isFinite(v) ? 0 : Infinity)));
+        if (!Number.isFinite(opt)) continue;
+        n++;
+        if (run(field) > opt + 1e-6) worse++;
+        return;
+      }
+    };
+    let seed = 1;
+    for (const vehicle of ['car', 'tracked'])
+      for (const reverse of [false, true]) {
+        for (let t = 0; t < 3; t++) query(makeLabLayer(60, 60), vehicle, reverse, makeLabRng(seed++));
+        for (let t = 0; t < 3; t++) {
+          const r = makeLabRng(seed++);
+          const layer = makeLabLayer(60, 60);
+          for (let i = 0; i < 3600; i++) if (r() < 0.04) layer.blocked[i] = 1;
+          query(layer, vehicle, reverse, r);
+        }
+        query(labPreset('city').build(80, 50, 7).layers[0], vehicle, reverse, makeLabRng(seed++));
+      }
+    fact(VEH, n >= 20 && worse === 0, `the state lattice returns the optimal path over its primitives (${n - worse} of ${n} queries)`);
+    claim(VEH, "['Optimal', 'Yes, for paths made of these primitives (with terrain costs, nearly)']");
+  }
+}
+
+// The tactics lab: its concept cards, hints and captions against the analyses they describe.
+function tactics(): void {
+  const C = 'tactics/concepts.ts';
+  const APP = 'tactics/app.ts';
+  const CHOKE = 'tactics/chokeTrace.ts';
+  const map = (preset: string, size = 'small') => TACTICS_PRESETS.find((p) => p.id === preset)!.build(...TACTICS_SIZES[size], 3);
+  // The lab's own constants, read from its source where they are arguments in the app.
+  const source = (file: string) => readFileSync(join(here, '..', 'src', file), 'utf8');
+  const constant = (file: string, re: RegExp) => {
+    const m = re.exec(source(file));
+    if (!m) throw new Error(`${file}: ${re} not found`);
+    return m.slice(1).map(Number);
+  };
+  const colours = { get: () => '#000', rgba: () => '#000' } as unknown as ConstructorParameters<typeof ChokeTrace>[1];
+  // Kinds of terrain: what blocks walking and what blocks sight from a standing eye.
+  const low = TACTICS_KINDS[T_LOW], building = TACTICS_KINDS[T_BUILDING], ravine = TACTICS_KINDS[T_RAVINE];
+  claim(C, `A low wall (${low.height} m) blocks movement and hides a crouching unit, but a standing one can see and strike over it.`);
+  fact(C, !low.walk && T_CROUCHED < low.height && T_STANDING > low.height, 'a low wall blocks walking, is taller than a crouching unit and shorter than a standing one');
+  fact(C, !ravine.walk && ravine.height < T_EYE && !building.walk && building.height > T_EYE, 'a ravine blocks movement but not sight; a building blocks both');
+  // Line of sight behind a 1 m wall on open ground: a crouched target is hidden from 3 m out, a standing one never is.
+  {
+    const w = makeTacticsWorld(30, 5);
+    const y = 2, x = 20;
+    w.kind[y * w.w + x - 1] = T_LOW;
+    let crouchedHidden = true, standingSeen = true;
+    for (let d = 3; d <= 15; d++) {
+      if (tacticsLos(w, x - d, y, x, y, T_EYE, T_CROUCHED).clear) crouchedHidden = false;
+      if (!tacticsLos(w, x - d, y, x, y, T_EYE, T_STANDING).clear) standingSeen = false;
+    }
+    fact(C, crouchedHidden && standingSeen, 'a crouched unit right behind a 1 m wall is hidden from 3 m and further; a standing one is seen');
+    // "Exact for this model": the cell walk agrees with a dense sample along the line on random sight lines.
+    let agree = 0, total = 0;
+    for (const preset of ['town', 'country']) {
+      const t = map(preset);
+      const r = makeLabRng(3);
+      const walk: number[] = [];
+      for (let i = 0; i < t.w * t.h; i++) if (TACTICS_KINDS[t.kind[i]].walk) walk.push(i);
+      // A line through a grid corner touches the cells beside it at a point; the cell walk counts that as
+      // crossing one of them (so it won't see diagonally between two buildings), so such lines are left out.
+      const throughCorner = (ax: number, ay: number, bx: number, by: number) => {
+        const dx = bx - ax, dy = by - ay;
+        for (let X = Math.min(ax, bx) + 1; X <= Math.max(ax, bx); X++) {
+          const y = ay + 0.5 + (dy * (X - ax - 0.5)) / dx;
+          if (Math.abs(y - Math.round(y)) < 1e-9) return true;
+        }
+        return false;
+      };
+      for (let k = 0; k < 3000; k++) {
+        const a = walk[Math.floor(r() * walk.length)], b = walk[Math.floor(r() * walk.length)];
+        const ax = a % t.w, ay = (a - ax) / t.w, bx = b % t.w, by = (b - bx) / t.w;
+        if (a === b || throughCorner(ax, ay, bx, by)) continue;
+        const tz = r() < 0.5 ? T_CROUCHED : T_STANDING;
+        let clear = true;
+        const steps = 20000;
+        for (let s = 1; s < steps && clear; s++) {
+          const f = s / steps;
+          const cx = Math.floor(ax + 0.5 + (bx - ax) * f), cy = Math.floor(ay + 0.5 + (by - ay) * f);
+          if ((cx === ax && cy === ay) || (cx === bx && cy === by)) continue;
+          const ci = cy * t.w + cx;
+          if (Math.max(TACTICS_KINDS[t.kind[ci]].height, t.dyn[ci]) > T_EYE + (tz - T_EYE) * f) clear = false;
+        }
+        total++;
+        if (clear === tacticsLos(t, ax, ay, bx, by, T_EYE, tz).clear) agree++;
+      }
+    }
+    fact(C, agree === total, `grid line of sight is exact for this model (${agree} of ${total} random sight lines match a dense sample)`);
+    claim(C, "It's exact for this model and costs one step per cell crossed");
+  }
+  // Movement chokes vs sight chokes on the ravine map: the bridge is a choke only for movement, the doorways for both.
+  {
+    const t = map('ravine');
+    const chokes = (mode: 'move' | 'sight') => {
+      const tr = new ChokeTrace(t, colours, mode, 0.6);
+      tr.seek(tr.length - 1);
+      return tr.chokes;
+    };
+    const tx = Math.floor(t.w * 0.5), wx = Math.floor(t.w * 0.22);
+    const onBridge = (c: { x: number }) => Math.abs(c.x - tx) <= 1;
+    const atWall = (c: { x: number }) => Math.abs(c.x - wx) <= 1;
+    const move = chokes('move'), sight = chokes('sight');
+    fact(C, move.some(onBridge) && !sight.some(onBridge), 'the bridge is a choke for movement and disappears for line of sight');
+    fact(C, move.filter(atWall).length === 2 && sight.filter(atWall).length === 2, 'both doorways in the wall are chokes for movement and for sight');
+  }
+  // Traffic: the number of Dijkstra searches and routes the card and the hint quote.
+  {
+    const [sources, each] = constant(APP, /traffic\(this\.t, (\d+), (\d+),/);
+    const [cs, ce] = constant(CHOKE, /for \(let s = 0; s < (\d+) && walk\.length > 1; s\+\+\)[\s\S]*?for \(let k = 0; k < (\d+); k\+\+\)/);
+    fact(CHOKE, cs === sources && ce === each, 'the traffic stage of the choke trace samples as many routes as the traffic layer');
+    claim(C, `Here: ${sources} Dijkstra searches, ${each} routes from each.`);
+    claim(APP, `stats.push(['${sources * each}', 'sampled routes'], ['${sources}', 'Dijkstra searches']`);
+    claim(APP, `Shortest routes between ${sources * each} random pairs of walkable points`);
+    claim(CHOKE, `(${sources} Dijkstra searches, up to ${each} random destinations each;`);
+  }
+  // Openness: rays per cell.
+  {
+    const t = map('town');
+    const n = probeOpenness(t, t.unit.x, t.unit.y).rays.length;
+    claim(C, `Cast rays outwards at eye height in a ring (${n} here)`);
+    claim(APP, `The unit casts ${n} rays at eye height`);
+  }
+  // The boundary walk: probes every metre; at the default tolerance no probe misses, raise it and red probes appear.
+  {
+    const [spacing] = constant(APP, /private sampleSpacing = ([\d.]+);/);
+    const [tol] = constant(APP, /private simplifyTol = ([\d.]+);/);
+    claim(C, `Walk each edge at a fixed spacing (here ${spacing} m)`);
+    const missed = (preset: string, tolerance: number) => {
+      const tr = new WalkTrace(map(preset), colours, spacing, tolerance);
+      tr.seek(tr.length - 1);
+      return (tr as unknown as { samples: Array<{ kind: string }> }).samples.filter((s) => s.kind === 'none').length;
+    };
+    fact(C, missed('town', tol) === 0 && missed('country', tol) === 0, 'at the default Simplify tolerance the boundary walk has no red (missed) probes');
+    fact(C, missed('town', 1) > 0 && missed('country', 1) > 0, 'raising the Simplify tolerance makes red probes appear');
+  }
+  // Thin gaps (the cards run the medium map, which is where these shares hold).
+  {
+    const t = TACTICS_PRESETS.find((p) => p.id === 'thin')!.build(...TACTICS_SIZES.medium, 3);
+    const truth = coverTruth(t);
+    let gaps = 0;
+    for (const i of truth.keys()) if (t.thin[i]) gaps++;
+    const share = (algo: 'random' | 'poisson' | 'biased') => {
+      const found = new Set<number>();
+      for (const [x, y] of samplePoints(t, algo, 300, 11))
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const i = (y + dy) * t.w + x + dx;
+            if (x + dx >= 0 && y + dy >= 0 && x + dx < t.w && y + dy < t.h && truth.has(i) && t.thin[i]) found.add(i);
+          }
+      return found.size / gaps;
+    };
+    const third = (x: number) => x >= 0.25 && x <= 0.42;
+    fact(C, third(share('random')) && third(share('poisson')) && share('biased') >= 0.83 && share('biased') <= 0.95, 'on the medium Thin gaps map with 300 samples, random and Poisson find about a third of the gap positions, edge-biased nearly nine in ten');
+    claim(C, 'On the medium Thin gaps map with 300 samples');
+    const card = TACTICS_CONCEPTS.find((c) => c.id === 'coverSampling')!;
+    fact(C, card.tries.every((x) => x.scenario.size === 'medium' && x.scenario.budget === 300), 'the thin-gaps cards run the medium map with 300 samples');
+  }
+  // Changing terrain: per-cell cover is rebuilt with a 1 m margin.
+  {
+    const [margin] = constant(APP, /dirtyTiles\(t, clamped, (\d+)\)/);
+    claim(C, `so a ${margin} m margin is enough`);
+  }
+  // Exposure: crouching barely changes the town (few low walls); behind the countryside's hedgerows it cuts exposure.
+  {
+    const card = TACTICS_CONCEPTS.find((c) => c.id === 'exposure')!;
+    const threatsAt = card.tries[0].scenario.threats!;
+    const exposure = (preset: string) => {
+      const t = map(preset);
+      const free = ([fx, fy]: [number, number]) => {
+        const x0 = Math.round(fx * (t.w - 1)), y0 = Math.round(fy * (t.h - 1));
+        for (let r = 0; r < Math.max(t.w, t.h); r++)
+          for (let y = y0 - r; y <= y0 + r; y++) for (let x = x0 - r; x <= x0 + r; x++) if (x >= 0 && y >= 0 && x < t.w && y < t.h && TACTICS_KINDS[t.kind[y * t.w + x]].walk) return { x, y };
+        return { x: x0, y: y0 };
+      };
+      const e = exposureKnown(t, threatsAt.map(free));
+      let standing = 0, crouched = 0;
+      for (let i = 0; i < t.w * t.h; i++) ((standing += e.standing[i]), (crouched += e.crouched[i]));
+      return { standing, crouched };
+    };
+    const town = exposure('town'), country = exposure('country');
+    fact(C, town.crouched >= 0.9 * town.standing, 'in the town, crouching barely changes the exposure map');
+    claim(C, `in the countryside, crouching behind the hedgerows cuts exposure by ${pct((1 - country.crouched / country.standing) * 100)}.`);
+  }
+  // Picking cover: candidates within 25 m of walking.
+  {
+    const [range] = constant(APP, /const \{ dist, prev \} = dijkstra\(t, from, (\d+)\);/);
+    claim(C, `Every cover position within ${range} m of walking is a candidate`);
+    claim(APP, `'Every cover position within ${range} m of walking is a candidate`);
+    claim(APP, `'no reachable cover within ${range} m'`);
+  }
+}
+
+const GROUPS: Record<string, () => void | Promise<void>> = { ai, goap, htn, hotreload: hotReload, physics, engines, chaos, ecs, trouble, network, feel, steering, formations, cover: coverSampling, avoidance, jobs, spatial, waiting, profiling, influence: influenceMaps, knowledge, party, recast, pathing, tactics };
+const FAST = ['ai', 'goap', 'htn', 'hotreload', 'physics', 'engines', 'chaos', 'ecs', 'trouble', 'network', 'feel', 'steering', 'formations', 'cover', 'avoidance', 'jobs', 'spatial', 'waiting', 'profiling', 'influence', 'knowledge', 'party', 'recast', 'pathing', 'tactics'];
 const args = process.argv.slice(2);
 const chosen = args.includes('--all') ? Object.keys(GROUPS) : args.filter((a) => !a.startsWith('-')).length ? args.filter((a) => !a.startsWith('-')) : FAST;
 for (const name of chosen) {

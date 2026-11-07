@@ -165,12 +165,12 @@ const REP_INFO: Record<
     summary:
       "The map is cut into tiles. Doors sit wherever a unit can cross a tile border, and each tile caches the route between every pair of its doors. A query connects start and goal to their tiles' doors, runs A* over the small door graph, then stitches the cached routes together.",
     chips: [
-      ['Optimal', 'Near: ~6% longer on average before smoothing'],
+      ['Optimal', 'Near: 2–4% longer on average before smoothing'],
       ['Complete', 'Yes'],
       ['Path', 'Grid steps via doors'],
     ],
     watch:
-      'Expanded counts doors, not cells: compare with A* on a 512 × 320 map. In lazy mode, move the goal and watch the cached (teal) tiles grow; paint a wall and only the red tiles rebuild. Set the door weight to 1.00 on an open map to see the plateau: many door routes tie on cost and all get explored. A weight of 1.05 breaks the tie for paths about 0.3% longer.',
+      'Expanded counts doors, not cells: compare with A* on a 512 × 320 map. In lazy mode, move the goal and watch the cached (teal) tiles grow; paint a wall and only the red tiles rebuild. Set the door weight to 1.00 on an open map to see the plateau: many door routes tie on cost and all get explored. A weight of 1.05 breaks the tie for paths about 0.4% longer.',
   },
   navmesh: {
     name: 'Navmesh (Recast)',

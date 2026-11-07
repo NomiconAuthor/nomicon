@@ -187,7 +187,7 @@ export const CONCEPTS: TConcept[] = [
     title: 'Exposure to known threats',
     layer: 'exposure',
     body: [
-      "For each cell, test line of sight from every known threat's eyes to a unit standing or crouching there. The count is the cell's exposure. Low walls only protect a crouching unit, so switching stance changes the map a lot.",
+      "For each cell, test line of sight from every known threat's eyes to a unit standing or crouching there. The count is the cell's exposure. Low walls only protect a crouching unit, so switching stance changes the map wherever there are low walls: the town has few and barely changes, but in the countryside, crouching behind the hedgerows cuts exposure by 34%.",
       'This is exact, and it is the right tool for a handful of known threats. It costs one line-of-sight test per cell per threat, so it grows with both. A game usually computes it only for the cells it is considering (candidate cover near a unit), not for the whole map.',
     ],
     tries: [{ label: 'Two threats in the town', scenario: { preset: 'town', layer: 'exposure', stance: 'crouched', threats: [[0.85, 0.2], [0.8, 0.85]] } }],

@@ -399,7 +399,7 @@ export const CONCEPTS: Concept[] = [
     group: SEARCH,
     title: 'Trading quality for speed',
     body: [
-      'Weighted A* uses f = g + w·h with w > 1. It trusts the heuristic more, so it heads for the goal harder and often expands 2 to 10 times fewer nodes; in return its path may cost up to w times the optimum. On big maps where near-optimal is fine, this is the cheapest speed-up there is.',
+      'Weighted A* uses f = g + w·h with w > 1. It trusts the heuristic more, so it heads for the goal harder and often expands far fewer nodes (17 times fewer on the big town below); in return its path may cost up to w times the optimum. On big maps where near-optimal is fine, this is the cheapest speed-up there is.',
       'Greedy best-first goes all the way: f = h, ignoring the cost walked. It is very fast on open maps and falls into every U-shaped trap, because walking into the trap always looks like progress.',
     ],
     look: 'On the U-wall, greedy walks into the cup and has to back out; A* sees the cost of doing that.',
@@ -730,6 +730,8 @@ export const CONCEPTS: Concept[] = [
           preset: 'empty',
           size: 'medium',
           useTerrain: false,
+          // Close enough that turning round in a loop costs more than backing in.
+          ends: { start: [0.2, 0.5], goal: [0.5, 0.5] },
           goalFacesBack: true,
           lanes: [
             { rep: 'vehicle', vAlg: 'hybrid', vVehicle: 'car', vReverse: true },
