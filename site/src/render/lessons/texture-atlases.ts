@@ -72,7 +72,8 @@ export class PackViz {
   private shown = 0;
   private raf = 0;
   private cache = new Map<string, PackResult>();
-  private cv = canvas(512, 2 * VIEW_H, 'The atlas being packed, 256 texels wide');
+  // A tall figure: cap its height in px too, so it stops growing with the screen.
+  private cv = canvas(512, 2 * VIEW_H, 'The atlas being packed, 256 texels wide', 'rd-canvas', { maxHeight: 'min(56vh, 440px)' });
   private why = h('p', { class: 'rd-say' });
   private counts = h('div', { class: 'll-stats' });
   private table = h('table', { class: 'rd-tab rq-tab' });
@@ -100,7 +101,7 @@ export class PackViz {
         btn('Whole atlas', () => this.step(Infinity)),
         btn('Clear', () => this.step(-Infinity)),
       ),
-      stage(this.cv, [this.why, this.counts, h('div', { class: 'll-h' }, 'Every packer, same sprites and settings'), h('div', { class: 'rd-read' }, this.table)]),
+      stage(this.cv, [this.why, this.counts, h('div', { class: 'll-h' }, `Every packer, ${ATLAS_W} texels wide, same sprites and settings`), h('div', { class: 'rd-read' }, this.table)]),
     );
     onTheme(() => {
       this.pal.reset();
@@ -154,7 +155,7 @@ export class PackViz {
   }
 
   private fillTable(): void {
-    const head = h('tr', {}, h('th', {}, 'Packer'), h('th', {}, 'Smallest'), h('th', {}, 'Used'), h('th', {}, 'Power of 2'), h('th', {}, 'Used'));
+    const head = h('tr', {}, h('th', {}, 'Packer'), h('th', {}, 'Height'), h('th', {}, 'Used'), h('th', {}, 'Power of 2'), h('th', {}, 'Used'));
     const [k0, h0] = choiceSettings(this.choice);
     const rows = PACKER_ROWS.map(([k, heur]) => {
       const r = this.packed({ packer: k, heuristic: heur, rotate: this.rotate, padding: this.padding });
@@ -163,9 +164,9 @@ export class PackViz {
         'tr',
         { class: k === k0 && heur === h0 ? 'on' : '' },
         h('th', {}, CHOICES.find(([c]) => choiceSettings(c)[0] === k && choiceSettings(c)[1] === heur)?.[1] ?? rowLabel(k, heur)),
-        h('td', {}, `${r.W} × ${r.H}`),
+        h('td', {}, String(r.H)),
         h('td', {}, `${efficiency(r).toFixed(1)}%`),
-        h('td', {}, `${r.W} × ${pot}`),
+        h('td', {}, String(pot)),
         h('td', {}, `${efficiency(r, pot).toFixed(1)}%`),
       );
     });
@@ -489,6 +490,6 @@ export class BleedViz {
     const wk = `${key} ${this.zoom} ${this.filter}`;
     let w = this.worsts.get(wk);
     if (!w) this.worsts.set(wk, (w = worstBleed(atlas, this.zoom, this.filter)));
-    this.worst.replaceChildren(h('b', {}, 'Worst pixel over every offset: '), `${bleedText(w.neighbour)} from other sprites, ${bleedText(w.any)} that isn't sprite A.`);
+    this.worst.replaceChildren(h('b', {}, 'Worst pixel over offsets in 1/16 px steps: '), `${bleedText(w.neighbour)} from other sprites, ${bleedText(w.any)} that isn't sprite A.`);
   }
 }

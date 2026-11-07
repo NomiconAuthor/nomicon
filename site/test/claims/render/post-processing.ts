@@ -29,7 +29,8 @@ import {
 } from '../../../src/render/scenes/post-processing';
 
 const P = 'rendering/post-processing.mdx';
-const mb = (b: number) => d1(b / (1024 * 1024));
+// Decimal megabytes (10^6 bytes), as the rest of the section.
+const mb = (b: number) => d1(b / 1e6);
 
 async function draws(kind: 'webgpu' | 'webgl2', s: PostSettings): Promise<number> {
   const log = new CallLog();

@@ -171,6 +171,15 @@ export function size(c: HTMLCanvasElement): { w: number; h: number } {
   return logical.get(c) ?? { w: c.width, h: c.height };
 }
 
+/**
+ * A font size in logical units that is at least `base` and shows at least `minCss` CSS px at the
+ * canvas's current displayed width (canvases drawn in 640-unit coordinates shrink on phones).
+ */
+export function fontPx(c: HTMLCanvasElement, base: number, minCss = 11): number {
+  const shown = c.getBoundingClientRect().width;
+  return shown > 0 ? Math.max(base, (minCss * size(c).w) / shown) : base;
+}
+
 /** The 2D context, scaled so that drawing in logical units fills the backing store. */
 export function ctx2d(c: HTMLCanvasElement): CanvasRenderingContext2D {
   const ctx = c.getContext('2d')!;

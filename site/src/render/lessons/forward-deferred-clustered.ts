@@ -10,7 +10,7 @@ import { h, seg } from '../../engine/dom';
 import '../gpu/gpu.css';
 import { CallLog } from '../gpu/record';
 import { type FdcRenderer, createFdc } from '../gpu/forward-deferred-clustered';
-import { GpuCanvas, backendLine, planReadout } from '../gpu/widget';
+import { GpuCanvas, planReadout } from '../gpu/widget';
 import { VIEW_H, VIEW_W } from '../scenes/courtyard';
 import {
   type Culling,
@@ -25,15 +25,17 @@ import {
   buildLists,
   bytesPerPixel,
   gridOf,
+  kbText,
   lightsAt,
   listStats,
+  mb,
   sliceStart,
   tileBounds,
   viewXZ,
 } from '../scenes/forward-deferred-clustered';
 import { COURTYARD_CAMERA } from '../scenes/courtyard';
 import { Palette, canvas, chk, ctx2d, fit, frame, onTheme, rgbCss, stage, stat } from '../view';
-import { animate, apiSwitch, gpuFigure, linearOf, slider, timePasses } from './lighting-ui';
+import { animate, apiSwitch, gpuFigure, gpuRow, linearOf, showBackendRow, slider, timePasses } from './lighting-ui';
 
 /** The heat colour for a light count (the same ramp the shaders use), 0–255. */
 export function heatRgb(n: number): [number, number, number] {
@@ -75,7 +77,7 @@ export class LightsViz {
   private planStats = h('div', { class: 'll-stats' });
   private say = h('p', { class: 'rd-note' });
   private timing = h('span', { class: 'll-muted' });
-  private top = canvas(400, 360, 'Top-down view of the camera, its cells and the lights');
+  private top = canvas(400, 360, 'Top-down view of the camera, its cells and the lights', 'rd-canvas', { maxWidth: 250 });
   private viewSeg: ReturnType<typeof seg<ViewMode>>;
   private lastStats = 0;
   private kick: () => void;
@@ -141,10 +143,11 @@ export class LightsViz {
     });
     root.append(
       this.backend,
-      h('div', { class: 'll-row' }, shading.el, culling.el),
       h(
         'div',
         { class: 'll-row' },
+        shading.el,
+        culling.el,
         count,
         chk('Move the lights', false, (on) => {
           this.moving = on;
@@ -158,14 +161,13 @@ export class LightsViz {
       h('div', { class: 'll-row' }, this.viewSeg.el),
       stage(gpuFigure(this.gpu, VIEW_W, VIEW_H), [
         this.stats,
+        this.gstats,
         this.legend(),
         this.top,
-        h('p', { class: 'rd-note' }, 'From above: the camera at the bottom, its tile columns, depth slices (with clusters), and each light as a circle of its radius. Cells are coloured by their most crowded cell in that column.'),
+        h('p', { class: 'rd-note' }, 'From above: the camera at the bottom, its cells, and each light\'s radius.'),
       ]),
       this.say,
-      this.gstats,
-      h('div', { class: 'll-row' }, h('span', { class: 'll-muted' }, 'GPU: '), this.planStats),
-      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn', onclick: () => void this.time() }, 'Time 60 frames'), this.timing),
+      gpuRow(this.planStats, () => void this.time(), this.timing),
       this.status,
     );
     fit(this.top, () => this.drawTop());
@@ -218,7 +220,7 @@ export class LightsViz {
   }
 
   private showBackend(): void {
-    this.backend.replaceChildren(this.api, h('span', {}, h('span', { class: 'll-muted' }, 'GPU side: '), ...backendLine(this.gpu)));
+    showBackendRow(this.backend, this.api, this.gpu);
   }
 
   private drawGpu(): void {
@@ -235,25 +237,24 @@ export class LightsViz {
     const lights = lightsAt(this.s.lights, this.t);
     const st = listStats(lights, this.s.culling, this.lists, !this.moving);
     const g = gridOf(this.s.culling);
-    const kb = (b: number) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`);
     this.stats.replaceChildren(
       stat(st.perPixel.toFixed(1), 'lights per pixel (average)'),
       stat(st.worstPixel, 'at the worst pixel'),
       ...(this.moving ? [] : [stat(st.reaching.toFixed(1), 'actually reach it')]),
       stat(`${g.tx} × ${g.ty}${g.slices > 1 ? ` × ${g.slices}` : ''}`, 'cells'),
       stat(st.entries.toLocaleString('en-US'), 'list entries'),
-      stat(kb(st.bytes), 'grid + lists'),
+      stat(kbText(st.bytes), 'grid + lists'),
     );
     const w = this.gpu.canvas.width;
     const hh = this.gpu.canvas.height;
-    const mbAt = (bpp: number) => ((bpp * w * hh) / (1024 * 1024)).toFixed(1);
+    const mbAt = (bpp: number) => mb(bpp * w * hh).toFixed(1);
     this.say.textContent =
       this.s.shading === 'forward'
         ? `Forward: one pass. Each pixel's fragment shader loops over the ${this.s.culling === 'none' ? 'whole light list' : `lights in its ${this.s.culling === 'tiles' ? 'tile' : 'cluster'}`}, while the material is known.`
         : `Deferred: the G-buffer pass stores ${GBUFFER.map((t) => t.name).join(', ')} (${GBUFFER_BYTES} bytes per pixel); the lighting pass reads them back and loops over the ${this.s.culling === 'none' ? 'whole light list' : `lights in each pixel's ${this.s.culling === 'tiles' ? 'tile' : 'cluster'}`}.`;
     this.gstats.replaceChildren(
-      stat(`${bytesPerPixel(this.s.shading)} B`, 'written + read per pixel'),
-      stat(`${mbAt(bytesPerPixel(this.s.shading))} MB`, `per frame at this canvas's ${w} × ${hh}`),
+      stat(`${bytesPerPixel(this.s.shading)} B`, 'per pixel written + read,'),
+      stat(`${mbAt(bytesPerPixel(this.s.shading))} MB`, `a frame at ${w} × ${hh}`),
     );
   }
 

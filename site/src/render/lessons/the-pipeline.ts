@@ -5,7 +5,7 @@
 import { h, seg } from '../../engine/dom';
 import { type PixelStep, type Step, type V3, DEFAULTS, Target, basis, emptyStats, render } from '../raster';
 import { PIPE_H, PIPE_NEARS, PIPE_W, pipelineCamera, pipelineScene } from '../scenes/the-pipeline';
-import { Palette, Stepper, btn, canvas, chk, ctx2d, fit, frame, markPixel, n2, n3, onTheme, outlineTri, paintTarget, plural, size, stage, stat } from '../view';
+import { Palette, Stepper, btn, canvas, chk, ctx2d, fit, fontPx, frame, markPixel, n2, n3, onTheme, outlineTri, paintTarget, plural, size, stage, stat } from '../view';
 
 const STAGES = ['Vertex shader', 'Primitive assembly and clipping', 'Rasteriser', 'Fragment shader', 'Output merger'];
 
@@ -25,7 +25,7 @@ export class PipelineViz {
   private pal: Palette;
 
   constructor(host: HTMLElement) {
-    const root = frame(host, 'rd-pipe');
+    const root = frame(host, 'rd-pipeline');
     this.pal = new Palette(root);
     this.stepper = new Stepper(
       () => {
@@ -35,6 +35,14 @@ export class PipelineViz {
       () => this.show(),
     );
     const s = this.stepper;
+    // The frame and the top view side by side, as one figure: 16 : 9 columns of equal height. The
+    // draw calls and counts sit beside it on wide screens, so the widget stays under one screen.
+    const fig = stage(
+      h('div', { class: 'rd-fig rd-two', style: '--rd-max-w: 860px; --rd-ar: 2.5' }, h('div', {}, h('div', { class: 'll-h' }, 'The frame, 64 × 40 pixels'), this.screen), h('div', {}, h('div', { class: 'll-h' }, 'From above'), this.top)),
+      [h('div', { class: 'll-h' }, 'Draw calls'), this.drawList, this.counts],
+      2.5,
+    );
+    fig.style.setProperty('--rd-side-min', '22rem');
     root.append(
       h(
         'div',
@@ -47,10 +55,6 @@ export class PipelineViz {
           this.cull = on;
           s.reset(true);
         }),
-      ),
-      h(
-        'div',
-        { class: 'll-row' },
         btn('Next vertex', () => s.next(['vertex'])),
         btn('Next triangle', () => s.next(['triangle'])),
         btn('Next pixel', () => s.next(['pixel'], (p) => (p as PixelStep).mask !== 0)),
@@ -60,11 +64,7 @@ export class PipelineViz {
       ),
       this.stages,
       this.say,
-      // The frame and the top view side by side, as one figure: 16 : 9 columns of equal height.
-      stage(h('div', { class: 'rd-fig rd-two', style: '--rd-max-w: 860px; --rd-ar: 2.5' }, h('div', {}, h('div', { class: 'll-h' }, 'The frame, 64 × 40 pixels'), this.screen), h('div', {}, h('div', { class: 'll-h' }, 'From above'), this.top))),
-      h('div', { class: 'll-h' }, 'Draw calls'),
-      this.drawList,
-      this.counts,
+      fig,
     );
     onTheme(() => {
       this.pal.reset();
@@ -217,7 +217,7 @@ export class PipelineViz {
     ctx.lineTo(bx + 30, by);
     ctx.stroke();
     ctx.fillStyle = this.pal.css('--alert');
-    ctx.font = '18px sans-serif';
+    ctx.font = `${fontPx(this.top, 18, 12)}px sans-serif`;
     ctx.fillText('near plane', Math.max(4, Math.min(ax, bx) - 30), Math.min(ay, by) - 10);
     const [ex, ey] = px(e);
     ctx.fillStyle = this.pal.css('--ink');

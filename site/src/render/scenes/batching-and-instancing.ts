@@ -319,11 +319,11 @@ export function memory(side: number): Memory {
   return { meshes, constants: objs.length * UNIFORM_ALIGN, batches, instances: objs.length * INSTANCE_BYTES };
 }
 
-/** Bytes for the text: "1.5 KB", "4.0 MB" (1 KB = 1,024 bytes). */
+/** Bytes for the text: "1.5 KB", "4.0 MB", in decimal units (1 KB = 1,000 bytes, 1 MB = 10^6 bytes) like the rest of the section. */
 export function bytesText(b: number): string {
-  if (b < 1024) return `${b} bytes`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  if (b < 1000) return `${b} bytes`;
+  if (b < 1e6) return `${(b / 1000).toFixed(1)} KB`;
+  return `${(b / 1e6).toFixed(1)} MB`;
 }
 
 /** Triangles per object of each mesh. */
@@ -331,7 +331,8 @@ export const meshTriangles = () => MESHES.map((m) => m.indexCount / 3);
 
 /**
  * API calls the renderers make for one frame of a plan (checked against the recorded calls in the
- * claims). WebGPU: write the frame constants, encoder, canvas texture, pass, group 0, the instance
+ * claims). WebGPU: write the frame constants, encoder, getCurrentTexture (its createView is on the texture,
+ * which isn't recorded), pass, group 0, the instance
  * buffer once if any draw is instanced, then per change a pipeline, a material group, a vertex and
  * an index buffer, an object group, and the draws; end, finish, submit. WebGL2: update the frame
  * constants, viewport, clear colour, clear, then per change a program, a material range, a vertex

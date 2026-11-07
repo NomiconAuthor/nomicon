@@ -28,6 +28,12 @@ import './quirky.css';
 const LEVEL_COLS = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6', '--c7', '--c8'];
 export const THRESHOLDS = [0.25, 0.5, 1, 2, 4, 8];
 
+/** A font size in logical px that shows at least `min` CSS px however small the canvas is shown. */
+function labelPx(cv: HTMLCanvasElement, px: number, min = 10.5): number {
+  const shown = cv.clientWidth;
+  return shown > 0 ? Math.max(px, (min * size(cv).w) / shown) : px;
+}
+
 
 export class ClusterLodViz {
   private build: Build = 'dag';
@@ -131,9 +137,11 @@ export class ClusterLodViz {
     ctx.arc(v.x, v.y, 14, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.font = '14px sans-serif';
+    const fp = labelPx(this.cv, 14);
+    ctx.font = `${fp}px sans-serif`;
     ctx.fillStyle = this.pal.css('--muted');
-    ctx.fillText('drag the viewer', Math.min(v.x + 16, W - 110), v.y < 30 ? v.y + 26 : v.y - 12);
+    const hint = 'drag the viewer';
+    ctx.fillText(hint, Math.min(v.x + 16, W - ctx.measureText(hint).width - 6), v.y < 2 * fp ? v.y + 16 + fp : v.y - 18);
 
     this.say.replaceChildren(
       h('b', {}, `${c.segments.toLocaleString('en-US')} of ${SEGMENTS.toLocaleString('en-US')} segments`),
@@ -153,14 +161,15 @@ export class ClusterLodViz {
     const { w: W, h: H } = size(cv);
     ctx.fillStyle = this.pal.css('--bg');
     ctx.fillRect(0, 0, W, H);
-    const pad = { l: 56, r: 12, t: 26, b: 34 };
+    const fp = labelPx(cv, 14);
+    const pad = { l: Math.max(56, 16 + 3 * fp * 0.6), r: 12, t: 12 + fp, b: 20 + fp };
     const d0 = 50;
     const d1 = 50000;
     const s0 = 4;
     const s1 = SEGMENTS;
     const X = (d: number) => pad.l + ((Math.log10(d) - Math.log10(d0)) / (Math.log10(d1) - Math.log10(d0))) * (W - pad.l - pad.r);
     const Y = (s: number) => pad.t + ((Math.log10(s1) - Math.log10(Math.max(s0, s))) / (Math.log10(s1) - Math.log10(s0))) * (H - pad.t - pad.b);
-    ctx.font = '14px sans-serif';
+    ctx.font = `${fp}px sans-serif`;
     ctx.strokeStyle = this.pal.css('--line-soft');
     ctx.fillStyle = this.pal.css('--muted');
     ctx.lineWidth = 1;
@@ -169,14 +178,15 @@ export class ClusterLodViz {
       ctx.moveTo(pad.l, Y(s));
       ctx.lineTo(W - pad.r, Y(s));
       ctx.stroke();
-      ctx.fillText(String(s), 8, Y(s) + 5);
+      ctx.fillText(String(s), 8, Y(s) + fp * 0.35);
     }
     for (const d of [100, 1000, 10000]) {
       ctx.beginPath();
       ctx.moveTo(X(d), pad.t);
       ctx.lineTo(X(d), H - pad.b);
       ctx.stroke();
-      ctx.fillText(d.toLocaleString('en-US'), X(d) - 14, H - 12);
+      const t = d.toLocaleString('en-US');
+      ctx.fillText(t, X(d) - ctx.measureText(t).width / 2, H - 12);
     }
     // Distances are measured from the middle of the outline.
     const pts = this.hier('dag').pts;
@@ -214,14 +224,14 @@ export class ClusterLodViz {
     let lx = pad.l + 6;
     for (const [b, col] of builds) {
       ctx.fillStyle = this.pal.css(col);
-      ctx.fillRect(lx, 10, 14, 4);
+      ctx.fillRect(lx, 4 + fp * 0.5, 14, 4);
       ctx.fillStyle = this.pal.css('--body');
       const label = b === 'dag' ? 'groups (DAG)' : 'each cluster alone';
-      ctx.fillText(label, lx + 18, 17);
-      lx += 150;
+      ctx.fillText(label, lx + 18, 6 + fp * 0.85);
+      lx += 18 + ctx.measureText(label).width + 20;
     }
     ctx.fillStyle = this.pal.css('--muted');
-    ctx.fillText('distance', W - pad.r - 58, H - 12);
+    ctx.fillText('distance', W - pad.r - ctx.measureText('distance').width, H - 12);
   }
 }
 

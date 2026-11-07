@@ -68,6 +68,7 @@ export default async function culling(): Promise<void> {
   claim(P, `Two-phase culls none of them: it draws ${two.phase1} in its first phase and ${two.drawn - two.phase1} more in its second.`);
   claim(P, `in frame ${T}, **Queries** culls ${q.missed} visible buildings`);
   claim(P, `so the model's queries cull more than the HZB and keep only ${at10.queries.drawn} buildings at frame ${K}, but ${at10.queries.missed} visible ones go missing there too`);
+  claim(P, `slivers of buildings that cover no pixel centre at ${MODEL_W} × ${MODEL_H}`);
   fact(P, at10.queries.occluded > at10.last.occluded, 'queries cull more than last frame\'s HZB at frame 10');
 
   // Conservative methods never miss anything, on any frame of the walk; two-phase never misses.

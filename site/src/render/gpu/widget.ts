@@ -157,19 +157,30 @@ export class GpuCanvas {
 // ---------------------------------------------------------------------------------------------
 // Readouts
 
-/** One line on what the GPU side runs on, and why if it's not WebGPU. */
+/**
+ * One line on what the GPU side runs on: the API, then the adapter's name. Why it's not WebGPU
+ * (when it isn't) goes in the tooltip with the full name, so the line stays one line: gpu.css cuts
+ * the name with an ellipsis in a backend row.
+ */
 export function backendLine(g: GpuCanvas): HTMLElement[] {
   const c = g.ctx;
   if (!c) return [h('span', { class: 'rd-gpu-api off' }, 'No GPU')];
   const name = c.kind === 'webgpu' ? 'WebGPU' : 'WebGL2';
-  const why = c.kind === 'webgl2' && g.noWebGpu && g.noWebGpu !== 'WebGL2 was chosen' ? ` (WebGL2 because ${g.noWebGpu})` : '';
-  return [h('span', { class: `rd-gpu-api ${c.kind}` }, name), h('span', { class: 'll-muted' }, `${c.about ? ` ${c.about}` : ''}${why}`)];
+  const why = c.kind === 'webgl2' && g.noWebGpu && g.noWebGpu !== 'WebGL2 was chosen' ? `WebGL2 because ${g.noWebGpu}` : '';
+  const tip = [c.about, why].filter(Boolean).join('; ');
+  const pill = h('span', { class: `rd-gpu-api ${c.kind}` }, name);
+  const about = h('span', { class: 'll-muted' }, c.about ? ` ${c.about}` : '');
+  if (tip) {
+    pill.title = tip;
+    about.title = tip;
+  }
+  return [pill, about];
 }
 
 /** Passes, draw calls and triangles submitted, from the frame's plan. */
 export function planReadout(p: FramePlan): HTMLElement[] {
   const s = planStats(p);
-  return [stat(s.passes, s.passes === 1 ? 'pass' : 'passes'), stat(s.draws, s.draws === 1 ? 'draw call' : 'draw calls'), stat(s.triangles, 'triangles submitted')];
+  return [stat(s.passes, s.passes === 1 ? 'pass' : 'passes'), stat(s.draws, s.draws === 1 ? 'draw call' : 'draw calls'), stat(s.triangles.toLocaleString('en-US'), 'triangles submitted')];
 }
 
 /** Median of the non-null values, per pass. */

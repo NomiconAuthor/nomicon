@@ -8,8 +8,10 @@
  *
  * WebGPU says what to do with each attachment at the start and end of a pass (loadOp, storeOp).
  * WebGL2 has no such thing: "clear" is a clear call, "load" is doing nothing, and "discard" is
- * gl.invalidateFramebuffer, a hint the driver may ignore. Targets are the chosen size, not the
- * canvas's, so the bytes are the ones the model counts.
+ * gl.invalidateFramebuffer, a hint the driver may ignore. The G-buffer and HDR targets are the
+ * chosen size, not the canvas's, so those bytes are the ones the model counts; the post pass draws
+ * onto the small canvas (point-sampling the HDR target), which the model counts as a full-size
+ * swapchain image.
  */
 import { type Gl2Context, type GpuContext, type WebGpuContext } from './context';
 import { GLSL_FULLSCREEN_VS, WGSL_FULLSCREEN, glProgram, named, target } from './perf-common';

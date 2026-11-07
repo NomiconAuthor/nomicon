@@ -28,7 +28,7 @@ export interface ShadowSettings {
   slope: number;
   filter: Filter;
   cascades: boolean;
-  /** Split scheme: 0 uniform, 1 logarithmic (Zhang et al.'s practical scheme blends them). */
+  /** Split scheme: 0 uniform, 1 logarithmic (Zhang et al.'s practical scheme blends them; GPU Gems 3's λ form). */
   lambda: number;
   stable: boolean;
   /** How far the camera has moved forward (metres), for the moving-camera demo. */
@@ -113,7 +113,7 @@ export const CASCADES = 4;
 /** Cascades cover the view out to this distance; beyond it, nothing is shadowed. */
 export const SHADOW_DISTANCE = 40;
 
-/** Split distances: Zhang et al.'s practical split scheme, λ between uniform (0) and logarithmic (1). */
+/** Split distances: Zhang et al.'s practical split scheme in GPU Gems 3's form, λ between uniform (0) and logarithmic (1). */
 export function splits(lambda: number, near = COURTYARD_CAMERA.near, far = SHADOW_DISTANCE, n = CASCADES): number[] {
   return Array.from({ length: n + 1 }, (_, i) => {
     if (i === 0) return near;
@@ -274,7 +274,7 @@ export function shadowStats(s: ShadowSettings): ShadowStats {
   return st;
 }
 
-/** The size of one screen pixel on the floor at view depth z, for comparing with a texel. */
+/** The width of one screen pixel at view depth z, across the view (a surface seen at a slant gets more along it), for comparing with a texel. */
 export const pixelFootprint = (z: number) => (2 * z) / COURTYARD_CAMERA.focal / VIEW_H;
 
 // ---------------------------------------------------------------------------------------------

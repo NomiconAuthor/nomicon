@@ -119,10 +119,44 @@
   min-width: 1.6em;
   color: var(--muted);
 }
+/* On a phone the pass list goes into two columns of names; the details show on click. */
+@container rd (max-width: 560px) {
+  .rd-graph .rd-passes {
+    grid-template-columns: 1fr 1fr;
+  }
+  .rd-graph .rd-passes .ll-muted {
+    display: none;
+  }
+}
 .rd-pass-detail {
   font-size: 12.5px;
   color: var(--body);
 }
 .rd-pass-detail p {
   margin: 0 0 4px;
+}
+/* Secondary detail in a side panel, collapsed. */
+.rd-note > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+/* Culling: counts that double as the map's colour key, and the camera's heading with its frame stats. */
+.ll-stat > .rd-key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+.rd-cull-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+}
+.rd-cull-h .ll-stats {
+  gap: 0 10px;
+  font-size: 12px;
 }

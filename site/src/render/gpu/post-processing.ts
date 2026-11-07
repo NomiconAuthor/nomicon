@@ -631,10 +631,11 @@ class PostGl2 implements PostRenderer {
     const gl = (this.gl = record(gc.gl, log, 'gl'));
     this.timer = new Gl2Timer(gc, log);
     log.phase = 'init';
-    // Rendering to half floats needs EXT_color_buffer_float in WebGL2 (sampling them doesn't).
-    const float = gl.getExtension('EXT_color_buffer_float');
+    // Rendering to half floats needs EXT_color_buffer_float, or EXT_color_buffer_half_float, in
+    // WebGL2 (sampling them doesn't).
+    const float = gl.getExtension('EXT_color_buffer_float') ?? gl.getExtension('EXT_color_buffer_half_float');
     this.hdr = float ? gl.RGBA16F : gl.RGBA8;
-    this.ldrOnly = float ? null : "this browser's WebGL2 can't render to float targets (no EXT_color_buffer_float), so the HDR targets are 8-bit and clip at 1";
+    this.ldrOnly = float ? null : "this browser's WebGL2 can't render to half-float targets (neither EXT_color_buffer_float nor EXT_color_buffer_half_float), so the HDR targets are 8-bit and clip at 1";
     this.meshes = glMeshes(gl, this.draws.map((d) => d.mesh));
     this.align = Math.max(16, Number(gl.getParameter(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT)) || 256);
     const ubo = (label: string, size: number, point: number) => {

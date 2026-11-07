@@ -7,7 +7,7 @@ import { h, seg } from '../../engine/dom';
 import { touchScroll } from '../../engine/touch';
 import { type Draw, type FillRule, type PixelStep, type Step, DEFAULTS, SAMPLES_4X, SUB, Target, emptyStats, render } from '../raster';
 import { PERSP_H, PERSP_W, RAST_H, RAST_W, type RasterPreset, coverage, coverageMaps, perspectiveCamera, perspectiveScene, rasterPoints, rasterScene } from '../scenes/rasterisation';
-import { Palette, Stepper, btn, canvas, ctx2d, fit, frame, markPixel, n2, n3, onTheme, outlineTri, paintTarget, size, stage } from '../view';
+import { Palette, Stepper, btn, canvas, ctx2d, fit, fontPx, frame, markPixel, n2, n3, onTheme, outlineTri, paintTarget, size, stage } from '../view';
 
 export class RasterViz {
   private preset: RasterPreset = 'shared';
@@ -44,15 +44,19 @@ export class RasterViz {
       s.reset(true);
     });
     root.append(
-      this.presetSeg.el,
-      seg<FillRule>('Fill rule', [['top-left', 'Top-left'], ['inclusive', 'Include edges'], ['exclusive', 'Exclude edges']], this.fill, (f) => {
+      h(
+        'div',
+        { class: 'll-row', style: 'gap: 6px 22px' },
+        this.presetSeg.el,
+        seg<FillRule>('Fill rule', [['top-left', 'Top-left'], ['inclusive', 'Include edges'], ['exclusive', 'Exclude edges']], this.fill, (f) => {
         this.fill = f;
         s.reset(true);
       }).el,
-      seg<string>('Samples', [['1', '1 per pixel'], ['4', '4× MSAA']], '1', (v) => {
-        this.samples = Number(v) as 1 | 4;
-        s.reset(true);
-      }).el,
+        seg<string>('Samples', [['1', '1 per pixel'], ['4', '4× MSAA']], '1', (v) => {
+          this.samples = Number(v) as 1 | 4;
+          s.reset(true);
+        }).el,
+      ),
       h(
         'div',
         { class: 'll-row' },
@@ -211,9 +215,10 @@ export class RasterViz {
       }
       const cx = ((this.pts[t * 3][0] + this.pts[t * 3 + 1][0] + this.pts[t * 3 + 2][0]) / 3) * k;
       const cy = ((this.pts[t * 3][1] + this.pts[t * 3 + 1][1] + this.pts[t * 3 + 2][1]) / 3) * k;
-      ctx.font = 'bold 22px sans-serif';
+      const f = fontPx(this.cv, 22, 13);
+      ctx.font = `bold ${f}px sans-serif`;
       ctx.fillStyle = this.pal.css('--ink');
-      ctx.fillText(t ? 'B' : 'A', cx - 7, cy + 8);
+      ctx.fillText(t ? 'B' : 'A', cx - f * 0.33, cy + f * 0.36);
     }
     this.readout(last);
     const c = coverage(this.pts, this.fill, this.samples);
@@ -235,21 +240,17 @@ export class RasterViz {
     const names = last.draw ? ['B'] : ['A'];
     const e = last.edges;
     const tie = { none: '', 'top-left': 'The centre is exactly on an edge, and that edge is a top or left edge: the top-left rule says this triangle owns it.', 'not-top-left': 'The centre is exactly on an edge, but it\'s a right or bottom edge, so this triangle doesn\'t take it. A triangle on the other side would take it; if there\'s none, or the centre is on its right or bottom edge too, nothing draws it.', inclusive: 'The centre is exactly on an edge, and "include edges" counts it.', exclusive: 'The centre is exactly on an edge, and "exclude edges" drops it.' }[this.samples === 1 ? last.tie : 'none'];
-    const row = (label: string, ...cells: string[]) => h('tr', {}, h('th', {}, label), ...cells.map((c) => h('td', {}, c)));
+    // One row per edge, so the table stays narrow enough for the side panel.
+    const edge = ['0→1', '1→2', '2→0'];
     this.read.replaceChildren(
       h('p', {}, h('b', {}, `Pixel (${last.x}, ${last.y}), triangle ${names[0]}: `), last.mask ? (this.samples === 4 ? `${popcount(last.mask)} of 4 samples covered.` : 'covered.') : 'not covered.', tie ? ` ${tie}` : ''),
       h(
         'table',
         { class: 'rd-tab' },
-        h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', {}, 'edge 0→1'), h('th', {}, 'edge 1→2'), h('th', {}, 'edge 2→0'))),
-        h(
-          'tbody',
-          {},
-          row('Edge function at the centre (px²)', ...e.map(n2)),
-          row('Sign', ...e.map((v) => (v > 0 ? 'inside' : v < 0 ? 'outside' : 'on the edge'))),
-          h('tr', {}, h('th', {}, 'Barycentrics (λ0, λ1, λ2)'), h('td', { colspan: '3' }, `${last.bary.map(n3).join(', ')} (they sum to 1)`)),
-        ),
+        h('thead', {}, h('tr', {}, h('th', {}, 'Edge'), h('th', {}, 'E at the centre (px²)'), h('th', {}, 'Sign'))),
+        h('tbody', {}, ...e.map((v, i) => h('tr', {}, h('th', {}, edge[i]), h('td', {}, n2(v)), h('td', {}, v > 0 ? 'inside' : v < 0 ? 'outside' : 'on the edge')))),
       ),
+      h('p', {}, `Barycentrics (λ0, λ1, λ2): `, h('b', {}, last.bary.map(n3).join(', ')), ' (they sum to 1)'),
     );
   }
 }
@@ -313,16 +314,16 @@ export class PerspectiveViz {
     const up = uvOf(last.pbary);
     const row = (label: string, ...cells: string[]) => h('tr', {}, h('th', {}, label), ...cells.map((c) => h('td', {}, c)));
     this.read.replaceChildren(
+      h('p', {}, h('b', {}, `Pixel (${last.x}, ${last.y})`), `. 1/w at the corners: ${t.iw.map(n3).join(', ')}`),
       h(
         'table',
-        { class: 'rd-tab' },
-        h('thead', {}, h('tr', {}, h('th', {}, `Pixel (${last.x}, ${last.y})`), h('th', {}, 'weights (λ0, λ1, λ2)'), h('th', {}, 'texture u, v (squares)'))),
+        { class: 'rd-tab rd-tab-wrap' },
+        h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', {}, 'weights λ0, λ1, λ2'), h('th', {}, 'u, v (squares)'))),
         h(
           'tbody',
           {},
-          row('Affine: screen-space weights', last.bary.map(n3).join(', '), ua.map(n2).join(', ')),
-          row('Perspective-correct: weighted by 1/w', last.pbary.map(n3).join(', '), up.map(n2).join(', ')),
-          row('1/w at the corners', t.iw.map(n3).join(', '), ''),
+          row('Affine (screen space)', last.bary.map(n3).join(', '), ua.map(n2).join(', ')),
+          row('Perspective-correct (by 1/w)', last.pbary.map(n3).join(', '), up.map(n2).join(', ')),
         ),
       ),
       h('p', { class: 'll-muted' }, `Off by ${n2(Math.max(Math.abs(ua[0] - up[0]), Math.abs(ua[1] - up[1])))} squares here. The widget is drawing with the ${this.perspective ? 'perspective-correct' : 'affine'} values.`),

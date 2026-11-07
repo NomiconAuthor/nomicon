@@ -11,7 +11,7 @@ import { h, seg } from '../../engine/dom';
 import '../gpu/gpu.css';
 import { CallLog } from '../gpu/record';
 import { type PbrRenderer, type PbrTables, createPbr } from '../gpu/physically-based-shading';
-import { GpuCanvas, backendLine, planReadout } from '../gpu/widget';
+import { GpuCanvas, planReadout } from '../gpu/widget';
 import {
   type BallLayout,
   MATERIALS,
@@ -27,7 +27,7 @@ import {
   specular,
 } from '../scenes/physically-based-shading';
 import { Palette, canvas, chk, ctx2d, fit, frame, onTheme, rgbCss, stage, stat } from '../view';
-import { apiSwitch, gpuFigure, slider, timePasses } from './lighting-ui';
+import { apiSwitch, gpuFigure, gpuRow, showBackendRow, slider, timePasses } from './lighting-ui';
 
 const DEG = Math.PI / 180;
 
@@ -46,9 +46,11 @@ export class PbrViz {
   private stats = h('div', { class: 'll-stats' });
   private timing = h('span', { class: 'll-muted' });
   private lobe = canvas(360, 200, 'The specular lobe in the plane of incidence');
-  private furnace = canvas(360, 220, 'White furnace: light reflected against roughness');
+  private furnace = canvas(360, 200, 'White furnace: light reflected against roughness');
   private sliders: Record<string, HTMLElement & { set?: (v: number) => void }> = {};
   private note = h('p', { class: 'rd-note' });
+  private lobeNote = h('p', { class: 'rd-note' }, 'f · cos θ for light from each direction, to the viewer on the left. Dashed: mirror direction.');
+  private furnaceNote = h('p', { class: 'rd-note' }, 'Light reflected under uniform white light, by roughness: specular alone with F = 1 (blue), white dielectric (gold).');
 
   constructor(host: HTMLElement) {
     const root = frame(host, 'rd-gpu rd-lit');
@@ -102,25 +104,24 @@ export class PbrViz {
       this.thetaV = v;
       this.drawPlots();
     });
+    const plot = seg<'lobe' | 'furnace'>(
+      'Plot',
+      [
+        ['lobe', 'Specular lobe'],
+        ['furnace', 'White furnace'],
+      ],
+      'lobe',
+      (v) => this.showPlot(v),
+    );
     root.append(
       this.backend,
-      h('div', { class: 'll-row' }, layout.el),
-      h('div', { class: 'll-row' }, mats.el),
+      h('div', { class: 'll-row' }, layout.el, mats.el),
       h('div', { class: 'll-row' }, this.sliders.metal, this.sliders.roughness, this.sliders.reflectance),
       h('div', { class: 'll-row' }, chk('Sun', true, (on) => this.set({ direct: on })), chk('Environment', true, (on) => this.set({ ibl: on })), view.el),
-      this.note,
-      stage(gpuFigure(this.gpu, PBR_W, PBR_H), [
-        angle,
-        this.lobe,
-        h('p', { class: 'rd-note' }, 'Specular lobe, f · cos θ, for this material and a viewer on the left at the view angle: how much light from each direction reaches the viewer. The dashed line is the mirror direction.'),
-        this.furnace,
-        h('p', { class: 'rd-note' }, 'White furnace: the fraction of light reflected, at this view angle, by the specular lobe alone with F = 1 (blue) and by a white dielectric with F0 = 0.04 (gold). Above 1 means more out than in.'),
-        this.stats,
-      ]),
-      h('div', { class: 'll-row' }, h('span', { class: 'll-muted' }, 'GPU: '), this.planStats),
-      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn', onclick: () => void this.time() }, 'Time 60 frames'), this.timing),
+      stage(gpuFigure(this.gpu, PBR_W, PBR_H), [this.note, plot.el, angle, this.lobe, this.lobeNote, this.furnace, this.furnaceNote, this.stats, gpuRow(this.planStats, () => void this.time(), this.timing)]),
       this.status,
     );
+    this.showPlot('lobe');
     fit(this.lobe, () => this.drawPlots());
     fit(this.furnace, () => this.drawPlots());
     onTheme(() => {
@@ -137,6 +138,15 @@ export class PbrViz {
     }, 30);
   }
 
+  /** One plot at a time, so the side panel is no taller than the frame. */
+  private showPlot(p: 'lobe' | 'furnace'): void {
+    const lobe = p === 'lobe';
+    this.lobe.hidden = !lobe;
+    this.lobeNote.hidden = !lobe;
+    this.furnace.hidden = lobe;
+    this.furnaceNote.hidden = lobe;
+  }
+
   private pick(i: number): void {
     const m = MATERIALS[i];
     this.s = { ...this.s, material: i, metal: m.metal, roughness: m.roughness, reflectance: m.reflectance };
@@ -151,13 +161,13 @@ export class PbrViz {
   }
 
   private showBackend(): void {
-    this.backend.replaceChildren(this.api, h('span', {}, h('span', { class: 'll-muted' }, 'GPU side: '), ...backendLine(this.gpu)));
+    showBackendRow(this.backend, this.api, this.gpu);
   }
 
   private redraw(): void {
     this.note.textContent =
       this.s.layout === 'grid'
-        ? 'The grid sets its own roughness (0 to 1, left to right) and metalness (0 on top, 1 below); the material gives the base colour and dielectric F0.'
+        ? 'Roughness 0 to 1 left to right; dielectric row on top, metal below.'
         : 'One sphere with the material\'s own metalness and roughness.';
     this.drawGpu();
     this.drawPlots();
@@ -238,7 +248,7 @@ export class PbrViz {
   private drawFurnace(): void {
     const ctx = ctx2d(this.furnace);
     const W = 360;
-    const H = 220;
+    const H = 200;
     const L = 34;
     const B = H - 26;
     const T = 10;
@@ -263,7 +273,7 @@ export class PbrViz {
     ctx.fillText('1', Rr - 6, H - 8);
     const nv = Math.cos(this.thetaV * DEG);
     const pts = Array.from({ length: 21 }, (_, i) => i / 20);
-    const ab = pts.map((r) => envBrdf(r, Math.max(1e-3, nv), 512));
+    const ab = pts.map((r) => envBrdf(r, Math.max(1e-3, nv)));
     const line = (col: string, f: (a: [number, number]) => number) => {
       ctx.strokeStyle = this.pal.css(col);
       ctx.lineWidth = 2;
@@ -285,7 +295,7 @@ export class PbrViz {
     ctx.moveTo(X(this.s.roughness), T);
     ctx.lineTo(X(this.s.roughness), B);
     ctx.stroke();
-    const [A, Bb] = envBrdf(this.s.roughness, Math.max(1e-3, nv), 512);
+    const [A, Bb] = envBrdf(this.s.roughness, Math.max(1e-3, nv));
     this.stats.replaceChildren(stat((A + Bb).toFixed(2), 'specular lobe, F = 1'), stat((1 + 0.04 * A + Bb).toFixed(2), 'white dielectric'), stat(`${this.thetaV}°`, 'view angle'));
   }
 

@@ -171,3 +171,36 @@
 :is(.rd-fill, .rd-bandwidth, .rd-timing, .rd-pipe) .rd-side {
   gap: 6px;
 }
+/* Bandwidth: a smaller canvas with the model's totals under it, and the attachment table (the
+   widget's main controls) beside them, so the selects and the bytes they change show together. */
+.rd-bandwidth {
+  --rd-max-w: 440px;
+  --rd-side-min: 31rem;
+}
+.rp-bw-fig {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+/* On a phone the table scrolls sideways: keep the attachment names in view. */
+@container rd (max-width: 560px) {
+  .rp-att tr > :first-child:not([colspan]) {
+    position: sticky;
+    left: 0;
+    background: var(--paper);
+  }
+}
+/* Live-time tables in the side panels: compact, so they don't push the widget past one screen. */
+:is(.rd-fill, .rd-bandwidth, .rd-timing) .rd-side .rd-tab,
+.rp-bw-fig .rd-tab {
+  font-size: 12px;
+  line-height: 1.3;
+}
+.rp-controls > .rp-legend {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.rp-att tr > td:first-child:not([colspan]) {
+  white-space: nowrap;
+}

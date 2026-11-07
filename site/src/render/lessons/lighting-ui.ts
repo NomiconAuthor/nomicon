@@ -1,12 +1,13 @@
 /**
- * UI pieces the lighting lessons' widgets share: the WebGPU/WebGL2 switch, a GPU canvas laid out
- * as a figure beside a side panel, a labelled slider, and the "time some frames" readout.
+ * UI pieces the lighting lessons' widgets share: the WebGPU/WebGL2 switch and the one-line backend
+ * row, a GPU canvas laid out as a figure beside a side panel, a labelled slider, and the
+ * "time some frames" row and readout.
  */
 import './lighting.css';
 import { h, seg } from '../../engine/dom';
 import { type Backend } from '../gpu/context';
 import { type GpuTimer } from '../gpu/timing';
-import { type GpuCanvas, msText, timeFrames } from '../gpu/widget';
+import { type GpuCanvas, backendLine, msText, timeFrames } from '../gpu/widget';
 import { type RGB, Palette } from '../view';
 
 /** The API switch: shown only where WebGPU works, so there's something to switch between. */
@@ -29,6 +30,22 @@ export function apiSwitch(g: GpuCanvas, onSwitch: () => void): HTMLElement & { r
     box.replaceChildren(s.el);
   };
   return Object.assign(box, { refresh: render });
+}
+
+/**
+ * Fill `row` with the API switch and the backend line, kept to one line: the adapter's long name
+ * is cut with an ellipsis and shown whole in the tooltip.
+ */
+export function showBackendRow(row: HTMLElement, api: HTMLElement, g: GpuCanvas): void {
+  const line = h('span', { class: 'rd-lit-about' }, h('span', { class: 'll-muted' }, 'GPU side: '), ...backendLine(g));
+  line.title = line.textContent ?? '';
+  row.className = 'll-row rd-lit-backend';
+  row.replaceChildren(api, line);
+}
+
+/** One row: the frame's passes, draws and triangles, the Time button, and the timing result. */
+export function gpuRow(planStats: HTMLElement, onTime: () => void, timing: HTMLElement): HTMLElement {
+  return h('div', { class: 'll-row' }, h('span', { class: 'll-muted' }, 'GPU: '), planStats, h('button', { type: 'button', class: 'll-btn', onclick: onTime }, 'Time 60 frames'), timing);
 }
 
 /** The GPU canvas's holder as a figure, so stage() sizes it like a canvas. */

@@ -128,3 +128,32 @@
 .rd-gpu-switch:empty {
   display: none;
 }
+
+/* A backend row (the API switch, then the backend line): one line, with the adapter's name cut by an
+   ellipsis (whole in its tooltip), and as tall as the switch from the start, so the widget doesn't
+   jump when the switch appears once the device is up. */
+.ll-row:has(> .rd-gpu-switch) {
+  flex-wrap: nowrap;
+  min-width: 0;
+  min-height: 2.15rem;
+}
+/* Before the device is up, the GPU widgets' backend row (their first row) is still empty. */
+:is(.rd-gpu, .rd-bandwidth, .rd-fill, .rd-timing) > .ll-row:first-child:empty {
+  min-height: 2.15rem;
+}
+.ll-row:has(> .rd-gpu-switch) > .rd-gpu-switch {
+  flex: none;
+}
+.ll-row:has(> .rd-gpu-switch) > :not(.rd-gpu-switch) {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* On a phone the frame sits above the list, so keep the list shorter. */
+@container rd (max-width: 560px) {
+  .rd-calls {
+    max-height: min(16rem, 40vh);
+  }
+}

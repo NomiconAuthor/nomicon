@@ -10,13 +10,17 @@ import { h, seg } from '../../engine/dom';
 import { type Compiled, FRAME_DEFAULTS, type FrameOptions, RESOURCES, SCREENS, USE_LABEL, type Use, compile, declare, mbText } from '../scenes/render-graphs';
 import { Palette, canvas, chk, ctx2d, fit, frame, mix, onTheme, rgbCss, size, stage, stat } from '../view';
 
-const W = 640;
-const H = 470;
-const LABEL_W = 96;
+/** Logical canvas size. Phones get a narrower one, so the 11 px labels stay readable when shown. */
+interface Layout {
+  w: number;
+  h: number;
+  label: number;
+}
+const WIDE: Layout = { w: 640, h: 470, label: 96 };
+const NARROW: Layout = { w: 360, h: 430, label: 76 };
 const HEAD = 22;
 const ROW = 16;
 const MEM_TOP = HEAD + RESOURCES.length * ROW + 22;
-const MEM_H = H - MEM_TOP - 16;
 const RES_TOKENS = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6', '--c7', '--c8'];
 
 export class GraphViz {
@@ -26,7 +30,8 @@ export class GraphViz {
   private c!: Compiled;
   private sel = -1;
   private pal: Palette;
-  private cv = canvas(W, H, 'Passes in columns, resources in rows: who reads and writes what, the transitions before each pass, and below, the transient memory heap');
+  private L = WIDE;
+  private cv = this.makeCanvas(WIDE);
   private stats = h('div', { class: 'll-stats' });
   private list = h('ol', { class: 'rd-passes' });
   private detail = h('div', { class: 'rd-pass-detail' });
@@ -47,18 +52,33 @@ export class GraphViz {
       stage(this.cv, [this.stats, this.list, this.detail]),
       this.legend(),
     );
-    this.cv.addEventListener('click', (e) => {
-      const b = this.cv.getBoundingClientRect();
-      const x = ((e.clientX - b.left) / b.width) * W;
-      const i = Math.floor((x - LABEL_W) / this.colW());
-      if (i >= 0 && i < this.c.passes.length) this.select(i === this.sel ? -1 : i);
-    });
-    fit(this.cv, () => this.draw());
+    if (typeof ResizeObserver !== 'undefined')
+      new ResizeObserver(() => {
+        const L = root.clientWidth < 560 ? NARROW : WIDE;
+        if (L === this.L) return;
+        this.L = L;
+        const c = this.makeCanvas(L);
+        this.cv.replaceWith(c);
+        this.cv = c;
+        this.draw();
+      }).observe(root);
     onTheme(() => {
       this.pal.reset();
       this.draw();
     });
     this.update();
+  }
+
+  private makeCanvas(L: Layout): HTMLCanvasElement {
+    const c = canvas(L.w, L.h, 'Passes in columns, resources in rows: who reads and writes what, the transitions before each pass, and below, the transient memory heap');
+    c.addEventListener('click', (e) => {
+      const b = c.getBoundingClientRect();
+      const x = ((e.clientX - b.left) / b.width) * this.L.w;
+      const i = Math.floor((x - this.L.label) / this.colW());
+      if (i >= 0 && i < this.c.passes.length) this.select(i === this.sel ? -1 : i);
+    });
+    fit(c, () => this.draw());
+    return c;
   }
 
   private legend(): HTMLElement {
@@ -71,11 +91,12 @@ export class GraphViz {
       sw('background: color-mix(in srgb, var(--accent) 25%, transparent)', 'lifetime'),
       sw('background: var(--warn)', 'transition before the pass'),
       sw('background: var(--alert)', 'aliasing barrier'),
+      h('span', {}, 'grey names: imported, not transient'),
     );
   }
 
   private colW(): number {
-    return (W - LABEL_W) / this.c.passes.length;
+    return (this.L.w - this.L.label) / this.c.passes.length;
   }
 
   private update(): void {
@@ -137,7 +158,10 @@ export class GraphViz {
 
   private draw(): void {
     const ctx = ctx2d(this.cv);
-    const { w } = size(this.cv);
+    const { w, h: H } = size(this.cv);
+    const LABEL_W = this.L.label;
+    const narrow = this.L === NARROW;
+    const MEM_H = H - MEM_TOP - 16;
     const c = this.c;
     const pal = this.pal;
     const bg = pal.rgb('--bg');
@@ -176,7 +200,7 @@ export class GraphViz {
       const y = HEAD + ri * ROW;
       ctx.textAlign = 'left';
       ctx.fillStyle = r.imported ? muted : ink;
-      ctx.fillText(r.imported ? `${r.name} (imported)` : r.name, 4, y + ROW / 2);
+      ctx.fillText(r.imported && !narrow ? `${r.name} (imported)` : r.name, 4, y + ROW / 2);
       const pl = c.placements.find((p) => p.res === r.name);
       if (pl) {
         ctx.fillStyle = rgbCss(pal.rgb('--accent'), 0.22);

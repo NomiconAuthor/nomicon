@@ -167,4 +167,5 @@ export function textureBytes(w: number, h: number, f: TexFormat, mips: boolean):
   return total;
 }
 export const bitsPerTexel = (f: TexFormat) => (f.bytes * 8) / (f.bw * f.bh);
-export const mib = (b: number) => `${(b / (1024 * 1024)).toFixed(1)} MiB`;
+/** Decimal megabytes (10^6 bytes), the section's convention. */
+export const mb = (b: number) => `${(b / 1e6).toFixed(1)} MB`;

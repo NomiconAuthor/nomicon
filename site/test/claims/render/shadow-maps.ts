@@ -65,7 +65,7 @@ export default async function shadows(): Promise<void> {
   // Texels.
   claim(P, `at 1024 texels across the whole courtyard each texel is ${lengthText(sceneBox(D.sun, 1024).texel)} wide`);
   claim(P, `The ${lengthText(sceneBox(D.sun, 1024).texel)} texels are too coarse`);
-  claim(P, `At 5 m from the camera a pixel of the widget's ${VIEW_W} × ${VIEW_H} canvas covers about ${lengthText(pixelFootprint(5))}; at 30 m, about ${lengthText(pixelFootprint(30))}.`);
+  claim(P, `At 5 m from the camera a pixel of the widget's ${VIEW_W} × ${VIEW_H} canvas is about ${lengthText(pixelFootprint(5))} across (more along the floor, which it sees at a slant); at 30 m, about ${lengthText(pixelFootprint(30))}.`);
   claim(P, `doubling the resolution to 2048 only brings the texels to ${lengthText(sceneBox(D.sun, 2048).texel)}`);
   const sp = splits(D.lambda);
   claim(P, `the widget splits the view out to ${SHADOW_DISTANCE} m into ${CASCADES} cascades, each a ${D.res / 2} × ${D.res / 2} quarter of the same texture`);

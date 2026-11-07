@@ -31,7 +31,7 @@ The widget draws a grid of objects: crates, wedges and pyramids, each in one of 
 
 The counts on the right come from the frame's plan, and they're the same on every machine. The times below them are measured on yours, live: how long the page takes to build the list of draws, and to record and submit it. They're only the page's share. On WebGPU the browser checks and translates the commands again in its GPU process, and the driver does its own work after that; none of it is in these numbers. Watch how they change between methods and with the object count rather than what they are.
 
-With **1,024 objects**, one draw per object in the order the scene lists them makes 1,024 draw calls, and the binds around them barely ever repeat: 508 pipeline binds, 762 material binds and 664 mesh binds. Each object also binds its own constants, its position and scale. On WebGPU that's 4,654 calls a frame; on WebGL2, 3,988.
+With **1,024 objects**, one draw per object in the order the scene lists them makes 1,024 draw calls, and the binds around them barely ever repeat: 508 pipeline binds, 762 material binds and 664 mesh binds. Each object also binds its own constants, its position and scale. On WebGPU that's 4,654 calls a frame; on WebGL2, 3,988. (The WebGPU counts leave out the one `createView` a frame on the canvas texture, which the renderer doesn't record.)
 
 ## Sorting by state
 
@@ -39,7 +39,7 @@ Neighbouring draws that share a pipeline, a material or a mesh don't need to bin
 
 The usual way is a **sort key**: pack the state you want to group by into one integer, most expensive first, and sort the integers. Christer Ericson's [*Order your graphics draw calls around!*](https://realtimecollisiondetection.net/blog/?p=86) is the classic description. His 64-bit key starts with layers and viewports (game or HUD, split screen) and the translucency type, then depth and material, and he points out that either of those two can come first; the widget's 32-bit key is pipeline (4 bits), material (4 bits), mesh (4 bits) and depth (16 bits). Depth goes in the low bits, so it only orders draws whose state is the same: front to back for opaque objects, so that early depth testing rejects more of what's behind (see [Depth](/rendering/depth/)). Transparent objects are sorted back to front instead, and their depth has to go above the material, because [the order they blend in](/rendering/blending-and-transparency/) decides what you see.
 
-Sort the 1,024 draws and the binds fall to 2 pipeline binds, 4 material binds and 12 mesh binds. The draws are still 1,024, and so are the per-object constants, so a frame is 2,086 calls on WebGPU and 2,072 on WebGL2. The list under the widget shows each draw's key, with the fields that changed from the draw before marked.
+Sort the 1,024 draws and the binds fall to 2 pipeline binds, 4 material binds and 12 mesh binds. The draws are still 1,024, and so are the per-object constants, so a frame is 2,086 calls on WebGPU and 2,072 on WebGL2. The list beside the frame shows the first draws' keys, with the fields that changed from the draw before marked.
 
 Which state goes first? Whatever costs most to change. NVIDIA's *Beyond Porting* talk (Everitt and McDonald, 2014) ranked OpenGL state changes, in decreasing cost: render target, program, ROP state (blending, depth), texture bindings, vertex format, uniform buffer bindings, vertex bindings, uniform updates. On D3D12 and Vulkan the pipeline object takes in the program, the ROP state and the vertex format, so the order collapses to render target (the pass), pipeline, then bindings. Sorting costs CPU time too; the widget shows it as building and sorting the list. Engines keep each object's key between frames and only update what changed (Ericson suggests the same), and integer keys suit a radix sort.
 
@@ -49,7 +49,7 @@ Objects that never move can be merged. At load, copy every object's mesh into on
 
 The costs come with it:
 
-- **Memory.** Every object is now its own copy of its mesh. The three shared meshes take 2.0 KB; the merged ones for 1,024 objects take 729.0 KB, and 11.3 MB for 16,384. They also need 32-bit indices once a batch passes 65,536 vertices.
+- **Memory.** Every object is now its own copy of its mesh. The three shared meshes take 2.0 KB; the merged ones for 1,024 objects take 746.5 KB, and 11.9 MB for 16,384. They also need 32-bit indices once a batch passes 65,536 vertices.
 - **Nothing moves.** The positions are baked into the vertices.
 - **Culling is coarse.** A batch is drawn whole, so an engine that batches a whole level draws everything, visible or not, unless it splits batches by area or draws sub-ranges of the index buffer. The [next lesson](/rendering/culling/) is about not drawing what you can't see.
 
@@ -59,9 +59,9 @@ Merging only works for objects that share a material. Engines widen that by shar
 
 Most repeated objects are the same mesh many times: trees, rocks, crates, crowds. An **instanced draw** draws a mesh many times in one call, `drawIndexed(indexCount, instanceCount, ...)`, and the vertex shader gets an instance index to tell the copies apart. Per-instance data, here the same 16 bytes of position and scale each object binds when it's drawn on its own, goes in a vertex buffer that advances once per instance instead of once per vertex (`stepMode: 'instance'` in WebGPU, `vertexAttribDivisor(3, 1)` in WebGL2), or in a storage buffer the shader indexes.
 
-**Instanced** draws the grid in 12 draws, one per mesh and material, from 16.0 KB of instance records for 1,024 objects. WebGPU's `drawIndexed` takes a `firstInstance`, so all twelve groups read from one buffer and each draw starts at its own records: 51 calls a frame. WebGL2 has no first instance (a draft extension adds one, but few browsers expose it), so each draw points the instance attribute at its group's records again, and the WebGL2 frame is 60 calls.
+**Instanced** draws the grid in 12 draws, one per mesh and material, from 16.4 KB of instance records for 1,024 objects. WebGPU's `drawIndexed` takes a `firstInstance`, so all twelve groups read from one buffer and each draw starts at its own records: 51 calls a frame. WebGL2 has no first instance (a draft extension adds one, but browsers only expose it behind a flag), so each draw points the instance attribute at its group's records again, and the WebGL2 frame is 60 calls.
 
-Instances can move: rewrite their records each frame, which is cheap compared with a draw per object. They can be culled one by one, by writing only the visible ones' records; the [last lesson in this part](/rendering/gpu-driven-rendering/) has the GPU do that itself. What instancing can't do is draw different meshes in one call. That needs indirect draws, also in that lesson.
+Instances can move: rewrite their records each frame, which is cheap compared with a draw per object. They can be culled one by one, by writing only the visible ones' records; the [GPU-driven rendering](/rendering/gpu-driven-rendering/) lesson has the GPU do that itself. What instancing can't do is draw different meshes in one call. That needs indirect draws, also in that lesson.
 
 ## What each saves
 
@@ -77,7 +77,7 @@ At 1,024 objects:
 Try 16,384 objects. The first two methods grow with the object count, in calls and in the time you see; the last two stay at 4 and 12 draws, and their time barely moves, because the GPU does the repeating.
 
 <Tip title="Constants per object, 256 bytes apart">
-Each object's constants are 16 bytes, but the per-object draws bind them at 256-byte offsets, because 256 is WebGPU's default `minUniformBufferOffsetAlignment` (WebGL2 reports its own `UNIFORM_BUFFER_OFFSET_ALIGNMENT`, which varies by GPU, and the renderer uses that). At 1,024 objects the WebGPU buffer is 256.0 KB, mostly padding. Engines on D3D12 and Vulkan put small per-draw values in root constants or push constants instead, or put every object's data in one storage buffer and pass only an index.
+Each object's constants are 16 bytes, but the per-object draws bind them at 256-byte offsets, because 256 is WebGPU's default `minUniformBufferOffsetAlignment` (WebGL2 reports its own `UNIFORM_BUFFER_OFFSET_ALIGNMENT`, which varies by GPU, and the renderer uses that). At 1,024 objects the per-object blocks take 262.1 KB, mostly padding. Engines on D3D12 and Vulkan put small per-draw values in root constants or push constants instead, or put every object's data in one storage buffer and pass only an index.
 </Tip>
 
 ## Takeaways

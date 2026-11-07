@@ -58,12 +58,19 @@ export default async function sameFrame(): Promise<void> {
 
   const gpu = await record('webgpu');
   const gl = await record('webgl2');
-  claim(P, `A WebGPU frame here is ${gpu.frame.length} calls.`);
+  claim(P, `A WebGPU frame here is ${gpu.frame.length} calls, not counting the \`createView\` on the canvas texture`);
+  fact(P, !gpu.frame.some((c) => c.method === 'createView'), 'createView on the canvas texture is not recorded');
   claim(P, `The WebGL2 frame is ${gl.frame.length} calls`);
   for (const [name, r] of [['WebGPU', gpu], ['WebGL2', gl]] as const)
     fact(P, r.frame.filter((c) => DRAW_METHODS.has(c.method)).length === st.draws, `the ${name} renderer's recorded draw calls match the plan`);
   fact(P, gpu.init.filter((c) => c.method === 'createRenderPipelineAsync').length === PIPELINE_KEYS.length, 'the WebGPU renderer creates every pipeline at load');
-  fact(P, gpu.frame.filter((c) => c.method === 'setBindGroup' && c.short.startsWith('pass.setBindGroup(0')).length === 2, 'group 0 is bound once per pass');
+  {
+    const g0 = gpu.frame.filter((c) => c.method === 'setBindGroup' && c.short.startsWith('pass.setBindGroup(0'));
+    const passes = gpu.frame.map((c, i) => (c.method === 'beginRenderPass' ? i : -1)).filter((i) => i >= 0);
+    const frameBinds = gpu.frame.map((c, i) => (c.method === 'setBindGroup' && c.short.startsWith("pass.setBindGroup(0, 'frame'") ? i : -1)).filter((i) => i >= 0);
+    fact(P, g0.length === 2 && passes.length === 2 && frameBinds.length === 1 && frameBinds[0] === passes[0] + 1 && frameBinds[0] < passes[1], 'the per-frame group is bound once, in the scene pass; the present pass binds its own group 0');
+  }
+  claim(P, 'written once per frame and bound once, at the start of the scene pass');
   fact(P, gpu.frame.some((c) => c.method === 'draw' && c.short.includes('(3, 1')), 'the present pass draws three vertices');
   fact(P, !gpu.frame.some((c) => c.method === 'setVertexBuffer' && c.short.includes('present')), 'the present pass has no vertex buffer');
   fact(P, gl.frame.some((c) => c.short === 'gl.disable(CULL_FACE)') && gl.frame.some((c) => c.short === 'gl.enable(DEPTH_TEST)') && gl.frame.some((c) => c.short === 'gl.disable(DEPTH_TEST)'), 'the WebGL2 frame switches depth testing on for the scene and off (with culling) for the present pass');

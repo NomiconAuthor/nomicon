@@ -98,14 +98,17 @@ export class FillViz {
     );
     root.append(
       this.backend,
-      h('div', { class: 'll-row' }, viewSeg.el),
       stage(this.gpu.el, [h('div', {}, h('p', { class: 'rp-h' }, 'Fragments, from the CPU model'), this.counts), h('div', {}, h('p', { class: 'rp-h' }, 'GPU time, live'), this.times)]),
-      this.legend,
+      h('div', { class: 'rp-controls' }, viewSeg.el, this.legend),
       h(
         'div',
         { class: 'rp-controls' },
         slider('Particles', range(0, 1200, 50), this.s.particles, (v) => int(v), set('particles')),
         seg<string>('Size', SIZES.map((v) => [String(v), `${v} px`] as [string, string]), String(this.s.size), (v) => set('size')(Number(v))).el,
+      ),
+      h(
+        'div',
+        { class: 'rp-controls' },
         seg<FillSettings['shape']>(
           'Particle shape',
           [
@@ -115,6 +118,7 @@ export class FillViz {
           this.s.shape,
           set('shape'),
         ).el,
+        seg<string>('Particle shader cost', COSTS.map((v) => [String(v), v === 1 ? '1 iteration' : `${v}`] as [string, string]), String(this.s.cost), (v) => set('cost')(Number(v))).el,
       ),
       h(
         'div',
@@ -131,11 +135,6 @@ export class FillViz {
         ).el,
         chk('Depth prepass', this.s.prepass, set('prepass')),
         chk('Particles at half resolution', this.s.halfRes, set('halfRes')),
-      ),
-      h(
-        'div',
-        { class: 'rp-controls' },
-        seg<string>('Particle shader cost', COSTS.map((v) => [String(v), v === 1 ? '1 iteration' : `${v}`] as [string, string]), String(this.s.cost), (v) => set('cost')(Number(v))).el,
       ),
       this.status,
     );
@@ -173,7 +172,7 @@ export class FillViz {
 
   private showLegend(): void {
     if (this.view === 'colour') {
-      this.legend.replaceChildren(h('span', {}, `The scene renders at ${FILL_W} × ${FILL_H} and is scaled to fit. Switch to the heat map to see where the fragments go.`));
+      this.legend.replaceChildren(h('span', {}, `Rendered at ${FILL_W} × ${FILL_H}, scaled to fit. The heat map shows where the fragments go.`));
       return;
     }
     const ramp = heatRamp(this.pal);
@@ -192,15 +191,15 @@ export class FillViz {
         h(
           'tbody',
           {},
-          row('Depth prepass', c.prepass, 'depth only, no shading', this.s.prepass),
+          row('Depth prepass', c.prepass, 'not counted', this.s.prepass),
           row('Opaque', c.opaque, `${(c.opaque / FILL_PIXELS).toFixed(2)} a pixel`),
-          row('Depth downsample', c.downsample, 'depth only', this.s.halfRes),
-          row('Particles', c.particles, hidden ? `${int(hidden)} more behind the trees` : ''),
+          row('Depth downsample', c.downsample, 'not counted', this.s.halfRes),
+          row('Particles', c.particles, hidden ? `${int(hidden)} hidden` : ''),
           row('Composite', c.composite, 'one a pixel', this.s.halfRes),
           h('tr', { class: 'rp-total' }, h('th', {}, 'Shaded'), h('td', {}, int(c.shaded)), h('td', { class: 'rp-cell-note' }, `${c.perPixel.toFixed(2)} a pixel`)),
         ),
       ),
-      h('p', { class: 'rp-fine' }, `${int(FILL_PIXELS)} pixels. The same at any cost setting: cost changes what each fragment costs, not how many there are.`),
+      h('p', { class: 'rp-fine' }, `${int(FILL_PIXELS)} pixels. Shader cost changes what each fragment costs, not the counts.`),
     );
   }
 

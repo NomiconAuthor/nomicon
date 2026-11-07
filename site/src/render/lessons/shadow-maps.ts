@@ -11,7 +11,7 @@ import { h, seg } from '../../engine/dom';
 import '../gpu/gpu.css';
 import { CallLog } from '../gpu/record';
 import { type ShadowRenderer, createShadows } from '../gpu/shadow-maps';
-import { GpuCanvas, backendLine, planReadout } from '../gpu/widget';
+import { GpuCanvas, planReadout } from '../gpu/widget';
 import {
   type Filter,
   GOOD_BIAS,
@@ -30,7 +30,7 @@ import {
 } from '../scenes/shadow-maps';
 import { lengthText } from '../scenes/common';
 import { Palette, chk, frame, onTheme, stage, stat } from '../view';
-import { animate, apiSwitch, gpuFigure, slider, timePasses } from './lighting-ui';
+import { animate, apiSwitch, gpuFigure, gpuRow, showBackendRow, slider, timePasses } from './lighting-ui';
 
 export class ShadowViz {
   private s: ShadowSettings = { ...SHADOW_DEFAULTS };
@@ -113,25 +113,27 @@ export class ShadowViz {
         h('button', { type: 'button', class: 'll-btn', onclick: () => this.goodBias() }, `Try ${GOOD_BIAS.bias * 100} cm + ${GOOD_BIAS.slope}`),
       ),
       h('div', { class: 'll-row' }, res.el, filter.el),
-      h(
-        'div',
-        { class: 'll-row' },
-        chk('Cascades', false, (on) => this.set({ cascades: on })),
-        lambda,
-        chk('Stabilise', true, (on) => this.set({ stable: on })),
-        chk('Move the camera', false, (on) => {
-          this.moving = on;
-          if (!on) {
-            this.t = 0;
-            this.set({ dolly: 0 });
-          }
-          this.kick();
-        }),
-      ),
-      h('div', { class: 'll-row' }, view.el),
-      stage(gpuFigure(this.gpu, VIEW_W, VIEW_H), [this.stats, this.maps]),
-      h('div', { class: 'll-row' }, h('span', { class: 'll-muted' }, 'GPU: '), this.planStats),
-      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn', onclick: () => void this.time() }, 'Time 60 frames'), this.timing),
+      stage(gpuFigure(this.gpu, VIEW_W, VIEW_H), [
+        view.el,
+        h(
+          'div',
+          { class: 'll-row' },
+          chk('Cascades', false, (on) => this.set({ cascades: on })),
+          lambda,
+          chk('Stabilise', true, (on) => this.set({ stable: on })),
+          chk('Move the camera', false, (on) => {
+            this.moving = on;
+            if (!on) {
+              this.t = 0;
+              this.set({ dolly: 0 });
+            }
+            this.kick();
+          }),
+        ),
+        this.stats,
+        this.maps,
+        gpuRow(this.planStats, () => void this.time(), this.timing),
+      ]),
       this.status,
     );
     onTheme(() => this.redraw());
@@ -160,7 +162,7 @@ export class ShadowViz {
   }
 
   private showBackend(): void {
-    this.backend.replaceChildren(this.api, h('span', {}, h('span', { class: 'll-muted' }, 'GPU side: '), ...backendLine(this.gpu)));
+    showBackendRow(this.backend, this.api, this.gpu);
   }
 
   private redraw(): void {

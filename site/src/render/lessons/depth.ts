@@ -7,7 +7,7 @@ import { h, seg } from '../../engine/dom';
 import { type DepthFormat, type DepthMode, type PixelStep, DEFAULTS, FORMAT_LABEL, Target, emptyStats, render } from '../raster';
 import { lengthText } from '../scenes/common';
 import { DEPTH_DEFAULT, DEPTH_FAR, DEPTH_H, DEPTH_NEARS, DEPTH_W, type DepthSettings, type DrawOrder, OVER_H, OVER_W, depthCamera, depthOptions, depthScene, overdrawCamera, overdrawScene, resolution, zFight } from '../scenes/depth';
-import { Palette, Stepper, btn, canvas, chk, ctx2d, fit, frame, markPixel, onTheme, outlineTri, paintTarget, size, stage, stat } from '../view';
+import { Palette, Stepper, btn, canvas, chk, ctx2d, fit, fontPx, frame, markPixel, onTheme, outlineTri, paintTarget, size, stage, stat } from '../view';
 
 export class DepthViz {
   private set: DepthSettings = { ...DEPTH_DEFAULT, near: 0.01 };
@@ -102,7 +102,7 @@ export class DepthViz {
     const r1 = 1e3;
     const X = (z: number) => pad.l + ((Math.log10(z) - Math.log10(z0)) / (Math.log10(z1) - Math.log10(z0))) * (W - pad.l - pad.r);
     const Y = (r: number) => pad.t + ((Math.log10(r1) - Math.log10(Math.max(r0, Math.min(r1, r)))) / (Math.log10(r1) - Math.log10(r0))) * (H - pad.t - pad.b);
-    ctx.font = '17px sans-serif';
+    ctx.font = `${fontPx(this.chart, 17)}px sans-serif`;
     ctx.fillStyle = this.pal.css('--muted');
     ctx.strokeStyle = this.pal.css('--line-soft');
     ctx.lineWidth = 1;

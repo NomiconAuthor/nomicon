@@ -96,16 +96,26 @@ export class CullViz {
         'div',
         { class: 'll-row' },
         seg<FrustumMode>('Frustum', (['off', 'sphere', 'box'] as FrustumMode[]).map((m) => [m, FRUSTUM_LABEL[m]]), this.s.frustum, (m) => this.set({ frustum: m })).el,
+        seg<OcclusionMode>('Occlusion', (Object.keys(OCCLUSION_LABEL) as OcclusionMode[]).map((m) => [m, OCCLUSION_LABEL[m]]), this.s.occlusion, (m) => this.set({ occlusion: m })).el,
+      ),
+      h(
+        'div',
+        { class: 'll-row' },
+        btn('◀', () => this.go(Math.max(0, this.k - 1))),
+        play,
+        btn('▶', () => this.go(Math.min(WALK_FRAMES - 1, this.k + 1))),
+        h('label', { class: 'rd-slider' }, this.slider, this.frameLabel),
         chk('Levels of detail', this.s.lod, (on) => this.set({ lod: on })),
         chk('Colour by level', false, (on) => ((this.byLod = on), this.draw())),
       ),
-      h('div', { class: 'll-row' }, seg<OcclusionMode>('Occlusion', (Object.keys(OCCLUSION_LABEL) as OcclusionMode[]).map((m) => [m, OCCLUSION_LABEL[m]]), this.s.occlusion, (m) => this.set({ occlusion: m })).el),
-      h('div', { class: 'll-row' }, btn('◀', () => this.go(Math.max(0, this.k - 1))), play, btn('▶', () => this.go(Math.min(WALK_FRAMES - 1, this.k + 1))), h('label', { class: 'rd-slider' }, this.slider, this.frameLabel)),
-      h('div', { class: 'rd-fig rd-cullpair' }, h('div', {}, h('div', { class: 'll-h' }, 'From above'), this.top), h('div', {}, h('div', { class: 'll-h' }, 'The camera, on the GPU'), this.gpu.el)),
+      h(
+        'div',
+        { class: 'rd-fig rd-cullpair' },
+        h('div', {}, h('div', { class: 'll-h' }, 'From above'), this.top),
+        h('div', {}, h('div', { class: 'rd-cull-h' }, h('span', { class: 'll-h' }, 'The camera, on the GPU'), this.gpuStats), this.gpu.el),
+      ),
       this.counts,
-      this.legend(),
       this.say,
-      h('div', { class: 'll-row' }, h('span', { class: 'll-muted' }, 'GPU frame: '), this.gpuStats),
       this.status,
     );
     fit(this.top, () => this.drawTop());
@@ -121,10 +131,10 @@ export class CullViz {
     this.draw();
   }
 
-  private legend(): HTMLElement {
-    const sw = (token: string, label: string, outline = false) =>
-      h('span', { class: 'rd-swatch' }, h('i', { style: outline ? `border: 2px solid var(${token}); background: none` : `background: var(${token})` }), label);
-    return h('div', { class: 'rd-legend' }, sw('--c2', 'drawn'), sw('--muted', 'occlusion-culled'), sw('--line', 'outside the frustum'), sw('--alert', 'visible but culled'), sw('--ink', 'really visible', true));
+  /** A count that is also the map's colour key: its swatch before the number. */
+  private keyed(n: number | string, label: string, token: string, outline = false, bad = false): HTMLElement {
+    const sw = h('i', { class: 'rd-key', style: outline ? `border: 2px solid var(${token}); background: none` : `background: var(${token})` });
+    return h('span', { class: `ll-stat${bad ? ' rd-bad' : ''}` }, sw, h('b', {}, String(n)), h('span', {}, label));
   }
 
   private stop(b: HTMLButtonElement): void {
@@ -154,14 +164,14 @@ export class CullViz {
     this.counts.replaceChildren(
       stat(c.total, 'buildings'),
       stat(this.s.frustum === 'off' ? 0 : c.total, 'frustum tests'),
-      stat(c.frustumCulled, 'outside the frustum'),
+      this.keyed(c.frustumCulled, 'outside the frustum', '--line'),
       stat(c.occlusionTests, this.s.occlusion === 'queries' ? 'queries' : 'occlusion tests'),
-      stat(c.occluded, 'occlusion-culled'),
-      stat(c.drawn, 'drawn'),
+      this.keyed(c.occluded, 'occlusion-culled', '--muted'),
+      this.keyed(c.drawn, 'drawn', '--c2'),
       stat(c.triangles.toLocaleString('en-US'), 'triangles'),
-      stat(visible, 'really visible'),
+      this.keyed(visible, 'really visible', '--ink', true),
       stat(c.wasted, 'drawn but hidden'),
-      h('span', { class: `ll-stat${c.missed ? ' rd-bad' : ''}` }, h('b', {}, String(c.missed)), h('span', {}, 'visible but culled')),
+      this.keyed(c.missed, 'visible but culled', '--alert', false, c.missed > 0),
     );
     this.say.textContent = SAY[this.s.occlusion] + (this.s.occlusion === 'two-phase' && c.phase1 ? ` This frame: ${c.phase1} in phase 1, ${c.drawn - c.phase1} more in phase 2.` : '');
     this.drawTop();

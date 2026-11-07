@@ -31,7 +31,7 @@ import {
   waveScene,
   wavesPerSimd,
 } from '../scenes/how-shaders-run';
-import { type RGB, Palette, btn, canvas, ctx2d, fit, frame, mix, onTheme, paintTarget, rgbCss, size, stage, stat } from '../view';
+import { type RGB, Palette, btn, canvas, ctx2d, fit, fontPx, frame, mix, onTheme, paintTarget, rgbCss, size, stage, stat } from '../view';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
@@ -179,7 +179,10 @@ export class WaveViz {
     const bg = this.pal.rgb('--bg');
     const litC = this.pal.rgb('--c1');
     const darkC = this.pal.rgb('--c7');
-    ctx.font = '10px sans-serif';
+    // Lane numbers stay at least 10 CSS px; where the cells are too small for that, colours only.
+    const f = fontPx(c, 10, 10);
+    const numbers = f <= cell * 0.6;
+    ctx.font = `${f}px sans-serif`;
     w.lanes.forEach((l, i) => {
       const x = (i % cols) * cell;
       const y = top + Math.floor(i / cols) * cell;
@@ -194,9 +197,9 @@ export class WaveViz {
       ctx.setLineDash(l.kind === 'helper' ? [3, 2] : []);
       ctx.strokeRect(x + 2.5, y + 2.5, cell - 5, cell - 5);
       ctx.setLineDash([]);
-      if (l.kind === 'empty') return;
+      if (l.kind === 'empty' || !numbers) return;
       ctx.fillStyle = this.pal.css(on && l.kind === 'pixel' ? '--bg' : '--muted');
-      ctx.fillText(l.kind === 'helper' ? 'h' : String(i), x + 5, y + cell / 2 + 4);
+      ctx.fillText(l.kind === 'helper' ? 'h' : String(i), x + 5, y + cell / 2 + f * 0.36);
     });
   }
 }
@@ -340,14 +343,18 @@ export class OccupancyViz {
     const { w: W, h: H } = size(this.cv);
     ctx.fillStyle = this.pal.css('--bg');
     ctx.fillRect(0, 0, W, H);
-    ctx.font = '13px sans-serif';
+    // Labels stay at least 11 CSS px on a phone; the label column grows to fit them.
+    const f = fontPx(this.cv, 13);
+    ctx.font = `${f}px sans-serif`;
+    const fx = Math.max(110, Math.ceil(ctx.measureText('Wave slots').width) + 12);
+    const fw = W - fx - 10;
     // Wave slots.
-    const slotW = (W - 120) / WAVE_SLOTS;
+    const slotW = fw / WAVE_SLOTS;
     ctx.fillStyle = this.pal.css('--muted');
-    ctx.fillText('Wave slots', 4, 26);
+    ctx.fillText('Wave slots', 4, 22 + f * 0.36);
     const cols = ['--c2', '--c7', '--c5', '--c4', '--c1', '--c6', '--c3', '--c8'];
     for (let i = 0; i < WAVE_SLOTS; i++) {
-      const x = 110 + i * slotW;
+      const x = fx + i * slotW;
       ctx.fillStyle = i < waves ? this.pal.css(cols[i % cols.length]) : this.pal.css('--bg');
       ctx.fillRect(x + 2, 10, slotW - 4, 24);
       ctx.strokeStyle = this.pal.css('--line');
@@ -355,9 +362,7 @@ export class OccupancyViz {
     }
     // The register file: each wave's allocation.
     ctx.fillStyle = this.pal.css('--muted');
-    ctx.fillText('Registers', 4, 66);
-    const fx = 110;
-    const fw = W - 120;
+    ctx.fillText('Registers', 4, 62 + f * 0.36);
     for (let i = 0; i < waves; i++) {
       ctx.fillStyle = this.pal.css(cols[i % cols.length]);
       ctx.fillRect(fx + (i * alloc * fw) / VGPRS_PER_SIMD, 50, (alloc * fw) / VGPRS_PER_SIMD - 1, 24);
@@ -369,7 +374,7 @@ export class OccupancyViz {
     const top = 100;
     const rowH = Math.min(12, (H - top - 26) / WAVE_SLOTS);
     ctx.fillStyle = this.pal.css('--muted');
-    ctx.fillText('Issuing', 4, top + 10);
+    ctx.fillText('Issuing', 4, top + f * 0.75);
     for (let t = 0; t < T; t++) {
       const wv = model.timeline[t];
       if (wv < 0) continue;
@@ -381,7 +386,7 @@ export class OccupancyViz {
     ctx.fillStyle = this.pal.css('--alert');
     for (let t = 0; t < T; t++) if (model.timeline[t] < 0) ctx.fillRect(fx + (t * fw) / T, by, Math.max(1, fw / T), 6);
     ctx.fillStyle = this.pal.css('--muted');
-    ctx.fillText('idle', 4, by + 7);
+    ctx.fillText('idle', 4, by + 3 + f * 0.36);
     ctx.fillText(`0 … ${T.toLocaleString('en-US')} cycles`, fx, H - 4);
     this.say.textContent = `${v} registers are allocated as ${alloc} (blocks of ${VGPR_GRANULE}), so ${Math.floor(VGPRS_PER_SIMD / alloc)} waves' worth fit in ${VGPRS_PER_SIMD.toLocaleString('en-US')}${Math.floor(VGPRS_PER_SIMD / alloc) > WAVE_SLOTS ? `, more than the ${WAVE_SLOTS} slots` : ''}. Each wave runs ${ALU_RUN} instructions, then waits ${MEM_LATENCY} cycles for memory.`;
     this.counts.replaceChildren(stat(`${waves} of ${WAVE_SLOTS}`, 'waves resident (occupancy)'), stat(pct(model.busy), 'of cycles issuing (toy model)'));

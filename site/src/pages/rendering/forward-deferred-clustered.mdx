@@ -32,15 +32,15 @@ Older forward renderers didn't loop over every light. The CPU picked the few lig
 |---|---|---|---|
 | albedo | `rgba8unorm` | 4 | base colour in RGB (A unused) |
 | normal | `rgb10a2unorm` | 4 | the normal, 10 bits per axis |
-| depth | `depth24plus` | 4 | depth, to rebuild the position |
+| depth | `depth24plus` | 4 | depth, to rebuild the position (24 bits or more; 4 bytes in practice) |
 
 That's **12 bytes per pixel**. Switch the view to **Albedo**, **Normals** or **Depth** to see each target. The lighting pass doesn't store a position: it rebuilds one from the pixel's coordinates and depth through the inverse view-projection matrix, which costs a few instructions and saves 12 bytes.
 
-Production G-buffers hold more: roughness, metalness, specular, material IDs, emissive, motion vectors, often in four or five render targets. They're the main cost of deferred shading, because every byte is written once and read back once for every pixel. Counting only those writes and reads (no caches, no framebuffer compression, no overdraw), this layout moves 28 bytes per pixel against forward's 8 (colour and depth). At 1920 × 1080 that's **55.4 MB a frame** against **15.8 MB**.
+Production G-buffers hold more: roughness, metalness, specular, material IDs, emissive, motion vectors, often in four or five render targets. They're the main cost of deferred shading, because every byte is written once and read back once for every pixel. Counting only those writes and reads (no caches, no framebuffer compression, no overdraw), this layout moves 28 bytes per pixel against forward's 8 (colour and depth). At 1920 × 1080 that's **58.1 MB a frame** against **16.6 MB**.
 
 What deferred gives up:
 
-- **MSAA.** The G-buffer has to be multisampled too (four samples per pixel at 4×, so four times the bytes), and the lighting pass has to light each sample separately where a pixel's samples differ, which is exactly at edges. Most deferred engines use post-process or temporal anti-aliasing instead; the post-processing lesson covers both.
+- **MSAA.** The G-buffer has to be multisampled too (four samples per pixel at 4×, so four times the bytes), and the lighting pass has to light each sample separately where a pixel's samples differ, which is exactly at edges. Most deferred engines use post-process anti-aliasing (FXAA, SMAA) or temporal anti-aliasing instead; the [post-processing lesson](/rendering/post-processing/) covers both.
 - **Transparency.** A G-buffer holds one surface per pixel. Glass, particles and anything blended are drawn afterwards with forward shading, so a deferred engine needs forward lighting code anyway.
 - **Material variety.** The lighting pass can only use what the G-buffer stores. A material that needs something else (hair, cloth, skin with subsurface scattering) needs bits in the G-buffer, usually a material ID and a branch in the lighting pass, or its own forward path.
 
@@ -61,10 +61,10 @@ With 64 lights:
 | Light lists | Lights per pixel (average) | Worst pixel | List entries | Grid + lists |
 |---|---|---|---|---|
 | None | 64 | 64 | 64 | 264 B |
-| Tiles | 7.7 | 34 | 814 | 4.4 KB |
-| Clusters | 6.3 | 16 | 7,755 | 50.3 KB |
+| Tiles | 7.7 | 34 | 814 | 4.5 KB |
+| Clusters | 6.3 | 16 | 7,755 | 51.5 KB |
 
-On average clusters win a little here, because this courtyard has few big depth jumps; they halve the worst case, which is what a frame's time follows when the bad tiles cluster around one spot. And the culling is never wrong: in the model, no pixel loses a light that reaches it, with tiles or with clusters. The cost is a bigger structure, and most of it is spent on nothing: lights are assigned to every cluster they touch, and of the 1,801 clusters that get a light, only 219 hold a surface that a pixel of the model's image sees. Olsson's version assigns lights only to clusters that some pixel uses, found from the depth buffer each frame; a fixed grid is simpler, and the lists are small anyway.
+Clusters win a little on average, because this courtyard has few big depth jumps, and they halve the worst pixel. Neither ever drops a light: in the model, no pixel loses a light that reaches it, with tiles or with clusters. The price is a bigger structure, mostly spent on nothing: lights are assigned to every cluster they touch, and of the 1,801 clusters that get a light, only 219 hold a surface that a pixel of the model's image sees. Olsson's version assigns lights only to clusters that some pixel uses, found from the depth buffer each frame; a fixed grid is simpler, and the lists are small anyway.
 
 The widget builds the lists on the CPU and uploads them for the shaders: a grid with an offset and a count per cell, and one list of light indices, both in integer textures. That's the layout Emil Persson describes for Avalanche's engine in [*Practical Clustered Shading*](https://www.humus.name/Articles/PracticalClusteredShading.pdf) (2015), which also assigned lights on the CPU, with 64 × 64-pixel tiles and 16 depth slices. Many engines build the lists in a compute shader instead.
 
@@ -82,7 +82,7 @@ Set 256 lights and look at **Lights per pixel** with each kind of list. Then tic
 | Transparency | the same shaders | a separate forward path | the same lists |
 | Materials | any shader | what the G-buffer can describe | any shader |
 
-None of these is the answer for every game. Avalanche's engine kept a deferred core and used the clustered lists for its forward passes, transparency included; id's *Doom* (2016) runs [clustered forward](https://www.adriancourreges.com/blog/2016/09/09/doom-2016-graphics-study/) for everything, with a 16 × 8 × 24 grid. Clustered forward also suits GPUs where bandwidth is scarce, such as mobile ones. What they agree on is that a pixel should only look at lights that can reach it.
+None of these is the answer for every game. Avalanche's engine kept a deferred core and used the clustered lists for its forward passes, transparency included; id's *Doom* (2016) lights everything with [clustered forward](https://www.adriancourreges.com/blog/2016/09/09/doom-2016-graphics-study/) shading on a 16 × 8 × 24 grid (lights, decals and reflection probes in the same lists), and writes a thin G-buffer on the side for screen-space reflections. Clustered forward also suits GPUs where bandwidth is scarce, such as mobile ones. What they agree on is that a pixel should only look at lights that can reach it.
 
 ## Takeaways
 

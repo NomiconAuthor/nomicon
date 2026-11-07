@@ -80,7 +80,7 @@ export class LiveLoop {
 /** Rows of "pass: time" from the rolling medians, or why there are none. */
 export function timesTable(timer: GpuTimer | null, live: LiveTimes | null, passes: string[]): HTMLElement {
   if (!timer) return h('p', { class: 'll-muted' }, 'Starting the GPU…');
-  if (!timer.available) return h('p', { class: 'rp-note' }, `No GPU timings here: ${timer.why}. Everything else on this widget still works; the counts don't depend on them.`);
+  if (!timer.available) return h('p', { class: 'rp-note' }, `No GPU timings here: ${timer.why}. The rest of the widget doesn't need them.`);
   const m = live?.medians(passes);
   if (!m || m.frames < 3) return h('p', { class: 'll-muted' }, 'Measuring…');
   let total = 0;
@@ -93,6 +93,6 @@ export function timesTable(timer: GpuTimer | null, live: LiveTimes | null, passe
     'div',
     {},
     h('table', { class: 'rd-tab' }, h('tbody', {}, ...rows, h('tr', { class: 'rp-total' }, h('th', {}, 'all passes'), h('td', {}, msText(total))))),
-    h('p', { class: 'rp-fine' }, `Median of the last ${m.frames} frames, ${timer.why}. Your GPU, your numbers: they change with the machine, the browser and what else is running.`),
+    h('p', { class: 'rp-fine' }, `Median of the last ${m.frames} frames, ${timer.why}. Your GPU's numbers; they vary by machine and browser.`),
   );
 }

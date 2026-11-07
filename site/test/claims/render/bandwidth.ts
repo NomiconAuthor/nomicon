@@ -43,7 +43,7 @@ export default async function bandwidthClaims(): Promise<void> {
   claim(P, `At 1920 × 1080 with the starting formats the frame moves ${MB(d.total)}, ${GBs(d.total)} at 60 frames a second`);
   claim(P, `The G-buffer pass stores ${MB(albedo.store + normal.store + depth.store)} (albedo ${(albedo.store / 1e6).toFixed(1)}, normal ${(normal.store / 1e6).toFixed(1)}, depth ${(depth.store / 1e6).toFixed(1)})`);
   fact(P, albedo.read + normal.read + depth.read === albedo.store + normal.store + depth.store, 'the lighting pass reads all of the G-buffer back');
-  claim(P, `writes ${MB(hdr.store)} of HDR colour, and the post pass reads that and writes ${MB(swap.store)} to the canvas`);
+  claim(P, `writes ${MB(hdr.store)} of HDR colour, and the post pass reads that and writes ${MB(swap.store)} to the swapchain image`);
   fact(P, hdr.read === hdr.store, 'the post pass reads the HDR colour once');
 
   const n10 = at({ normal: 'rgb10a2unorm' });

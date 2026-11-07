@@ -172,7 +172,7 @@ export interface FillCounts {
   particlesCovered: number;
   /** Fragments of the composite pass (half resolution only). */
   composite: number;
-  /** Fragments shaded by a real fragment shader: opaque + particles + composite. */
+  /** Fragments shaded in the colour passes: opaque + particles + composite (the prepass and the depth downsample, which write only depth, are left out). */
   shaded: number;
   /** Shaded fragments per pixel of the frame. */
   perPixel: number;

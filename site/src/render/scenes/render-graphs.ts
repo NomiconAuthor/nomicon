@@ -280,5 +280,5 @@ export function compile(passes: Pass[], w = 1920, h = 1080, aliasing = true): Co
   };
 }
 
-/** Megabytes for the text: 1 MB = 1,048,576 bytes. */
-export const mbText = (b: number) => `${(b / 1048576).toFixed(1)} MB`;
+/** Megabytes for the text: 1 MB = 1,000,000 bytes, like the section's GB/s figures. */
+export const mbText = (b: number) => `${(b / 1e6).toFixed(1)} MB`;

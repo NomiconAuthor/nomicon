@@ -76,32 +76,36 @@ export class BandwidthViz {
       features: ['rg11b10ufloat-renderable'],
     });
     this.api = apiSwitch(this.gpu, () => void this.changed());
+    // The attachment table (the main controls) sits beside a smaller canvas, with the model's totals
+    // under the canvas, so the selects and the bytes they change are on screen together.
+    const figure = h('div', { class: 'rp-bw-fig' }, this.gpu.el, h('div', {}, h('p', { class: 'rp-h' }, 'Model: bytes moved per frame'), this.totals), h('div', {}, h('p', { class: 'rp-h' }, 'GPU time, live'), this.times));
     root.append(
       this.backend,
-      h(
-        'div',
-        { class: 'll-row' },
-        seg<string>('Resolution', RESOLUTIONS.map(([w, hh]) => [`${w}x${hh}`, `${w} × ${hh}`] as [string, string]), `${this.s.w}x${this.s.h}`, (v) => {
-          const [w, hh] = v.split('x').map(Number);
-          this.s.w = w;
-          this.s.h = hh;
-          void this.changed();
-        }).el,
-      ),
-      stage(this.gpu.el, [h('div', {}, h('p', { class: 'rp-h' }, 'Model: bytes moved per frame'), this.totals), h('div', {}, h('p', { class: 'rp-h' }, 'GPU time, live'), this.times)]),
-      this.warn,
-      this.table,
-      h(
-        'div',
-        { class: 'rp-controls' },
-        chk('Fog: the lighting pass reads depth', this.s.fog, (v) => {
-          this.s.fog = v;
-          void this.changed();
-        }),
-        chk('G-buffer and lighting in one pass, on chip (model only)', this.s.merged, (v) => {
-          this.s.merged = v;
-          void this.changed();
-        }),
+      stage(
+        figure,
+        [
+          seg<string>('Resolution', RESOLUTIONS.map(([w, hh]) => [`${w}x${hh}`, `${w} × ${hh}`] as [string, string]), `${this.s.w}x${this.s.h}`, (v) => {
+            const [w, hh] = v.split('x').map(Number);
+            this.s.w = w;
+            this.s.h = hh;
+            void this.changed();
+          }).el,
+          this.table,
+          this.warn,
+          h(
+            'div',
+            { class: 'rp-controls' },
+            chk('Fog: the lighting pass reads depth', this.s.fog, (v) => {
+              this.s.fog = v;
+              void this.changed();
+            }),
+            chk('G-buffer and lighting in one pass, on chip (model only)', this.s.merged, (v) => {
+              this.s.merged = v;
+              void this.changed();
+            }),
+          ),
+        ],
+        16 / 9,
       ),
       h('details', {}, h('summary', {}, 'The pass setup the renderer recorded for this frame'), this.calls),
       this.status,
@@ -127,7 +131,7 @@ export class BandwidthViz {
     this.ready = false;
     const why = r.unsupported(this.s);
     if (why) {
-      this.status.textContent = `Can't draw this on the GPU here: ${why}. The model on the right still counts it.`;
+      this.status.textContent = `Can't draw this on the GPU here: ${why}. The model still counts it.`;
       return;
     }
     await r.prepare(this.s);
@@ -224,7 +228,7 @@ export class BandwidthViz {
           row(hdr, 'HDR colour', this.formatCell('hdr', '', HDR_FORMATS), this.opsCells('hdrOps')),
           h('tr', { class: 'pass' }, h('td', { colspan: '6' }, 'Post pass')),
           readRow('reads HDR colour', hdr.read),
-          row(swap, 'the canvas', h('td', {}, '8-bit RGBA or BGRA'), this.opsCells('hdrOps', true)),
+          row(swap, 'swapchain image', h('td', {}, '8-bit RGBA or BGRA'), this.opsCells('hdrOps', true)),
         ),
       ),
     );
@@ -242,7 +246,7 @@ export class BandwidthViz {
           h('tr', {}, h('th', {}, 'of which could be memoryless'), h('td', {}, MB(b.transient))),
         ),
       ),
-      h('p', { class: 'rp-fine' }, `Render-target traffic only, with no compression: what a tile-based GPU moves; a lower bound on an immediate-mode one. MB = 10⁶ bytes.${fmtNote.length ? ` ${fmtNote.join('; ')}.` : ''}`),
+      h('p', { class: 'rp-fine' }, `Render-target traffic, no compression: what a tile-based GPU moves, a lower bound on others. MB = 10⁶ bytes.${fmtNote.length ? ` ${fmtNote.join('; ')}.` : ''}`),
     );
     const names: Record<string, string> = { albedo: 'Albedo', normal: 'The normal', depth: 'Depth', hdr: 'The HDR colour' };
     this.warn.textContent = b.broken.length ? `${b.broken.map((n, i) => (i ? names[n].toLowerCase() : names[n])).join(' and ')} ${b.broken.length > 1 ? 'are' : 'is'} discarded but read by a later pass, which reads garbage (zeros, in WebGPU).` : '';

@@ -63,7 +63,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .rd-top {
-    max-width: 260px;
+    max-width: 200px;
   }
 }
 .rd-stages {
@@ -141,6 +141,17 @@
 .rd-tab th {
   color: var(--muted);
   font-weight: 500;
+}
+/* Opt-in: let cells wrap (at spaces), for readouts in a narrow side panel. */
+.rd-tab.rd-tab-wrap th,
+.rd-tab.rd-tab-wrap td {
+  white-space: normal;
+}
+/* On narrow widgets the textures lesson's footprint inset shrinks, so the readout stays near it. */
+@container rd (max-width: 560px) {
+  .rd-tex .rd-inset {
+    width: min(100%, 170px);
+  }
 }
 .rd-heat-legend {
   display: flex;

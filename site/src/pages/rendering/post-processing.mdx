@@ -21,11 +21,11 @@ The courtyard at night: sixteen point lights, each with a small cube that glows 
 3. **bloom** blurs the bright parts through a chain of 5 downsamples and 4 upsamples;
 4. **tone map** mixes the bloom in, applies exposure and a tone curve, encodes sRGB and writes the canvas.
 
-That's 12 passes with everything on, each a full-screen triangle after the first. **Split** shows the frame as drawn, exposed and clamped with no post-processing, on the left half. The list beside the frame shows the passes in order and their sizes; it follows your settings.
+That's 12 passes with everything on, each a full-screen triangle after the first. **Split** shows the frame as drawn, exposed and clamped with no post-processing, on the left half. The pass list beside the frame (open it under the tone curve) shows the passes in order and their sizes; it follows your settings.
 
 ## HDR targets
 
-An 8-bit target clips at 1: a lamp and a white wall both store 1.0, and nothing later can tell them apart. A half-float target stores up to 65,504 with about three significant digits, at 8 bytes per pixel instead of 4: 15.8 MB at 1920 × 1080. Engines also use `R11G11B10` floats, 4 bytes with no alpha and less precision; WebGPU offers it as a render target only with the optional `rg11b10ufloat-renderable` feature, and WebGL2 can render to float targets only with `EXT_color_buffer_float`. If the widget's WebGL2 can't, it says so and uses 8 bits, and the lamps clip.
+An 8-bit target clips at 1: a lamp and a white wall both store 1.0, and nothing later can tell them apart. A half-float target stores up to 65,504 with about three significant digits, at 8 bytes per pixel instead of 4: 16.6 MB at 1920 × 1080. Engines also use `R11G11B10` floats, 4 bytes with no alpha and less precision; WebGPU offers it as a render target only with the optional `rg11b10ufloat-renderable` feature, and WebGL2 needs `EXT_color_buffer_float` (or, for half floats only, `EXT_color_buffer_half_float`) to render to float targets. If the widget's WebGL2 has neither, it says so and uses 8 bits, and the lamps clip.
 
 ## Exposure and tone mapping
 
@@ -36,7 +36,7 @@ An 8-bit target clips at 1: a lamp and a white wall both store 1.0, and nothing 
 - **Reinhard with a white point** *W*: *x* (1 + *x* / *W*²) / (1 + *x*), which reaches exactly 1 at *W*. With *W* = 4, 1 becomes 0.53.
 - **ACES fit**: Krzysztof Narkowicz's [fit](https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/) of the Academy's filmic curve, five numbers in a rational function. A **filmic** curve has a toe that deepens shadows and a shoulder that rolls highlights off; 1 becomes 0.80 (Narkowicz: "1 on input maps to ~0.8 on output"; multiply the input by 0.6 to match the original curve), and 0.99 is reached at an input of 5.55.
 
-The plot beside the frame shows all four, and the one in use. Each of them works on red, green and blue separately, so saturated bright colours shift hue and saturate as each channel hits the shoulder at a different time. **AgX**, which replaced Filmic as Blender's default view transform in Blender 4.0, is built to avoid that: in Blender's words, "bright colors go towards white, similar to real cameras". It isn't in the widget; it needs a colour-space transform around the curve, not just a curve.
+The plot beside the frame shows all four, and the one in use. The widget applies each of them to red, green and blue separately, as most games do (Reinhard's paper maps luminance), so saturated bright colours shift hue and saturate as each channel hits the shoulder at a different time. **AgX**, which replaced Filmic as Blender's default view transform in Blender 4.0, is built to avoid that: in Blender's words, "bright colors go towards white, similar to real cameras". It isn't in the widget; it needs a colour-space transform around the curve, not just a curve.
 
 ## Bloom
 
@@ -46,26 +46,26 @@ Real lenses and eyes scatter a little of the light from bright sources into the 
 - **Upsample** back up with a 3 × 3 tent filter, adding each level to the next larger one, so the result is a sum of blurs of increasing width, close to a wide Gaussian.
 - **Mix** it into the HDR frame with a small weight, 0.04 here as in Jimenez's talk, before tone mapping. There's no threshold: everything blooms a little, but only very bright pixels bloom visibly.
 
-At 1920 × 1080 the chain holds 10.5 MB of half-float textures. Jimenez also weights the first downsample by 1 / (1 + luminance) in groups of four ("Karis average") to stop single very bright pixels flickering; the widget doesn't.
+At 1920 × 1080 the chain holds 11.0 MB of half-float textures. Jimenez also weights the first downsample by 1 / (1 + luminance) in groups of four ("Karis average") to stop single very bright pixels flickering; the widget doesn't.
 
 **Order matters.** Choose **After**: the chain then blurs the tone-mapped image, where the lamps are already squeezed to at most 1, so the glow around them almost disappears. Bloom belongs before tone mapping, where a lamp still has 24 times the energy of a white wall to spread around.
 
 ## Temporal anti-aliasing
 
-One sample per pixel aliases: edges stair-step, and thin things flicker as they move. MSAA helps edges only, and doesn't work well with deferred shading. **Temporal anti-aliasing** spreads the samples over time instead:
+One sample per pixel aliases: edges stair-step, and thin things flicker as they move. MSAA helps edges only, and doesn't work well with deferred shading. **Post-process anti-aliasing** works on the finished frame alone: NVIDIA's FXAA and [SMAA](https://www.iryoku.com/smaa/) (Jimenez et al., 2012) find edges by their contrast and blend across them. That's cheap and smooths stair-steps, but one frame holds no detail smaller than a pixel, so thin things still flicker. **Temporal anti-aliasing** spreads the samples over time instead:
 
 - **Jitter**: each frame, the projection is shifted by a different sub-pixel offset, so each pixel samples a different point inside itself. The widget uses the first 8 points of the Halton (2, 3) sequence, a low-discrepancy sequence that covers the pixel evenly, and repeats.
 - **History**: the resolve blends the new frame into an accumulated history: history × (1 − α) + new × α. With α = 0.1 (Salvi: "Typically we blend 10% of the current frame"), the result has about the noise of an average of 19 frames.
 - **Reprojection**: things move, so the history must be read where the surface was last frame. The resolve rebuilds each pixel's position from depth and projects it with last frame's camera; engines also write **motion vectors** for moving objects. This widget's camera doesn't move and its crate has no motion vectors, on purpose.
-- **History rejection**: when the surface behind a pixel changes (something moved, or was uncovered), the history is wrong. The usual fix, which Brian Karis's [*High Quality Temporal Supersampling*](https://advances.realtimerendering.com/s2014/index.html) (SIGGRAPH 2014) made widely known, is to **clamp** the history colour to the range of colours in the new frame's 3 × 3 neighbourhood: a colour that isn't around any more can't survive.
+- **History rejection**: when the surface behind a pixel changes (something moved, or was uncovered), the history is wrong. The usual fix, which Brian Karis's [*High Quality Temporal Supersampling*](https://de45xmedrsdbp.cloudfront.net/Resources/files/TemporalAA_small-59732822.pdf) (SIGGRAPH 2014) made widely known, is to **clamp** the history colour to the range of colours in the new frame's 3 × 3 neighbourhood: a colour that isn't around any more can't survive.
 
-Untick **Clamp history** and watch the crate: it smears a trail. That's **ghosting**: without rejection, a colour that's gone still makes up (1 − α)<sup>*n*</sup> of the pixel *n* frames later, 35% after 10 frames, and it takes 22 frames to fall below 10%. Clamping removes most of the trail, at a price: it also rejects legitimate history on thin, high-contrast details, so they flicker or soften. Real TAA spends most of its code on this trade-off: clipping towards the average rather than clamping, variance-based bounds ([Salvi, 2016](https://developer.download.nvidia.com/gameworks/events/GDC2016/msalvi_temporal_supersampling.pdf)), motion-vector checks, and sharpening afterwards.
+Untick **Clamp history** and watch the crate: it smears a trail. That's **ghosting**: without rejection, a colour that's gone still makes up (1 − α)<sup>*n*</sup> of the pixel *n* frames later, 35% after 10 frames, and it takes 22 frames to fall below 10%. Clamping removes most of the trail, at a price: it also rejects legitimate history on thin, high-contrast details, so they flicker or soften. Real TAA spends most of its code on this trade-off: clipping the history towards the neighbourhood's average rather than clamping it (Karis's own refinement, in the same talk), variance-based bounds ([Salvi, 2016](https://developer.download.nvidia.com/gameworks/events/GDC2016/msalvi_temporal_supersampling.pdf)), motion-vector checks, and sharpening afterwards.
 
 **Blend in: Tone-mapped** divides each colour by 1 + its luminance before blending and undoes it after. In linear space, one very bright sample, such as a lamp's edge, dominates the average and flickers as the jitter moves; in the compressed space it weighs about as much as any other.
 
 ## Upscaling
 
-Choose a **render scale** of 75% or 50%: the scene is drawn at that fraction of the width and height, a quarter of the pixels at 50%, and the TAA resolve writes a full-size history from it. Because each frame samples different sub-pixel positions, the history gathers more detail than any single low-resolution frame holds. That's the idea behind temporal upscalers: Unreal's TSR, AMD's FSR 2 and later, Intel's XeSS and NVIDIA's DLSS all accumulate jittered low-resolution frames into a full-resolution history, the last two using a neural network to decide how much of the history to trust. Turn TAA off at 50% and the frame is just stretched.
+Choose a **render scale** of 75% or 50%: the scene is drawn at that fraction of the width and height, a quarter of the pixels at 50%, and the TAA resolve writes a full-size history from it. Because each frame samples different sub-pixel positions, the history gathers more detail than any single low-resolution frame holds. That's the idea behind temporal upscalers: Unreal's TSR, AMD's FSR 2 and later, Intel's XeSS and NVIDIA's DLSS all accumulate jittered low-resolution frames into a full-resolution history; DLSS, XeSS and FSR 4 use a neural network to decide how much of the history to trust, while TSR and FSR 2 and 3 use hand-written heuristics. Turn TAA off at 50% and the frame is just stretched.
 
 ## The order of the passes
 
@@ -78,7 +78,7 @@ On an HDR display the tone curve's target changes: the output is no longer 0..1 
 ## Takeaways
 
 - Light the scene in **HDR** (half floats: 8 bytes per pixel) so bright things stay bright until the end.
-- **Exposure** then a **tone curve** map it to the display: Reinhard never clips but greys highlights; filmic curves (the ACES fit maps 1 to 0.80) add a toe and a shoulder; AgX avoids per-channel hue shifts.
+- **Exposure** then a **tone curve** map it to the display: Reinhard never clips but greys highlights; filmic curves (the ACES fit maps 1 to 0.80) add a toe and a shoulder; AgX reduces those hue shifts and sends bright colours towards white.
 - **Bloom**: a chain of 13-tap downsamples and tent upsamples, mixed in at about 0.04, before tone mapping.
 - **TAA**: jitter the projection, reproject and blend into a history (α = 0.1 is about 19 frames), and **clamp** the history to the current neighbourhood to stop **ghosting**. The same machinery upscales.
 
@@ -87,7 +87,8 @@ On an HDR display the tone curve's target changes: the output is no longer 0..1 
 - Erik Reinhard, Michael Stark, Peter Shirley and Jim Ferwerda, [*Photographic Tone Reproduction for Digital Images*](https://www-old.cs.utah.edu/docs/techreports/2002/pdf/UUCS-02-001.pdf), SIGGRAPH 2002.
 - Krzysztof Narkowicz, [*ACES Filmic Tone Mapping Curve*](https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/), 2016.
 - Blender, [*4.0 colour management release notes*](https://developer.blender.org/docs/release_notes/4.0/color_management/): AgX.
-- Jorge Jimenez, *Next Generation Post Processing in Call of Duty: Advanced Warfare*, and Brian Karis, *High Quality Temporal Supersampling*, both in [SIGGRAPH 2014's Advances in Real-Time Rendering](https://advances.realtimerendering.com/s2014/index.html).
+- Jorge Jimenez, *Next Generation Post Processing in Call of Duty: Advanced Warfare*, and Brian Karis, *High Quality Temporal Supersampling* ([PDF](https://de45xmedrsdbp.cloudfront.net/Resources/files/TemporalAA_small-59732822.pdf)), both in [SIGGRAPH 2014's Advances in Real-Time Rendering](https://advances.realtimerendering.com/s2014/index.html).
+- Jorge Jimenez, Jose I. Echevarria, Tiago Sousa and Diego Gutierrez, [*SMAA: Enhanced Subpixel Morphological Antialiasing*](https://www.iryoku.com/smaa/), Eurographics 2012.
 - Jorge Jimenez's bloom, explained with code: LearnOpenGL, [*Physically Based Bloom*](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom).
 - Marco Salvi, [slides on temporal supersampling](https://developer.download.nvidia.com/gameworks/events/GDC2016/msalvi_temporal_supersampling.pdf), GDC 2016: neighbourhood clipping and variance clipping.
 - Lei Yang, Shiqiu Liu and Marco Salvi, [*A Survey of Temporal Antialiasing Techniques*](https://research.nvidia.com/labs/rtr/publication/yang2020survey/), Eurographics 2020.

@@ -243,15 +243,16 @@ export const EQUIVALENTS: Record<string, [string, string, string]> = {
   setBindGroup: ['SetGraphicsRootDescriptorTable', 'vkCmdBindDescriptorSets', 'setVertexBuffer: / setFragmentBuffer: (or an argument buffer)'],
   setVertexBuffer: ['IASetVertexBuffers', 'vkCmdBindVertexBuffers', 'setVertexBuffer:offset:atIndex:'],
   setIndexBuffer: ['IASetIndexBuffer', 'vkCmdBindIndexBuffer', 'nothing: the index buffer is an argument of the draw'],
-  drawIndexed: ['DrawIndexedInstanced', 'vkCmdDrawIndexed', 'drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:'],
-  draw: ['DrawInstanced', 'vkCmdDraw', 'drawPrimitives:vertexStart:vertexCount:'],
+  drawIndexed: ['DrawIndexedInstanced', 'vkCmdDrawIndexed', 'drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:'],
+  draw: ['DrawInstanced', 'vkCmdDraw', 'drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:'],
   end: ['EndRenderPass (or nothing)', 'vkCmdEndRendering (or vkCmdEndRenderPass)', 'endEncoding'],
   copyTextureToBuffer: ['CopyTextureRegion', 'vkCmdCopyImageToBuffer', 'a blit encoder\'s copyFromTexture:…toBuffer:…'],
   copyBufferToBuffer: ['CopyBufferRegion', 'vkCmdCopyBuffer', 'a blit encoder\'s copyFromBuffer:…toBuffer:…'],
   resolveQuerySet: ['ResolveQueryData', 'vkCmdCopyQueryPoolResults', 'resolveCounters:inRange:destinationBuffer:destinationOffset:'],
   finish: ['ID3D12GraphicsCommandList::Close', 'vkEndCommandBuffer', 'nothing (commit ends the command buffer)'],
   submit: ['ID3D12CommandQueue::ExecuteCommandLists', 'vkQueueSubmit', '[commandBuffer commit]'],
-  getCurrentTexture: ['IDXGISwapChain3::GetCurrentBackBufferIndex and GetBuffer', 'vkAcquireNextImageKHR', '[layer nextDrawable]'],
+  // The view WebGPU then makes with createView isn't recorded (it's a call on the texture).
+  getCurrentTexture: ['IDXGISwapChain3::GetCurrentBackBufferIndex and GetBuffer (plus a render target view of each back buffer, usually made once)', 'vkAcquireNextImageKHR (plus a VkImageView of each swapchain image, usually made once)', '[layer nextDrawable], then its texture'],
   mapAsync: ['Map on a readback heap once a fence has passed', 'vkMapMemory once a fence has passed', 'contents, in the command buffer\'s completion handler'],
 };
 
@@ -318,12 +319,13 @@ export class GpuInspectorViz {
       h(
         'div',
         { class: 'll-row' },
+        this.tabs.el,
+        chk('Show timing and readback calls', false, (on) => ((this.extras = on), this.show())),
         chk('Cull back faces', true, (on) => {
           this.s.cull = on;
           this.draw();
         }),
       ),
-      h('div', { class: 'll-row' }, this.tabs.el, chk('Show timing and readback calls', false, (on) => ((this.extras = on), this.show()))),
       stage(this.gpuFig(), [this.list, this.summary]),
       this.status,
     );

@@ -7,7 +7,7 @@
 import { h, seg } from '../../engine/dom';
 import { DEFAULTS, Target, emptyStats, render } from '../raster';
 import { ANISO_STEPS, FILTER_LABEL, type FilterMode, type PixelSample, TEX_H, TEX_SIZE, TEX_W, checkerTexture, measure, reference, samplerFor, texCamera, texScene } from '../scenes/textures-and-sampling';
-import { type RGB, Palette, Stepper, btn, canvas, ctx2d, fit, frame, mix, n2, onTheme, paintTarget, rgbCss, size, stage, stat } from '../view';
+import { type RGB, Palette, Stepper, btn, canvas, ctx2d, fit, fontPx, frame, mix, n2, onTheme, paintTarget, rgbCss, size, stage, stat } from '../view';
 
 /** Colours for mip levels 0, 1, 2, ...; magnification uses the first. */
 export const LEVEL_TOKENS = ['--c4', '--c2', '--c7', '--c5', '--c3', '--c6', '--c1'];
@@ -51,8 +51,7 @@ export class TextureViz {
     });
     root.append(
       this.modeSeg.el,
-      this.anisoSeg.el,
-      seg<'color' | 'level' | 'ref'>('Show', [['color', 'Colour'], ['level', 'Mip level read'], ['ref', 'Reference (256 rays a pixel)']], this.view, (v) => ((this.view = v), this.show())).el,
+      h('div', { class: 'll-row', style: 'gap: 6px 22px' }, this.anisoSeg.el, seg<'color' | 'level' | 'ref'>('Show', [['color', 'Colour'], ['level', 'Mip level read'], ['ref', 'Reference (256 rays a pixel)']], this.view, (v) => ((this.view = v), this.show())).el),
       h('div', { class: 'll-row' }, btn('Next quad', () => s.next(['quad'])), s.playBtn, btn('Whole frame', () => s.finish()), btn('Clear', () => s.reset())),
       h('div', { class: 'll-h' }, 'Click or tap a pixel to see its footprint'),
       stage(this.cv, [this.inset, this.read, this.sum]),
@@ -143,9 +142,9 @@ export class TextureViz {
     }
     const r = measure(this.log);
     this.sum.replaceChildren(
-      stat(r.error.toFixed(3), 'average error against the reference'),
-      stat(n2(r.reads), 'texels read per pixel'),
-      stat(r.maxLambda.toFixed(1), `highest level of detail asked for (the texture has levels 0 to ${this.tex.levels.length - 1})`),
+      stat(r.error.toFixed(3), 'average error'),
+      stat(n2(r.reads), 'texels read a pixel'),
+      stat(r.maxLambda.toFixed(1), `highest λ asked for (levels go 0 to ${this.tex.levels.length - 1})`),
     );
   }
 
@@ -159,19 +158,19 @@ export class TextureViz {
     const y = Math.floor(this.sel / TEX_W);
     const t = ps.trace;
     const T = TEX_SIZE;
-    const row = (label: string, ...cells: string[]) => h('tr', {}, h('th', {}, label), ...cells.map((c) => h('td', { style: 'white-space: normal' }, c)));
+    const row = (label: string, ...cells: string[]) => h('tr', {}, h('th', {}, label), ...cells.map((c) => h('td', {}, c)));
     const lv = t.lambda > 0 && this.mode !== 'point' && this.mode !== 'bilinear' ? t.levels.map(([l, w]) => (w === 1 ? `level ${l}` : `level ${l} × ${w.toFixed(2)}`)).join(' + ') : 'level 0';
-    const why = t.lambda <= 0 ? 'magnified: under one texel per pixel' : this.mode === 'point' || this.mode === 'bilinear' ? 'no mipmaps, so level 0 anyway' : '';
+    const why = t.lambda <= 0 ? 'magnified' : this.mode === 'point' || this.mode === 'bilinear' ? 'no mipmaps: level 0' : '';
     this.read.replaceChildren(
-      h('p', {}, h('b', {}, `Pixel (${x}, ${y}), quad (${x & ~1}, ${y & ~1})`), ` at u, v = ${n2(ps.u * T)}, ${n2(ps.v * T)} texels`),
+      h('p', {}, h('b', {}, `Pixel (${x}, ${y}), quad (${x & ~1}, ${y & ~1})`), `, u, v = ${n2(ps.u * T)}, ${n2(ps.v * T)} texels`),
       h(
         'table',
-        { class: 'rd-tab' },
+        { class: 'rd-tab rd-tab-wrap' },
         h(
           'tbody',
           {},
-          row('one pixel right / down moves u, v by', `(${n2(ps.d[0] * T)}, ${n2(ps.d[1] * T)}) / (${n2(ps.d[2] * T)}, ${n2(ps.d[3] * T)})`),
-          row('footprint x, y (texels)', `${n2(t.px)}, ${n2(t.py)}${this.mode === 'aniso' ? `: ${t.n} samples (ratio ${n2(Math.max(t.px, t.py) / Math.min(t.px, t.py))}, max ${this.aniso})` : ''}`),
+          row('u, v per pixel right / down', `(${n2(ps.d[0] * T)}, ${n2(ps.d[1] * T)}) / (${n2(ps.d[2] * T)}, ${n2(ps.d[3] * T)})`),
+          row('footprint x, y (texels)', `${n2(t.px)}, ${n2(t.py)}${this.mode === 'aniso' ? `; ${t.n} samples (ratio ${n2(Math.max(t.px, t.py) / Math.min(t.px, t.py))}, max ${this.aniso})` : ''}`),
           row('level of detail λ', `${n2(t.lambda)}${why ? ` (${why})` : ''}`),
           row('read', `${lv}: ${t.reads} texel${t.reads === 1 ? '' : 's'}`),
         ),
@@ -190,9 +189,10 @@ export class TextureViz {
     const ink = this.pal.css('--ink');
     if (!ps) {
       ctx.fillStyle = this.pal.css('--muted');
-      ctx.font = '15px sans-serif';
-      ctx.fillText('The texture under the', 20, W / 2 - 10);
-      ctx.fillText('selected pixel shows here', 20, W / 2 + 12);
+      const f = fontPx(c, 15);
+      ctx.font = `${f}px sans-serif`;
+      ctx.fillText('The texture under the', 16, W / 2 - f * 0.6);
+      ctx.fillText('selected pixel shows here', 16, W / 2 + f * 0.9);
       return;
     }
     const T = TEX_SIZE;
@@ -255,8 +255,10 @@ export class TextureViz {
     }
     ctx.closePath();
     ctx.stroke();
-    // Each sample: a circle as wide as one texel of the level it reads (2^λ texels of level 0).
-    const r = (Math.pow(2, Math.max(0, this.mode === 'point' || this.mode === 'bilinear' ? 0 : t.lambda)) / 2) * sc;
+    // Each sample: a circle as wide as one texel of the level it reads (2^level texels of level 0);
+    // for trilinear, the two levels' weighted mean.
+    const lvl = this.mode === 'point' || this.mode === 'bilinear' || t.lambda <= 0 ? 0 : t.levels.reduce((a, [l, w]) => a + l * w, 0);
+    const r = (Math.pow(2, lvl) / 2) * sc;
     ctx.strokeStyle = ink;
     ctx.fillStyle = ink;
     ctx.lineWidth = 1.5;
@@ -268,7 +270,7 @@ export class TextureViz {
       ctx.arc(X(u), Y(v), 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.font = '14px sans-serif';
+    ctx.font = `${fontPx(c, 14)}px sans-serif`;
     ctx.fillStyle = this.pal.css('--body');
     ctx.fillText(`${span < 20 ? span.toFixed(1) : Math.round(span)} texels across`, 8, W - 10);
   }

@@ -22,7 +22,7 @@ Both sides use the same camera. The GPU's vertex shader multiplies each position
 
 The GPU's frame has **2 passes**: the scene is drawn into a 64 × 40 colour and depth target, and a second pass copies it to the canvas with one triangle that covers the screen, sampling without filtering so the pixels stay square. That's 3 draw calls and 15 triangles submitted: the floor's 2, the box's 12 and the full-screen triangle. Choose **Full** and the scene pass renders at the canvas's own size instead, every device pixel of it, in the same two passes.
 
-**Mark pixels that differ** reads the GPU's frame back to the CPU and compares it with the software one. Expect them to agree almost everywhere. Where they don't, it's on edges, where the checker squares meet, and where the near plane cuts: GPUs snap vertices to their own sub-pixel grid (D3D requires 8 bits; Vulkan only guarantees 4, and each device reports its `subPixelPrecisionBits`), and they interpolate in 32-bit floats where the rasteriser uses 64-bit. How many differ depends on your GPU and driver.
+**Mark pixels that differ** reads the GPU's frame back to the CPU and compares it with the software one. Expect them to agree almost everywhere. Where they don't, it's on edges, where the checker squares meet, and where the near plane cuts: GPUs snap vertices to their own sub-pixel grid (D3D requires 8 bits; core Vulkan only guarantees 4, the Roadmap 2026 profile 8, and each device reports its `subPixelPrecisionBits`), and they interpolate in 32-bit floats where the rasteriser uses 64-bit. How many differ depends on your GPU and driver.
 
 **Time 60 frames** measures each pass on the GPU with **timestamp queries**, if your browser offers them: WebGPU's optional `timestamp-query` feature, or WebGL2's `EXT_disjoint_timer_query_webgl2`, which Firefox and Safari don't expose. A CPU timer can't do this: the calls return long before the GPU runs them. Chrome rounds WebGPU timestamps to 100 µs, so passes this small often read 0. A later lesson, *Timing the GPU*, comes back to this.
 
@@ -30,7 +30,7 @@ The GPU's frame has **2 passes**: the scene is drawn into a 64 × 40 colour and 
 
 ## Adapters, devices and queues
 
-An **adapter** is a GPU (or a software one, which is what a headless browser offers). You ask it for a **device**, your own connection to it, and say which optional **features** and higher **limits** you need; anything you don't ask for isn't available, even if the hardware has it. This lesson asks for `timestamp-query` when the adapter lists it, and nothing else. A device comes with a **queue**, where finished command buffers and uploads are sent.
+An **adapter** is a GPU, or a software fallback (which a headless browser or a blocklisted driver may give you). You ask it for a **device**, your own connection to it, and say which optional **features** and higher **limits** you need; anything you don't ask for isn't available, even if the hardware has it. This lesson asks for `timestamp-query` when the adapter lists it, and nothing else. A device comes with a **queue**, where finished command buffers and uploads are sent.
 
 | WebGPU | D3D12 | Vulkan | Metal |
 |---|---|---|---|
@@ -59,8 +59,8 @@ The price is combinations. This lesson has two fragment shaders (checker and lit
 Not everything is baked:
 
 - **WebGPU** sets the viewport, scissor rectangle, blend constant and stencil reference on the pass.
-- **D3D12** sets those, the primitive topology (the PSO only knows triangles from lines) and all resource bindings on the command list.
-- **Vulkan** lets you mark parts of a pipeline as **dynamic** state: viewport and scissor since 1.0, and since 1.3 (from `VK_EXT_extended_dynamic_state`) cull mode, front face, depth test and others.
+- **D3D12** sets those, list or strip for the topology (the PSO only knows points, lines, triangles or patches), and all resource bindings and render targets on the command list.
+- **Vulkan** lets you mark parts of a pipeline as **dynamic** state: viewport, scissor, blend constants, depth bias and stencil reference since 1.0, and since 1.3 (from `VK_EXT_extended_dynamic_state`) cull mode, front face, depth test and others.
 - **Metal** keeps depth and stencil state in a separate `MTLDepthStencilState`, and sets cull mode and winding on the render encoder.
 
 **WebGL2** has no pipeline object at all. It's OpenGL ES 3.0: a program (the linked shaders) plus global state you switch on and off. Switch the widget to WebGL2 and culling becomes `gl.enable(CULL_FACE)` or `gl.disable(CULL_FACE)` before the draw; the browser (through [ANGLE](https://github.com/google/angle), which turns WebGL into Direct3D 11 on Windows) and the driver work out the combination at draw time. WebGL2's clip-space depth is also OpenGL's −1 to 1 rather than 0 to 1, so its vertex shader converts.
@@ -69,7 +69,7 @@ Not everything is baked:
 
 Shaders read **resources**: buffers of constants, textures, samplers. They're bound in **bind groups**, and a pipeline's layout says which groups it expects and what's in each. Group them by how often they change:
 
-- Group 0, **per frame**: the view-projection matrix, the light and the background colour, 112 bytes, written once per frame and bound once per pass.
+- Group 0, **per frame**: the view-projection matrix, the light and the background colour, 112 bytes, written once per frame and bound once, at the start of the scene pass.
 - Group 1, **per draw**: the draw's colour. Both draws' blocks live in one buffer, 256 bytes apart, because WebGPU's default `minUniformBufferOffsetAlignment` is 256: a bind group can only point at a range starting on that boundary.
 
 Creating a bind group does the slow part ahead of time: checking the resources against the layout and building the descriptors the GPU reads. Binding it in the frame is cheap, close to handing over a pointer, which is the point. In D3D12 a bind group is a range of descriptors in a descriptor heap, bound as a root descriptor table; in Vulkan it's a descriptor set.
@@ -82,7 +82,7 @@ The inspector lists every call the renderer made, recorded as it ran: what it cr
 
 <RenderWidget kind="gpu-inspector" />
 
-A WebGPU frame here is 23 calls. One `writeBuffer` for the frame's constants, then the encoder; the scene pass binds group 0 once, then for each draw sets the pipeline, group 1, the vertex and index buffers, and draws; the present pass gets the canvas's current texture, sets one pipeline and one bind group, and draws three vertices with no vertex buffer at all. Then `finish` and `submit`. There's no present call: the browser shows the canvas texture once the page's task is done.
+A WebGPU frame here is 23 calls, not counting the `createView` on the canvas texture: the inspector records calls on the device, queue, encoders and passes, and a view is made on the texture itself. One `writeBuffer` for the frame's constants, then the encoder; the scene pass binds group 0 once, then for each draw sets the pipeline, group 1, the vertex and index buffers, and draws; the present pass gets the canvas's current texture, sets one pipeline and one bind group, and draws three vertices with no vertex buffer at all. Then `finish` and `submit`. There's no present call: the browser shows the canvas texture once the page's task is done.
 
 The WebGL2 frame is 25 calls, about the same number, but they do different work. There's no encoder, no pass and no submit: each call changes the context's global state, and the browser and driver turn that into commands. The scene pass has to switch depth testing on, and the present pass has to switch it and culling off again, because state carries over from whatever ran last.
 

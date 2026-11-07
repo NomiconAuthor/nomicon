@@ -255,7 +255,7 @@ export interface GTarget {
 export const GBUFFER: GTarget[] = [
   { name: 'albedo', format: 'rgba8unorm', gl: 'RGBA8', bytes: 4, holds: 'base colour in RGB (A unused)' },
   { name: 'normal', format: 'rgb10a2unorm', gl: 'RGB10_A2', bytes: 4, holds: 'the normal, 10 bits per axis' },
-  { name: 'depth', format: 'depth24plus', gl: 'DEPTH_COMPONENT24', bytes: 4, holds: 'depth, to rebuild the position' },
+  { name: 'depth', format: 'depth24plus', gl: 'DEPTH_COMPONENT24', bytes: 4, holds: 'depth, to rebuild the position (24 bits or more; 4 bytes in practice)' },
 ];
 export const GBUFFER_BYTES = GBUFFER.reduce((s, t) => s + t.bytes, 0);
 /** The lit output: the canvas, 8 bits per channel. */
@@ -269,7 +269,10 @@ export const OUTPUT_BYTES = 4;
 export function bytesPerPixel(s: Shading): number {
   return s === 'forward' ? OUTPUT_BYTES + 4 : GBUFFER_BYTES * 2 + OUTPUT_BYTES;
 }
-export const mb = (bytes: number) => bytes / (1024 * 1024);
+/** Decimal megabytes (10^6 bytes), as the rest of the section. */
+export const mb = (bytes: number) => bytes / 1e6;
+/** A byte count as text, in bytes below 1,000 and decimal kilobytes above. */
+export const kbText = (b: number) => (b < 1000 ? `${b} B` : `${(b / 1000).toFixed(1)} KB`);
 
 // ---------------------------------------------------------------------------------------------
 // The frame as the renderers draw it

@@ -11,7 +11,7 @@ import { h, seg } from '../../engine/dom';
 import '../gpu/gpu.css';
 import { CallLog } from '../gpu/record';
 import { type PostRenderer, createPost } from '../gpu/post-processing';
-import { GpuCanvas, backendLine, planReadout } from '../gpu/widget';
+import { GpuCanvas, planReadout } from '../gpu/widget';
 import { VIEW_H, VIEW_W } from '../scenes/courtyard';
 import {
   type BloomOrder,
@@ -29,7 +29,7 @@ import {
   tone,
 } from '../scenes/post-processing';
 import { Palette, canvas, chk, ctx2d, fit, frame, onTheme, stage, stat } from '../view';
-import { animate, apiSwitch, gpuFigure, linearOf, slider, timePasses } from './lighting-ui';
+import { animate, apiSwitch, gpuFigure, gpuRow, linearOf, showBackendRow, slider, timePasses } from './lighting-ui';
 
 export class PostViz {
   private s: PostSettings = { ...POST_DEFAULTS };
@@ -44,8 +44,9 @@ export class PostViz {
   private status = h('p', { class: 'rd-gpu-status' });
   private planStats = h('div', { class: 'll-stats' });
   private passList = h('ol', { class: 'rd-draws' });
+  private passSummary = h('summary', {});
   private stats = h('div', { class: 'll-stats' });
-  private curve = canvas(360, 220, 'The tone curve: scene value in, display value out');
+  private curve = canvas(360, 200, 'The tone curve: scene value in, display value out');
   private timing = h('span', { class: 'll-muted' });
 
   constructor(host: HTMLElement) {
@@ -92,12 +93,15 @@ export class PostViz {
     root.append(
       this.backend,
       h('div', { class: 'll-row' }, chk('TAA', true, (on) => this.set({ taa: on })), chk('Clamp history', true, (on) => this.set({ clamp: on })), space.el, scale.el),
-      h('div', { class: 'll-row' }, chk('Bloom', true, (on) => this.set({ bloom: on })), order.el, slider('Strength', 0, 0.2, 0.01, this.s.strength, (v) => v.toFixed(2), (v) => this.set({ strength: v }))),
-      h('div', { class: 'll-row' }, op.el, slider('Exposure', -3, 3, 0.25, this.s.ev, (v) => `${v > 0 ? '+' : ''}${v} EV`, (v) => this.set({ ev: v }))),
-      h('div', { class: 'll-row' }, chk('Split: no post-processing on the left', false, (on) => this.set({ split: on })), chk('Pause the crate', false, (on) => (this.paused = on))),
-      stage(gpuFigure(this.gpu, VIEW_W, VIEW_H), [h('div', { class: 'll-h' }, 'Passes, in order'), this.passList, this.curve, h('p', { class: 'rd-note' }, 'The tone curve: exposed scene value across (0 to 8), display value up. The dashed line marks 1; the faint curves are the other operators.'), this.stats]),
-      h('div', { class: 'll-row' }, h('span', { class: 'll-muted' }, 'GPU: '), this.planStats),
-      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn', onclick: () => void this.time() }, 'Time 60 frames'), this.timing),
+      h('div', { class: 'll-row' }, chk('Bloom', true, (on) => this.set({ bloom: on })), order.el, slider('Strength', 0, 0.2, 0.01, this.s.strength, (v) => v.toFixed(2), (v) => this.set({ strength: v })), chk('Split: no post on the left', false, (on) => this.set({ split: on }))),
+      h('div', { class: 'll-row' }, op.el, slider('Exposure', -3, 3, 0.25, this.s.ev, (v) => `${v > 0 ? '+' : ''}${v} EV`, (v) => this.set({ ev: v })), chk('Pause the crate', false, (on) => (this.paused = on))),
+      stage(gpuFigure(this.gpu, VIEW_W, VIEW_H), [
+        this.curve,
+        h('p', { class: 'rd-note' }, 'Tone curve: exposed scene value across (0 to 8), display value up; dashed at 1, the other curves faint.'),
+        this.stats,
+        h('details', {}, this.passSummary, this.passList),
+        gpuRow(this.planStats, () => void this.time(), this.timing),
+      ]),
       this.status,
     );
     fit(this.curve, () => this.drawCurve());
@@ -125,7 +129,7 @@ export class PostViz {
 
   private showBackend(): void {
     const ldr = this.renderer?.ldrOnly;
-    this.backend.replaceChildren(this.api, h('span', {}, h('span', { class: 'll-muted' }, 'GPU side: '), ...backendLine(this.gpu)));
+    showBackendRow(this.backend, this.api, this.gpu);
     if (ldr) this.status.textContent = `Note: ${ldr}.`;
   }
 
@@ -135,8 +139,9 @@ export class PostViz {
     const w = this.gpu.canvas.width;
     const hh = this.gpu.canvas.height;
     const passes = postPasses(this.s, w, hh);
+    this.passSummary.textContent = `${passes.length} passes, in order`;
     this.passList.replaceChildren(...passes.map((p) => h('li', {}, h('b', {}, p.name), ` ${p.output === 'canvas' ? '→ canvas' : `${p.w} × ${p.h}`}`)));
-    const mb = (b: number) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
+    const mb = (b: number) => `${(b / 1e6).toFixed(1)} MB`;
     this.stats.replaceChildren(
       ...(this.s.taa ? [stat(`≈ ${Math.round(effectiveSamples(TAA_ALPHA))}`, 'frames averaged by the history')] : []),
       ...(this.s.bloom ? [stat(mb(bloomBytes(w, hh)), 'bloom chain at this size')] : []),
@@ -154,7 +159,7 @@ export class PostViz {
   private drawCurve(): void {
     const ctx = ctx2d(this.curve);
     const W = 360;
-    const H = 220;
+    const H = 200;
     const L = 30;
     const B = H - 22;
     const T = 10;

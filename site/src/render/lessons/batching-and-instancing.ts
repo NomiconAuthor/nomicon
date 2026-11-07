@@ -36,6 +36,9 @@ const SAY: Record<Method, string> = {
   instanced: 'One draw per mesh and material, with a 16-byte record per instance read from a second vertex buffer. The GPU repeats the mesh for each record.',
 };
 
+/** How many of the frame's first draws the key list shows. */
+const FIRST_DRAWS = 5;
+
 export class BatchViz {
   private method: Method = 'unsorted';
   private side: Side = DEFAULT_SIDE;
@@ -51,7 +54,7 @@ export class BatchViz {
   private backend = h('div', { class: 'll-row' });
   private counts = h('div', { class: 'll-stats' });
   private live = h('div', { class: 'll-stats' });
-  private liveNote = h('p', { class: 'll-muted', style: 'margin: 0' });
+  private liveNote = h('p', { class: 'll-muted', style: 'margin: 4px 0 0' });
   private mem = h('p', { class: 'll-muted', style: 'margin: 0' });
   private keys = h('ol', { class: 'rd-keys' });
   private say = h('p', { class: 'rd-say' });
@@ -100,7 +103,14 @@ export class BatchViz {
         }).el,
         chk('Turn the camera', this.turning, (on) => (this.turning = on)),
       ),
-      stage(this.gpuFig(), [this.counts, this.live, this.liveNote, this.mem, h('div', { class: 'll-h' }, 'First draws, in submission order (key: pipeline, material, mesh, depth)'), this.keys]),
+      stage(this.gpuFig(), [
+        this.counts,
+        this.live,
+        h('details', { class: 'rd-note' }, h('summary', {}, 'How the times are measured'), this.liveNote),
+        this.mem,
+        h('div', { class: 'll-h' }, 'First draws (key: pipeline, material, mesh, depth)'),
+        this.keys,
+      ]),
       this.say,
       this.status,
     );
@@ -165,7 +175,7 @@ export class BatchViz {
         : this.method === 'instanced'
           ? `Instance records: ${bytesText(m.instances)} (${plural(this.side * this.side, 'object')} × 16 bytes).`
           : `Object constants: ${bytesText(m.constants)}, 16 bytes per object at 256-byte offsets.`;
-    const draws = p.passes[0].draws.slice(0, 8);
+    const draws = p.passes[0].draws.slice(0, FIRST_DRAWS);
     let prev: (typeof draws)[number] | null = null;
     this.keys.replaceChildren(
       ...draws.map((d) => {

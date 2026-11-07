@@ -51,6 +51,7 @@ export class PipelineTimelineViz {
         'div',
         { class: 'rp-controls' },
         seg<string>('Frames in flight', ['1', '2', '3'].map((v) => [v, v] as [string, string]), String(this.s.inFlight), (v) => set('inFlight')(Number(v))).el,
+        seg<string>('Swapchain images', ['2', '3', '4'].map((v) => [v, v] as [string, string]), String(this.s.images), (v) => set('images')(Number(v))).el,
         seg<PresentMode>(
           'Present mode',
           [
@@ -109,7 +110,7 @@ export class PipelineTimelineViz {
           row('Frames shown a second', `${Math.round(r.fps)}`),
           row('Frames drawn but never shown', `${Math.round(100 * r.dropped)}%`),
           row('GPU busy', `${Math.round(100 * r.gpuBusy)}%`),
-          row('Swapchain images', String(r.images)),
+          row('Swapchain images', r.images === this.s.images ? String(r.images) : `${r.images} (mailbox: frames in flight + 2, so it never blocks)`),
         ),
       ),
       h('p', { class: 'rp-fine' }, `A model, the same on every machine: frames ${WARMUP} to ${FRAMES} of a steady run. Latency runs from the input read at the start of the frame's simulation to the refresh that starts showing it; the display's own processing and scan-out come on top.`),

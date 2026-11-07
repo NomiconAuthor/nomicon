@@ -23,6 +23,7 @@ export default function textureAtlases(): void {
   fact(D, nextPow2(shelf.H) === 512 && nextPow2(pack('skyline', 'bssf').H) === 512, 'shelf and skyline spill past 256 rows into a 512 atlas');
   fact(D, nextPow2(bl.H) === 256 && nextPow2(bssf.H) === 256 && nextPow2(pack('guillotine', 'baf').H) === 256, 'guillotine and both MaxRects fit 256 × 256');
   claim(D, `the same atlas at 256 × 512 is only ${d1(efficiency(shelf, 512))}% sprite`);
+  claim(D, `the shelf packer's ${shelf.W} × ${shelf.H} atlas takes ${Math.round((100 * shelf.H) / 512)}% of the memory of the ${shelf.W} × 512 one`);
   // Rotation.
   const bssfR = pack('maxrects', 'bssf', true);
   const skyR = pack('skyline', 'bssf', true);
@@ -51,5 +52,5 @@ export default function textureAtlases(): void {
   fact(D, aligned, 'at 1× on whole pixels bilinear reads only sprite A, even without padding');
   // Nearest filtering: the aligned layout (no padding) stays clean at every level; padding 1 breaks the alignment.
   fact(D, zooms.every((z) => worstBleed(bleedAtlas(0, 'empty'), z, 'nearest').any === 0), 'nearest, no padding: clean at every level');
-  claim(D, `with 1 texel of padding, up to ${bleedText(worstBleed(bleedAtlas(1, 'extrude'), 0.25, 'nearest').any)} at 1/4`);
+  claim(D, `nearest filtering now bleeds up to ${bleedText(worstBleed(bleedAtlas(1, 'extrude'), 0.25, 'nearest').any)} at 1/4`);
 }

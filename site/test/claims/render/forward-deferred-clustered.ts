@@ -27,12 +27,13 @@ import {
   fdcPlan,
   lightsAt,
   listStats,
+  kbText,
   mb,
   missedLights,
 } from '../../../src/render/scenes/forward-deferred-clustered';
 
 const P = 'rendering/forward-deferred-clustered.mdx';
-const kb = (b: number) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`);
+const kb = kbText;
 
 async function drawsRecorded(kind: 'webgpu' | 'webgl2', s: FdcSettings): Promise<number> {
   const log = new CallLog();

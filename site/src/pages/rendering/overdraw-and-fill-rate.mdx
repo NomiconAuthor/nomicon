@@ -36,7 +36,7 @@ Foliage is the other classic case. Leaves are cut-out cards, many layers deep, a
 
 The fixes all cut either the number of fragments or what each one costs.
 
-**Fewer, smaller particles.** Fragments grow with the square of the size. At **96 px** the same plume shades 3,367,832 fragments, 25.99 per pixel. The usual trade is fewer particles with more detail in each texture, and fewer layers close to the camera, where each particle covers the most pixels.
+**Fewer, smaller particles.** Fragments grow with the square of the size. At **96 px** the plume shades 3,161,704 fragments and the frame 3,367,832, 25.99 per pixel. The usual trade is fewer particles with more detail in each texture, and fewer layers close to the camera, where each particle covers the most pixels.
 
 **Trim the quad.** Most of a smoke sprite's square is transparent, and those pixels are shaded and blended for nothing. Draw the sprite on a polygon that hugs its visible part instead of a quad. For this widget's round puffs, a regular octagon around the circle covers 83% of the square; **Trimmed octagons** cuts the particle fragments from 832,100 to 700,983, 84% (the octagons are snapped outwards to half pixels). Real smoke textures have more empty space: Emil Persson's [particle trimmer](https://www.humus.name/index.php?ID=266) cut one smoke puff's fill to 60% of the quad with four vertices and 52% with eight. The extra vertices cost far less than the pixels they save.
 
@@ -46,7 +46,7 @@ The fixes all cut either the number of fragments or what each one costs.
 - **Blend in two parts:** colour as usual onto black, and alpha as the running product of (1 − *a*). The particle buffer then holds the particles' colour and how much of the scene shows through.
 - **Composite** with one full-screen pass: scene × that product + particle colour.
 
-Tick **Particles at half resolution**: the particles shade 208,025 fragments instead of 832,100, the composite adds one per pixel (129,600) and the depth downsample 32,400 depth-only ones, for 543,753 in all, 4.20 per pixel. The cost is blur and blocky edges where particles meet geometry; Cantlay finds those edges with a Sobel filter and draws the particles again at full resolution only there.
+Tick **Particles at half resolution**: the particles shade 208,025 fragments instead of 832,100, the composite adds one per pixel (129,600) and the depth downsample 32,400 more (a small shader that only writes depth, left out of the count), for 543,753 shaded fragments in all, 4.20 per pixel. The cost is blur and blocky edges where particles meet geometry; Cantlay finds those edges with a Sobel filter and draws the particles again at full resolution only there.
 
 **Cheaper shaders.** Fragments × cost per fragment is the bill, and the slider changes the second factor without touching the first: the counts stay the same, only the time moves. Particle shaders grow: lighting, several texture reads, a fade where the particle meets geometry. When the shader is the expensive part, making it cheaper (or moving work to the vertex shader: lighting per vertex is often good enough for smoke) helps as much as fewer fragments.
 

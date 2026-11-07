@@ -1,7 +1,7 @@
 // Claims for rendering/cpu-gpu-frame-pipeline.mdx: every latency and frame rate the lesson quotes,
 // from the same deterministic model the widget draws.
 import { claim, fact, pct } from '../core';
-import { LATE_MARGIN, PIPE_DEFAULTS as D, type PipeSettings, simulate } from '../../../src/render/scenes/cpu-gpu-frame-pipeline';
+import { LATE_MARGIN, PIPE_DEFAULTS as D, type PipeSettings, WARMUP, simulate } from '../../../src/render/scenes/cpu-gpu-frame-pipeline';
 
 const ms = (x: number) => `${x.toFixed(1)} ms`;
 
@@ -10,20 +10,26 @@ export default function framePipeline(): void {
   const at = (o: Partial<PipeSettings>) => simulate({ ...D, ...o });
   const steady = (r: ReturnType<typeof simulate>) => r.latency.max - r.latency.min < 0.05;
 
-  claim(P, `It starts at ${D.hz} Hz with FIFO, ${D.inFlight} frames in flight, ${D.sim} ms of simulation, ${D.render} ms of rendering on the CPU and ${D.gpu} ms on the GPU`);
+  claim(P, `It starts at ${D.hz} Hz with FIFO, ${D.inFlight} frames in flight, ${D.images} swapchain images, ${D.sim} ms of simulation, ${D.render} ms of rendering on the CPU and ${D.gpu} ms on the GPU`);
   fact(P, D.present === 'fifo' && !D.late, 'the widget starts on FIFO without the just-in-time start');
   const d = at({});
   fact(P, steady(d) && d.latency.mean / d.T > 2.5 && d.latency.mean / d.T < 3, 'the starting latency is steady and nearly three refreshes');
   fact(P, D.sim + D.render + D.gpu < d.T, 'the work fits in a refresh');
   claim(P, `input to photon is ${ms(d.latency.mean)}, nearly three refreshes`);
-  fact(P, d.images === D.inFlight + 1, 'one swapchain image per frame in flight plus the one on screen');
+  fact(P, d.images === D.images, 'FIFO uses the chosen image count');
+  const n2 = at({ images: 2 });
+  const n4 = at({ images: 4 });
+  fact(P, steady(n2) && steady(n4), 'steady with 2 and 4 images');
+  claim(P, `**Swapchain images** set how deep the queue gets. With 2 the same work shows in ${ms(n2.latency.mean)}; with 4, ${ms(n4.latency.mean)}.`);
   const f1 = at({ inFlight: 1 });
   const f3 = at({ inFlight: 3 });
-  fact(P, steady(f1) && steady(f3), 'steady with 1 and 3 frames in flight');
-  claim(P, `With 1 the same work shows in ${ms(f1.latency.mean)}; with 3, ${ms(f3.latency.mean)}`);
+  fact(P, steady(f1) && JSON.stringify(f3.latency) === JSON.stringify(d.latency), '3 frames in flight changes nothing with 3 images');
+  // The fence never binds at the defaults: every frame's start is set by the previous submit, not by frame i − F's GPU end.
+  fact(P, d.frames.slice(WARMUP).every((f) => f.i < D.inFlight || d.frames[f.i - D.inFlight].gpuEnd < f.start - 1e-6), 'at the defaults the CPU never waits on a fence');
+  claim(P, `With 3 nothing changes; only 1, which makes the CPU wait for the GPU as well, brings it down, to ${ms(f1.latency.mean)}.`);
   const mb = at({ present: 'mailbox' });
   claim(P, `${ms(mb.latency.mean)} on average (${ms(mb.latency.min)} to ${ms(mb.latency.max)}, depending on where a frame finishes relative to the refresh). The cost is work: ${pct(100 * mb.dropped)} of the frames are drawn and never shown`);
-  fact(P, mb.images === D.inFlight + 2, 'mailbox gets one more image');
+  fact(P, mb.images === D.inFlight + 2, 'mailbox gets one image per frame in flight plus two');
   const im = at({ present: 'immediate' });
   fact(P, steady(im) && Math.abs(im.latency.mean - (D.sim + D.render + D.gpu)) < 0.5, 'immediate latency is the work alone (the CPU being slower than the GPU here, one frame overlaps)');
   claim(P, `**Immediate** shows each frame as soon as the GPU finishes it: ${ms(im.latency.mean)}, just the work itself, with the CPU and GPU running at ${Math.round(im.fps)} frames a second`);
@@ -32,8 +38,12 @@ export default function framePipeline(): void {
   claim(P, `Now make the GPU the bottleneck: ${20} ms of GPU work`);
   claim(P, `it shows ${Math.round(g.fps)} frames a second, unevenly (some frames for one refresh, some for two), and latency averages ${ms(g.latency.mean)} (${ms(g.latency.min)} to ${ms(g.latency.max)})`);
   const g1 = at({ gpu: 20, inFlight: 1 });
-  claim(P, `One frame in flight cuts latency to ${ms(g1.latency.mean)} but halves the frame rate to ${Math.round(g1.fps)}`);
-  fact(P, Math.round(g1.fps) * 2 === Math.round(D.hz), 'halves 60 to 30');
+  claim(P, `One frame in flight cuts latency to ${ms(g1.latency.mean)} on average but drops the frame rate to ${Math.round(g1.fps)}, because the CPU and GPU no longer overlap: each frame takes ${D.sim + D.render} ms of CPU, then 20 ms of GPU.`);
+  fact(P, Math.abs(g1.fps - 1000 / (D.sim + D.render + 20)) < 0.1, 'one frame in flight: one frame per CPU + GPU time');
+  const g2 = at({ gpu: 20, images: 2 });
+  fact(P, steady(g2), 'steady with 2 images and the 20 ms GPU');
+  claim(P, `Two swapchain images is worse on both counts, ${ms(g2.latency.mean)} at ${Math.round(g2.fps)} frames a second`);
+  fact(P, Math.round(g2.fps) * 2 === Math.round(D.hz), 'two images: every other refresh');
   // How long each shown frame stays on screen with the 20 ms GPU: four for one refresh, then one for two.
   const shown = g.frames.slice(60, 120).filter((f) => f.shown !== null && f.replaced !== null);
   const holds = shown.map((f) => Math.round(((f.replaced as number) - (f.shown as number)) / g.T));

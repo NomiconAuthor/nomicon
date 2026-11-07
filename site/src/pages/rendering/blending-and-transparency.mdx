@@ -12,20 +12,20 @@ Opaque surfaces have it easy: the depth buffer keeps the nearest one at each pix
 
 ## The blend equation
 
-The mixing happens in the output merger, after the fragment shader, in fixed-function hardware. It combines the shader's output (the **source**) with the colour already in the target (the **destination**):
+The mixing happens after the fragment shader, in the output merger. You configure it as fixed state, not code; desktop GPUs do it in dedicated hardware, while some mobile GPUs (Apple's among them) compile it onto the end of the fragment shader. It combines the shader's output (the **source**) with the colour already in the target (the **destination**):
 
 > result = source × *src factor* **op** destination × *dst factor*
 
-You choose the two factors and the operation (add, subtract, min, max), with a separate choice for the alpha channel. The common settings:
+You choose the two factors and the operation (add, subtract, reverse subtract, min, max; min and max ignore the factors), with a separate choice for the alpha channel. The common settings:
 
 | Blend | src factor | dst factor | result |
 |---|---|---|---|
 | Opaque | one | zero | src |
 | Alpha ("over") | src α | 1 − src α | src·α + dst·(1 − α) |
 | Premultiplied alpha | one | 1 − src α | src + dst·(1 − α) |
-| Additive | one (or src α) | one | dst + src |
+| Additive | one (or src α) | one | dst + src (or dst + src·α) |
 
-In D3D12 these are the `SrcBlend`, `DestBlend` and `BlendOp` fields of `D3D12_RENDER_TARGET_BLEND_DESC`; in Vulkan `srcColorBlendFactor`, `dstColorBlendFactor` and `colorBlendOp`; in WebGPU a `blend` with `srcFactor`, `dstFactor` and `operation`. "Over" is Porter and Duff's 1984 compositing operator: the source covers a fraction α of the pixel and lets 1 − α of the destination show through.
+In D3D12 these are the `SrcBlend`, `DestBlend` and `BlendOp` fields of `D3D12_RENDER_TARGET_BLEND_DESC`; in Vulkan `srcColorBlendFactor`, `dstColorBlendFactor` and `colorBlendOp`; in WebGPU a `blend` whose `color` and `alpha` components each have `srcFactor`, `dstFactor` and `operation`. "Over" is Porter and Duff's 1984 compositing operator: the source covers a fraction α of the pixel and lets 1 − α of the destination show through.
 
 ## Sorting
 
@@ -67,7 +67,7 @@ There's a worse problem at a distance. The fence's wire covers 23% of its area. 
 | Alpha test (≥ 0.5) | 15% | 0% |
 | Alpha to coverage | 24% | 24% |
 
-**Alpha to coverage** uses MSAA instead. The fragment's alpha decides how many of the pixel's samples it covers: at 4×, alpha 0.23 covers one sample of four. Each sample is still opaque and depth-tested on its own, so there's still no sorting, but after the resolve a pixel can be a quarter, half or three-quarters wire. The fence keeps its density at every distance, and its edges are antialiased. The widget keeps round(α × 4) samples. Real hardware chooses its own pattern of samples and usually dithers it between neighbouring pixels: Vulkan's spec says only that the number of covered samples is meant to be proportional to alpha. It needs an MSAA target, which deferred renderers often don't have. The usual fix for alpha test instead is in the asset pipeline: scale each mip level's alpha so that the same fraction of it passes the test as at full size.
+**Alpha to coverage** uses MSAA instead. The fragment's alpha decides how many of the pixel's samples it covers: at 4×, alpha 0.23 covers one sample of four. Each sample is still opaque and depth-tested on its own, so there's still no sorting, but after the resolve a pixel can be a quarter, half or three-quarters wire. The fence keeps its density at every distance, and its edges are antialiased. The widget keeps round(α × 4) samples. Real hardware chooses its own pattern of samples, and some GPUs dither it between neighbouring pixels: Vulkan's spec says only that the number of covered samples is meant to be proportional to alpha. It needs an MSAA target, which deferred renderers often don't have. The usual fix for alpha test instead is in the asset pipeline: scale each mip level's alpha so that the same fraction of it passes the test as at full size.
 
 ## Order-independent transparency, in brief
 
@@ -77,7 +77,7 @@ Sorting per object fails for intersecting and self-overlapping geometry. **Order
 - **Per-pixel lists**: every transparent fragment is appended to a linked list for its pixel (in a storage buffer, with an atomic counter), then a full-screen pass sorts and blends each pixel's list. Exact up to the memory you allow. The A-buffer idea goes back to Carpenter (1984); Yang and others built it on GPUs in 2010.
 - **Weighted blended OIT** (McGuire and Bavoil, 2013) gives up on exactness. It accumulates Σ colour·α and Σ α additively, and the product of (1 − α) separately, then composites their weighted average once. Choose **Weighted blended OIT** in the sorting widget: the picture is the same in every order, but where panes overlap it's an average, not a stack, and 318 pixels differ from the sorted answer, by up to 13%. The paper also weights each layer by its depth so nearer layers count for more; the widget weights them equally. It works best for many thin layers of similar colour, such as smoke.
 
-On D3D12 hardware, **rasterizer-ordered views** let a pixel shader read and write its pixel's data in submission order, which is what per-pixel methods such as Intel's multi-layer alpha blending build on. Most games still sort per object and avoid the cases where that fails.
+On GPUs that support them, **rasterizer-ordered views** (D3D11.3/12; fragment shader interlock in Vulkan, raster order groups in Metal) let a pixel shader read and write its pixel's data in submission order, which is what per-pixel methods such as Intel's multi-layer alpha blending build on. Most games still sort per object and avoid the cases where that fails.
 
 <Tip kind="note" title="What the widgets simplify">
 The widgets blend weights over the theme's colours instead of RGB numbers, which is the same linear maths, and don't round to an 8-bit target. Real blending happens on the stored format, so blending in an sRGB target is done in linear space and stored back as sRGB. That's another reason to blend premultiplied, linear colour.
@@ -85,7 +85,7 @@ The widgets blend weights over the theme's colours instead of RGB numbers, which
 
 ## Takeaways
 
-- Blending is fixed-function: result = src × factor **op** dst × factor. "Over" (src α, 1 − src α) needs whatever is behind to be drawn first.
+- Blending is configured as fixed state: result = src × factor **op** dst × factor. "Over" (src α, 1 − src α) needs whatever is behind to be drawn first.
 - Transparent things are drawn **back to front**, after the opaque ones, with the **depth test on and depth writes off**. Sorting by object is approximate; intersecting and self-overlapping geometry break it.
 - **Premultiplied alpha** makes filtering and blending correct; straight alpha bleeds the colour of transparent texels into edges unless the art is dilated.
 - **Alpha test** needs no sorting but aliases and vanishes in the distance; **alpha to coverage** turns alpha into MSAA coverage and keeps the density.

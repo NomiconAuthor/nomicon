@@ -38,7 +38,7 @@ export const FORMATS: Record<string, Format> = {
 export const NORMAL_FORMATS = ['rgba8unorm', 'rgb10a2unorm', 'rgba16float'];
 export const DEPTH_FORMATS = ['depth16unorm', 'depth24plus', 'depth24plus-stencil8', 'depth32float'];
 export const HDR_FORMATS = ['rg11b10ufloat', 'rgba16float', 'rgba32float'];
-/** The canvas's format: four bytes a pixel whichever of rgba8unorm or bgra8unorm the browser prefers. */
+/** The swapchain's format: four bytes a pixel (the canvas is rgba8unorm or bgra8unorm, whichever the browser prefers). The model counts it at the chosen resolution, as a game's swapchain would be; the widget's real canvas is smaller. */
 export const SWAP_BYTES = 4;
 
 export const RESOLUTIONS: Array<[number, number]> = [
@@ -129,7 +129,7 @@ export function bandwidth(s: BandwidthSettings): BandwidthResult {
   add('normal', 'G-buffer', s.normal, FORMATS[s.normal].bytes, s.normalOps, 1, m);
   add('depth', 'G-buffer', s.depth, FORMATS[s.depth].bytes, s.depthOps, s.fog ? 1 : 0, m);
   add('hdr', 'lighting', s.hdr, FORMATS[s.hdr].bytes, s.hdrOps, 1, false);
-  add('swapchain', 'post', 'the canvas', SWAP_BYTES, { load: 'clear', store: 'store' }, 0, false);
+  add('swapchain', 'post', 'swapchain image', SWAP_BYTES, { load: 'clear', store: 'store' }, 0, false);
   const total = rows.reduce((a, r) => a + r.load + r.store + r.read, 0);
   const footprint = rows.reduce((a, r) => a + px * r.bytesPerPixel, 0);
   const transient = rows.filter((r) => r.transientOk && r.name !== 'swapchain').reduce((a, r) => a + px * r.bytesPerPixel, 0);

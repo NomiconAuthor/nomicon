@@ -10,6 +10,9 @@
 }
 .rd-slider input {
   width: clamp(110px, 22vw, 220px);
+}
+.rd-lit .rd-slider input {
+  width: clamp(100px, 14vw, 190px);
   flex: 0 0 auto;
 }
 .rd-slider output {
@@ -33,9 +36,34 @@
   margin-right: 4px;
   vertical-align: -2px;
 }
-/* Side-panel plots stay modest beside the 640-px frame, however wide the panel gets. */
+/* Side-panel plots stay modest beside the 640-px frame, however wide the panel gets, so the panel
+   is no taller than the frame. */
 .rd-lit .rd-side .rd-canvas {
-  width: min(100%, 400px);
+  width: min(100%, 340px, var(--rd-max-w));
+}
+/* The backend line stays on one line; the full adapter name is in its tooltip. */
+.rd-lit-backend {
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.rd-lit-backend > .rd-gpu-switch {
+  flex: none;
+}
+.rd-lit-about {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Collapsed secondary detail in a side panel. */
+.rd-lit details > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.rd-lit details[open] > summary {
+  margin-bottom: 6px;
 }
 .rd-lit {
   --rd-side-min: 20rem;
@@ -66,4 +94,8 @@
 .ll-seg-b:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* .rd-canvas sets display, which would override the hidden attribute. */
+.rd-lit [hidden] {
+  display: none !important;
 }

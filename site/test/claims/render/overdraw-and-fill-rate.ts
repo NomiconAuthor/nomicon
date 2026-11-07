@@ -35,14 +35,15 @@ export default async function overdraw(): Promise<void> {
   // Particles.
   claim(P, `here, ${int(d.particlesCovered - d.particles)} particle fragments fail the depth test against the trees`);
   const big = at({ size: 96 });
-  claim(P, `At **96 px** the same plume shades ${int(big.shaded)} fragments, ${big.perPixel.toFixed(2)} per pixel`);
+  claim(P, `At **96 px** the plume shades ${int(big.particles)} fragments and the frame ${int(big.shaded)}, ${big.perPixel.toFixed(2)} per pixel`);
   const octagon = 2 * (Math.SQRT2 - 1);
   claim(P, `a regular octagon around the circle covers ${pct(100 * octagon)} of the square`);
   const trim = at({ shape: 'trimmed' });
   claim(P, `cuts the particle fragments from ${int(d.particles)} to ${int(trim.particles)}, ${pct((100 * trim.particles) / d.particles)}`);
   fact(P, particleCards(48, 'trimmed').every((c) => c.k >= c.hx * Math.tan(Math.PI / 8) && Number.isInteger(c.k - 0.5)), 'every octagon encloses its puff and has its cut on a half pixel');
   const half = at({ halfRes: true });
-  claim(P, `the particles shade ${int(half.particles)} fragments instead of ${int(d.particles)}, the composite adds one per pixel (${int(half.composite)}) and the depth downsample ${int(half.downsample)} depth-only ones, for ${int(half.shaded)} in all, ${half.perPixel.toFixed(2)} per pixel`);
+  claim(P, `the particles shade ${int(half.particles)} fragments instead of ${int(d.particles)}, the composite adds one per pixel (${int(half.composite)}) and the depth downsample ${int(half.downsample)} more (a small shader that only writes depth, left out of the count), for ${int(half.shaded)} shaded fragments in all, ${half.perPixel.toFixed(2)} per pixel`);
+  fact(P, half.shaded === half.opaque + half.particles + half.composite, 'the half-resolution total leaves out the depth downsample');
   for (const cost of [1, 128]) fact(P, at({ cost }).shaded === d.shaded, `the shader cost (${cost}) doesn't change the counts`);
   let heatSum = 0;
   for (const v of half.heat) heatSum += v;

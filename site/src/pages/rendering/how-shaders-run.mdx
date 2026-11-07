@@ -12,9 +12,9 @@ The lessons so far ran the fragment shader once per pixel, one after another. A 
 
 ## Waves: one instruction, many lanes
 
-A GPU core doesn't fetch instructions for each pixel. It groups invocations of the same shader into a **wave** (AMD's term; NVIDIA says **warp**, Vulkan **subgroup**) and runs them in lockstep: each instruction is fetched and issued once, and executed by every **lane** of the wave on its own data. That's SIMD, with the shader compiler writing scalar-looking code for one lane.
+A GPU core doesn't fetch instructions for each pixel. It groups invocations of the same shader into a **wave** (AMD's term; NVIDIA says **warp**, Vulkan **subgroup**) and runs them in lockstep: each instruction is fetched and issued once, and executed by every **lane** of the wave on its own data. That's SIMD: you write the shader for one lane, and the hardware runs it on all of them at once.
 
-NVIDIA's warps are 32 lanes. AMD's GCN GPUs ran waves of 64; RDNA runs 32 natively and can also run a shader as wave64, over two cycles. Intel compiles shaders for 8, 16 or 32 lanes. A shader can ask with `WaveGetLaneCount()` in HLSL or `gl_SubgroupSize` in GLSL. For pixel shaders, a wave is made of whole 2 × 2 quads (the [textures lesson](/rendering/textures-and-sampling/) explained why quads): 8 of them for 32 lanes, 16 for 64.
+NVIDIA's warps are 32 lanes. AMD's GCN GPUs ran waves of 64; RDNA runs 32 natively and can also run a shader as wave64, over two cycles. Intel compiles shaders for 16 or 32 lanes (8, 16 or 32 before Xe2). A shader can ask with `WaveGetLaneCount()` in HLSL or `gl_SubgroupSize` in GLSL. For pixel shaders, a wave is made of whole 2 × 2 quads (the [textures lesson](/rendering/textures-and-sampling/) explained why quads): 8 of them for 32 lanes, 16 for 64.
 
 ## Branches: both sides, masked
 
@@ -69,7 +69,7 @@ The widget cuts one 32 × 32-pixel square into more and more triangles. The pixe
 | 512 | 512 | 2,048 | 1,024 | 50% |
 | 2,048 | 1,024 | 4,096 | 3,072 | 25% |
 
-At 2,048 triangles each covers half a pixel on average, and 1,024 of them cover no pixel centre at all. Every one that does launches its own quad for its single pixel: four lanes to shade one. Fatahalian and others measured the same effect on real hardware, and proposed merging quads from neighbouring triangles, which cut shading work for pixel-sized triangles by a factor of eight.
+At 2,048 triangles each covers half a pixel on average, and 1,024 of them cover no pixel centre at all. Every one that does launches its own quad for its single pixel: four lanes to shade one. Fatahalian and others quantified the same overshading and proposed merging quads from neighbouring triangles in hardware; in their evaluation that cut shading work for pixel-sized triangles by a factor of eight.
 
 This is the cost behind level of detail for meshes: drawing a distant object with fewer, larger triangles saves pixel shading, not just vertex work. It's also part of why Nanite rasterises small triangles in a compute shader into a visibility buffer and shades the pixels in a later pass, where quads come from the screen rather than from triangles.
 

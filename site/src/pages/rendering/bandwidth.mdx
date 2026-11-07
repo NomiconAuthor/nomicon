@@ -25,15 +25,15 @@ A format's size is its bytes per pixel times the pixels. The usual ones:
 | `depth24plus-stencil8` | `D24_UNORM_S8_UINT` | `D24_UNORM_S8_UINT` | 4 | depth and stencil, packed |
 | `depth32float` | `D32_FLOAT` | `D32_SFLOAT` | 4 | depth, and reverse-Z |
 
-`rg11b10ufloat` is the HDR workhorse: three small floats (6-bit mantissas for red and green, 5-bit for blue, a 5-bit exponent each, no sign) in the space of an RGBA8 pixel, half the size of `rgba16float`. It can't hold negative values or alpha. WebGPU's `depth24plus` is "at least 24 bits", and it and `depth24plus-stencil8` leave the real format to the implementation, which may use a 32-bit float (some GPUs have no packed 24-bit depth with stencil at all); the widget's model counts them as 4 bytes. The [depth lesson](/rendering/depth/#precision-and-z-fighting) covers what each depth format does to precision.
+`rg11b10ufloat` is the HDR workhorse: three small floats (6-bit mantissas for red and green, 5-bit for blue, a 5-bit exponent each, no sign) in the space of an RGBA8 pixel, half the size of `rgba16float`. It can't hold negative values or alpha. In WebGPU you can render to it only on devices created with the optional `rg11b10ufloat-renderable` feature (WebGL2 needs `EXT_color_buffer_float`). WebGPU's `depth24plus` is "at least 24 bits", and it and `depth24plus-stencil8` leave the real format to the implementation, which may use a 32-bit float (some GPUs have no packed 24-bit depth with stencil at all); the widget's model counts them as 4 bytes. The [depth lesson](/rendering/depth/#precision-and-z-fighting) covers what each depth format does to precision.
 
 ## A frame's bandwidth
 
-The widget draws a small deferred frame on your GPU in three passes, all at the resolution you pick (not the canvas's, so the bytes are real):
+The widget draws a small deferred frame on your GPU in three passes. The first two run at the resolution you pick, not the canvas's, so their bytes are real:
 
 1. **G-buffer:** the [pipeline lesson's](/rendering/the-pipeline/) floor and box, writing albedo (`rgba8unorm`), a normal and depth.
 2. **Lighting:** one full-screen triangle reads albedo and normal, and depth for fog, and writes lit HDR colour.
-3. **Post:** one full-screen triangle tone-maps the HDR colour onto the canvas.
+3. **Post:** one full-screen triangle tone-maps the HDR colour onto the widget's small canvas. The model counts it as a full-size swapchain image, as a game's would be.
 
 Each attachment has a **load op**, what happens to it when the pass starts, and a **store op**, what happens when it ends. In WebGPU they're part of the pass descriptor:
 
@@ -47,11 +47,11 @@ encoder.beginRenderPass({
 });
 ```
 
-`load` reads the attachment's old contents in; `clear` starts from a constant and reads nothing. `store` writes the result out; `discard` throws it away. The model beside the widget counts what that moves: a load reads the whole attachment, a store writes it, a later pass that samples it reads it once. That's exactly the render-target traffic of a tile-based GPU (below). On a desktop GPU it's a lower bound, since overdraw, blending and depth tests add traffic their caches only partly absorb, and compression takes some away.
+`load` reads the attachment's old contents in; `clear` starts from a constant and reads nothing. `store` writes the result out; `discard` throws it away. The model in the widget counts what that moves: a load reads the whole attachment, a store writes it, a later pass that samples it reads it once. That's exactly the render-target traffic of a tile-based GPU (below). On a desktop GPU it's a lower bound, since overdraw, blending and depth tests add traffic their caches only partly absorb, and compression takes some away.
 
 <RenderWidget kind="bandwidth" />
 
-At 1920 × 1080 with the starting formats the frame moves 107.8 MB, 6.47 GB/s at 60 frames a second. The G-buffer pass stores 33.2 MB (albedo 8.3, normal 16.6, depth 8.3), the lighting pass reads all of it back and writes 16.6 MB of HDR colour, and the post pass reads that and writes 8.3 MB to the canvas. Everything is written once and read once, so the formats decide most of it:
+At 1920 × 1080 with the starting formats the frame moves 107.8 MB, 6.47 GB/s at 60 frames a second. The G-buffer pass stores 33.2 MB (albedo 8.3, normal 16.6, depth 8.3), the lighting pass reads all of it back and writes 16.6 MB of HDR colour, and the post pass reads that and writes 8.3 MB to the swapchain image. Everything is written once and read once, so the formats decide most of it:
 
 - A `rgb10a2unorm` normal instead of `rgba16float`, or `rg11b10ufloat` HDR instead of `rgba16float`, each saves 16.6 MB: 91.2 MB a frame.
 - `rgba32float` HDR costs 141.0 MB.
@@ -81,13 +81,13 @@ The model in the widget ignores compression; how much it saves depends on the co
 
 Phones, tablets and Apple silicon Macs use **tile-based** GPUs. They split the target into small tiles, first work out which triangles touch each tile, then render one tile at a time into **tile memory**: fast storage on the GPU itself. Apple's documentation describes tile memory as having [many times the bandwidth, a fraction of the latency and much less energy per access](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering) than device memory. Only when a tile is finished is its result written out.
 
-So on a tile-based GPU the load and store ops are the bandwidth. A `clear` costs nothing (the tile starts from a constant), a `load` copies the attachment in from memory tile by tile, a `store` copies it out, a `discard` skips that. Apple's guidance is blunt: [choose "don't care" or clear unless you need the previous contents, and don't store depth you won't read](https://developer.apple.com/documentation/metal/setting-load-and-store-actions). Every API has the same switches under different names:
+So on a tile-based GPU the load and store ops are the render-target bandwidth. A `clear` reads nothing from memory (the tile starts from a constant), a `load` copies the attachment in from memory tile by tile, a `store` copies it out, a `discard` skips that. Apple's guidance is blunt: [choose "don't care" or clear unless you need the previous contents, and don't store depth you won't read](https://developer.apple.com/documentation/metal/setting-load-and-store-actions). Every API has the same switches under different names:
 
 | | Start of pass | End of pass |
 |---|---|---|
 | WebGPU | `loadOp`: `clear`, `load` | `storeOp`: `store`, `discard` |
 | Metal | `loadAction`: `clear`, `load`, `dontCare` | `storeAction`: `store`, `dontCare`, `multisampleResolve`, … |
-| Vulkan | `loadOp`: `CLEAR`, `LOAD`, `DONT_CARE` | `storeOp`: `STORE`, `DONT_CARE` |
+| Vulkan | `loadOp`: `CLEAR`, `LOAD`, `DONT_CARE` (and `NONE`) | `storeOp`: `STORE`, `DONT_CARE`, `NONE` |
 | D3D12 render passes | `D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR`, `_PRESERVE`, `_DISCARD` | `D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE`, `_DISCARD`, `_RESOLVE` |
 | OpenGL ES, WebGL2 | `glClear` | `glInvalidateFramebuffer` |
 
@@ -106,7 +106,7 @@ On a desktop GPU, render-target traffic at this size is a small share of the tim
 - **Bandwidth is bytes per pixel × pixels × passes that touch them.** Pick the smallest format that holds what you need: `rg11b10ufloat` for HDR colour, 10-bit normals, 32-bit depth.
 - **Load and store ops** say what a pass moves: clear rather than load, discard what nobody reads. Discard something that is read and you read garbage.
 - **Framebuffer compression** (DCC, AFBC) saves bandwidth, not memory, and only when you don't stop it: no needless storage usage, simple clear values.
-- **Tile-based GPUs** render into tile memory, and only the ops cost bandwidth. Memoryless and transient attachments need no memory at all, and merging passes keeps whole G-buffers on chip.
+- **Tile-based GPUs** render into tile memory, and only the ops cost render-target bandwidth. Memoryless and transient attachments need no memory at all, and merging passes keeps whole G-buffers on chip.
 
 ## Further reading
 

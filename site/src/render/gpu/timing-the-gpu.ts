@@ -254,11 +254,6 @@ class TimingGl2 implements TimingRenderer {
     gl.useProgram(this.work);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, s.layers);
     this.timer.end(gl);
-    const t1 = performance.now();
-    // Make the CPU wait for the work pass: reading a pixel can't return before the GPU has drawn it.
-    this.log.tagged('readback', () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.pixel));
-    const t2 = performance.now();
-    const done = t2 - t0;
     this.timer.begin(gl);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -268,8 +263,12 @@ class TimingGl2 implements TimingRenderer {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.timer.end(gl);
     this.timer.submitted(gl);
-    // The CPU's own time in the calls, not counting the wait in readPixels.
-    const cpu = t1 - t0 + (performance.now() - t2);
+    // The CPU's own time in the calls.
+    const cpu = performance.now() - t0;
+    // Make the CPU wait for both passes, as onSubmittedWorkDone does on WebGPU: reading a pixel of
+    // the presented image can't return before the GPU has drawn it (and the work pass it samples).
+    this.log.tagged('readback', () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.pixel));
+    const done = performance.now() - t0;
     return { plan, timed, cpu, done: Promise.resolve(done) };
   }
 

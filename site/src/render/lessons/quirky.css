@@ -17,6 +17,14 @@
   color: var(--ink);
   min-width: 5.5em;
 }
+/* On a phone the packer table wraps its headers rather than scrolling sideways. */
+@container rd (max-width: 560px) {
+  .rq-tab th,
+  .rq-tab td {
+    padding: 3px 4px;
+    white-space: normal;
+  }
+}
 .rq-tab tr.on td,
 .rq-tab tr.on th {
   color: var(--accent);

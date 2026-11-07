@@ -67,5 +67,5 @@ export default async function batching(): Promise<void> {
     fact(P, stateChanges(planFor('static', side)).draws === 4 && stateChanges(planFor('instanced', side)).draws === 12, `at ${side * side} objects: still 4 static batches and 12 instanced draws`);
   }
   claim(P, `the last two stay at ${s.static.draws} and ${s.instanced.draws} draws`);
-  claim(P, `At ${int(n)} objects the WebGPU buffer is ${bytesText(mem.constants)}, mostly padding.`);
+  claim(P, `At ${int(n)} objects the per-object blocks take ${bytesText(mem.constants)}, mostly padding.`);
 }

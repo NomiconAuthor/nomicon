@@ -8,10 +8,11 @@
  * them:
  *   - Frames in flight F: the CPU may not start frame i until the GPU has finished frame i − F
  *     (the fence wait every Vulkan / D3D12 renderer has).
- *   - Swapchain images: F + 1 (one on screen, one per frame in flight) for FIFO and immediate;
- *     F + 2 for mailbox, which needs a spare so it never blocks. The CPU acquires an image before
- *     it records rendering and waits there if none is free. In FIFO an image comes free when the
- *     frame after it reaches the screen; in immediate, as soon as the next frame replaces it.
+ *   - Swapchain images N, a separate setting (as in Vulkan and DXGI), for FIFO and immediate.
+ *     Mailbox gets at least F + 2, so it never blocks. The CPU acquires an image before it records
+ *     rendering and waits there if none is free. In FIFO an image comes free when the frame after
+ *     it reaches the screen; in immediate, as soon as the next frame replaces it. With FIFO and a
+ *     fast CPU it's this wait, not the fence, that usually holds the CPU back.
  *   - Present modes: FIFO shows one new frame per refresh, in order, never tearing. Mailbox shows
  *     the newest finished frame at each refresh and drops older unshown ones. Immediate shows a
  *     frame the moment the GPU finishes (tearing).
@@ -36,11 +37,13 @@ export interface PipeSettings {
   gpu: number;
   /** How many frames the CPU may get ahead of the GPU. */
   inFlight: number;
+  /** Swapchain images (FIFO and immediate; mailbox uses at least inFlight + 2). */
+  images: number;
   present: PresentMode;
   /** Start each frame just in time instead of as soon as possible. */
   late: boolean;
 }
-export const PIPE_DEFAULTS: PipeSettings = { hz: 60, sim: 4, render: 3, gpu: 6, inFlight: 2, present: 'fifo', late: false };
+export const PIPE_DEFAULTS: PipeSettings = { hz: 60, sim: 4, render: 3, gpu: 6, inFlight: 2, images: 3, present: 'fifo', late: false };
 export const LATE_MARGIN = 1;
 export const FRAMES = 160;
 /** Frames before this are warm-up; statistics use the rest. */
@@ -92,7 +95,7 @@ const vblank = (t: number, T: number) => Math.ceil(t / T - EPS) * T;
 export function simulate(s: PipeSettings): PipeResult {
   const T = 1000 / s.hz;
   const F = s.inFlight;
-  const images = s.present === 'mailbox' ? F + 2 : F + 1;
+  const images = s.present === 'mailbox' ? Math.max(s.images, F + 2) : s.images;
   const fr: FrameTimes[] = [];
   let cpuFree = 0;
   let gpuFree = 0;
