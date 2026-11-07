@@ -141,7 +141,7 @@ export function describe(ev: TraceEvent, s: Session, types: (table: number) => s
         title: `Hook ${ev.event.replace('On', 'on_').toLowerCase()} for ${ev.id}${ev.entity ? ` on ${n(ev.entity)}` : ''}`,
         fn: 'flecs_invoke_hook',
         tone: 'callback',
-        why: 'Component hooks are per-component callbacks (one per hook kind) that run before observers. flecs uses them itself, for example to keep the name index in sync with (Identifier, Name).',
+        why: 'Component hooks are per-component callbacks (one per hook kind). On add and set they run before observers, on remove after them. flecs uses them itself, for example to keep the name index in sync with (Identifier, Name).',
       };
     case 'flushBegin':
       return {

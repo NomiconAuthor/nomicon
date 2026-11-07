@@ -85,7 +85,7 @@ The merge always happens on the main thread, while the workers wait. It applies 
 **`set_task_threads(n)`** gives you the same stages and the same schedule, but the `n − 1` workers aren't long-lived OS threads. At the start of each `progress()`, flecs creates them through the OS API's `task_new_` callback, and at the end it joins them with `task_join_`. Point those callbacks at your own job system and flecs borrows its workers for the frame. Your job system must be able to run all `n − 1` tasks at once, for the whole `progress()` call, because they wait for each other at every merge.
 
 <Tip kind="warn" title="This page runs single-threaded">
-The flecs on this site is compiled for WebAssembly without threads, so the debugger can't show workers. The drawing above is an illustration. The schedule, the 4, 3, 3 split and the stage-order merge come from the flecs source, and were checked against a native build of the same commit.
+The flecs on this site is compiled for WebAssembly without threads, so the debugger can't show workers. The drawing above is an illustration. The schedule, the 4, 3, 3 split and the stage-order merge come from the flecs source, and were checked against a native build of the same version.
 </Tip>
 
 ## Immediate systems
