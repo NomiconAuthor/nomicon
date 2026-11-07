@@ -1,0 +1,91 @@
+---
+layout: ../../layouts/Lesson.astro
+title: The pipeline and the draw call
+order: 1
+part: Pipeline fundamentals
+summary: 'What happens between a draw call and the pixels it changes: vertex shading, primitive assembly, clipping at the near plane, culling, rasterisation, fragment shading and the output merger, stepped one vertex, triangle and pixel at a time.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A GPU draws a frame as a list of **draw calls**. Each one says: take these vertices, join them into triangles this way, and run these shaders on them with this state. Between the call and the pixels it changes sits a fixed sequence of stages, and the APIs (D3D12, Vulkan, Metal, WebGPU) all describe it the same way.
+
+These lessons build it up on a small software rasteriser written for this site. It does the steps a GPU does, in the order the APIs define, but one at a time, so you can stop it after any vertex, triangle or pixel. A real GPU runs thousands of them at once; the [last section](#what-a-real-gpu-does-differently) says what that changes.
+
+## What a draw call is
+
+By the time you draw, you've already set up **state**: the shaders, the layout of the vertex data, how triangles are culled, how depth is tested and how colours blend (in D3D12 and Vulkan most of that is baked into one **pipeline state object**), plus the buffers and textures the shaders read. The draw call itself is mostly counts:
+
+```cpp
+// D3D12: 36 indices, one instance, starting at index 0, no offset added to the indices.
+cmd->SetPipelineState(opaque_pso);
+cmd->IASetVertexBuffers(0, 1, &box_vertices);
+cmd->IASetIndexBuffer(&box_indices);
+cmd->DrawIndexedInstanced(36, 1, 0, 0, 0);
+
+// Vulkan and WebGPU take the same five numbers:
+// vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);   pass.drawIndexed(36, 1, 0, 0, 0);
+```
+
+An **index buffer** lets triangles share vertices: three indices per triangle, each picking a vertex from the vertex buffer. The box in the widget below has 24 vertices (four per face, because each face has its own shade) and 36 indices for its 12 triangles.
+
+The call is cheap for the GPU to start and comparatively expensive for the CPU to issue: the driver validates state and writes commands for every one. That's why engines batch and instance, which a later lesson covers.
+
+## Step through a frame
+
+The scene is two draw calls: a floor that runs behind the camera, and a box. **Next vertex**, **Next triangle** and **Next pixel** each run the pipeline to the next step of that kind; **Whole frame** finishes it. The second view shows the scene from above, with the near plane in red.
+
+<RenderWidget kind="pipeline" />
+
+## Vertex shader
+
+The vertex shader runs once per vertex and must output a **clip-space position**: four numbers *x*, *y*, *z*, *w*. For a perspective camera, *w* is the distance in front of the camera, and *x*, *y* and *z* are scaled so that dividing by *w* gives **normalised device coordinates**: *x* and *y* from −1 to 1 across the screen, and depth from 0 to 1 in D3D, Vulkan and WebGPU (OpenGL defaults to −1 to 1). Step through the vertices and watch *w*: the floor's two near corners are behind the camera, with negative *w*.
+
+This frame has 28 vertex shader runs: the floor's 4 and the box's 24. That's once per vertex here. A GPU shades vertices in batches and reuses results for repeated indices within a batch, so a vertex shared by many triangles can still be shaded more than once; ordering indices so that shared vertices are close together (as meshoptimizer does) reduces that.
+
+## Primitive assembly, clipping and culling
+
+**Primitive assembly** reads the indices three at a time and makes triangles. 14 triangles go in. Each then goes through three cheap tests before any pixel is touched:
+
+1. **Trivial reject.** If all three vertices are outside the same edge of the view, the triangle is dropped.
+2. **Clipping.** A triangle that crosses the **near plane** must be cut there. Behind the camera *w* is zero or negative, and dividing by it flips or explodes the position. Clipping a triangle against a plane leaves a polygon of three or four corners, which is split back into triangles. Here both floor triangles cross the near plane and come out as 3 triangles. The sides of the screen are usually *not* clipped: the rasteriser only visits pixels inside the target anyway, so a triangle hanging off the side costs nothing extra. That margin is the **guard band**, and only triangles that go far outside it need real clipping.
+3. **Back-face culling.** After the divide, the triangle's winding on screen says which way it faces. This rasteriser treats counter-clockwise as front-facing, as OpenGL and WebGPU do by default (D3D defaults to clockwise, and Vulkan makes you choose). 6 of the box's 12 face away from the camera, and are dropped. Untick **Cull back faces** and they're drawn too, only to be hidden by the front faces: 1826 fragments, 62 of which fail the depth test, against 1722 fragments with culling on.
+
+Set the near plane to **4.6 m**. It now cuts through the box as well: 7 of the 14 triangles are clipped, into 13. The box opens up, and with culling on you see straight through it to the floor, because its far side faces away. That's the near plane eating into geometry: the same thing happens when a camera backs into a wall.
+
+<Tip title="Depth clamp">
+Clipping at the far plane is optional on modern APIs: with **depth clamp** (D3D's `DepthClipEnable = FALSE`, Vulkan's `depthClampEnable`), geometry beyond it is drawn at the far depth instead of cut off. Shadow maps use it so that casters between the light and the shadow frustum aren't lost. The near plane still has to be clipped or handled in the rasteriser, because of the divide.
+</Tip>
+
+## Rasterisation
+
+The surviving triangles are divided by *w*, mapped to pixels by the **viewport transform**, and snapped to a fixed-point grid. Then the **rasteriser** finds which pixel centres each triangle covers: 9 triangles reach the rasteriser, and between them they produce 1722 fragments. Each covered pixel becomes a **fragment** with its own depth and its own copy of the vertex outputs, interpolated. How the rasteriser decides coverage, and how it interpolates, is the [next lesson](/rendering/rasterisation/).
+
+## Fragment shader
+
+The **fragment shader** (D3D calls it the pixel shader) runs once per fragment and returns a colour. Here it reads the face's shade, or picks a checker square from the floor's texture coordinates. In a game this is usually where most of the GPU's time goes: lighting, texture reads, materials.
+
+## Output merger
+
+Last, the **output merger** decides what the fragment does to the target. It runs the **depth test** (is this fragment nearer than what's there?) and the stencil test, then **blends** the colour with what's already in the target (or replaces it) and writes depth. The widget draws the floor first and then the box, which is nearer everywhere it overlaps, so nothing fails the depth test with culling on.
+
+The API puts the depth test after the fragment shader. In practice GPUs run it **before** the shader whenever the result can't change, so hidden fragments are never shaded: the widget does this, and says "discarded before shading (early Z)" when it happens. [Depth](/rendering/depth/) covers when that's allowed.
+
+## What a real GPU does differently
+
+The order above is what the APIs promise, not how the hardware schedules it. Fabian Giesen's [*A trip through the graphics pipeline*](https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/) is the standard tour; the short version:
+
+- **Everything is in flight at once.** Thousands of vertices and fragments are shaded in parallel across many cores. What the API guarantees is that the *results* land as if triangles were drawn in order: blending and depth writes for one pixel happen in submission order.
+- **Shading happens in 2 × 2 quads.** The rasteriser hands out pixels in groups of four, so the shader can compare neighbours to compute texture derivatives. A triangle that covers one pixel of a quad still costs four shader lanes.
+- **Coverage is hierarchical.** Rasterisers test tiles (8 × 8 pixels, say) against the edges first, and only go down to pixels in tiles that are partly covered. Depth has a coarse per-tile copy too (hierarchical Z), to reject whole tiles at once.
+- **Mobile GPUs bin first.** Tile-based GPUs sort triangles into screen tiles, then render each tile entirely in on-chip memory, to save bandwidth to the main memory.
+- **The front end can be programmable too.** Tessellation and geometry shaders sit between the vertex shader and the rasteriser on desktop APIs, and **mesh shaders** replace the vertex stages with compute-like shaders that output small batches of triangles.
+
+None of that changes what a frame looks like, which is why stepping a sequential rasteriser is a fair way to learn it.
+
+## Takeaways
+
+- A **draw call** is state you set earlier plus counts: how many indices, from where, how many instances.
+- **Vertex shader**: clip-space position out; *w* is the distance in front of the camera.
+- **Primitive assembly** makes triangles; the **near plane** must be clipped because of the divide; the sides are left to the **guard band**; **back faces** are culled by their winding on screen.
+- The **rasteriser** turns triangles into fragments; the **fragment shader** colours them; the **output merger** depth-tests, blends and writes, in submission order.

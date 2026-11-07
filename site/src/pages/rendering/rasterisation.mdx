@@ -1,0 +1,90 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Rasterisation
+order: 2
+part: Pipeline fundamentals
+summary: 'How a GPU decides which pixels a triangle covers and what values they get: edge functions on a fixed-point grid, the top-left rule that keeps shared edges watertight, barycentrics, perspective-correct interpolation, and what MSAA samples and what it shades.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The rasteriser gets a triangle as three points in pixel coordinates and has to answer two questions for every pixel near it: does the triangle **cover** this pixel, and if so, what are the vertex outputs **here**? Both answers come from the same three numbers per pixel, the **edge functions**.
+
+## Edge functions
+
+Take one edge of the triangle, from *a* to *b*. For any point *p*,
+
+> *E*(*p*) = (*b*<sub>x</sub> − *a*<sub>x</sub>)(*p*<sub>y</sub> − *a*<sub>y</sub>) − (*b*<sub>y</sub> − *a*<sub>y</sub>)(*p*<sub>x</sub> − *a*<sub>x</sub>)
+
+is zero on the line through the edge, positive on one side and negative on the other. It's twice the signed area of the triangle *a*, *b*, *p*. Order the vertices so the inside is positive for all three edges, and a point is inside the triangle exactly when all three are positive. This is Juan Pineda's 1988 formulation, and it's what hardware does: each *E* is linear in *x* and *y*, so stepping one pixel right adds a constant, and many pixels can be tested at once.
+
+**Next pixel** walks the triangle's bounding box and shows the three values at each pixel centre. Drag a corner to move it.
+
+<RenderWidget kind="raster" />
+
+Before any of this, the vertex positions are **snapped to a fixed-point grid**. D3D's rasteriser uses 16.8 fixed point: 8 bits below the pixel, so positions land on 1/256 of a pixel (Vulkan reports its precision as `subPixelPrecisionBits`, and requires at least 4). The widget does the same. From there the edge functions are exact integer arithmetic, and that's what makes the next part possible.
+
+## The top-left rule
+
+Two triangles that share an edge must between them cover every pixel along it **exactly once**. Covered twice, a transparent surface would blend twice along the seam; covered by neither, the background shows through as a crack. The trouble is pixel centres that lie *exactly* on the shared edge, where *E* = 0 for both triangles.
+
+The **Shared edge** preset is a quad split along a 45° diagonal that passes through nine pixel centres. A's top edge and B's bottom edge also run through centres.
+
+- **Include edges** (*E* ≥ 0): 9 pixels are drawn twice, all on the diagonal.
+- **Exclude edges** (*E* > 0): 16 pixels are drawn by neither: the diagonal, and A's top edge.
+- **Top-left**: A covers 37 pixels and B covers 38, none twice, none missed.
+
+The **top-left rule**, which D3D specifies exactly, settles a tie by the edge: a centre on an edge counts only if it's a **top edge** (exactly horizontal, with the triangle below it) or a **left edge** (the triangle is to its right). A shared edge is a left edge for one triangle and a right edge for the other, so exactly one of them takes it. Step through the diagonal and the readout says which rule decided each pixel. OpenGL and Vulkan don't fix the rule, only that ties are broken consistently so shared edges are drawn once; in practice the hardware is the same.
+
+The rule only works because the arithmetic is exact. With floating-point edge functions, the two triangles could compute slightly different values at the same point, and the guarantee would be gone. That's the reason for snapping.
+
+In an integer rasteriser the rule costs nothing: subtract 1 from the edge functions of edges that aren't top or left, once at setup, then test ≥ 0 everywhere. On an integer grid, *E* − 1 ≥ 0 is the same as *E* > 0.
+
+```cpp
+// Setup, once per triangle: inside is positive, y points down.
+bool top_left(Vec2i a, Vec2i b) { return (a.y == b.y && b.x > a.x) || a.y > b.y; }
+int bias0 = top_left(v1, v2) ? 0 : -1;   // likewise for the other two edges
+
+// Per pixel (or per sample): three integer evaluations.
+int w0 = edge(v1, v2, p) + bias0;
+int w1 = edge(v2, v0, p) + bias1;
+int w2 = edge(v0, v1, p) + bias2;
+if ((w0 | w1 | w2) >= 0) shade(p, w0, w1, w2);
+```
+
+## Barycentrics
+
+The edge functions also say where in the triangle the pixel is. Divide each by the triangle's area and you have the **barycentric coordinates**: λ<sub>0</sub>, λ<sub>1</sub>, λ<sub>2</sub>, which sum to 1, and each is the weight of one vertex. Vertex 0's weight is the edge function of the edge *opposite* it: 1 at vertex 0, 0 along that edge. Any vertex output is then interpolated as λ<sub>0</sub>·*a*<sub>0</sub> + λ<sub>1</sub>·*a*<sub>1</sub> + λ<sub>2</sub>·*a*<sub>2</sub>. Step a covered pixel and the readout shows them.
+
+## Perspective-correct interpolation
+
+There's a catch. The rasteriser works in screen space, after the divide by *w*, and perspective doesn't preserve proportions: halfway across a triangle on screen is not halfway across it in the world. A floor tile further away is squeezed, so screen-space weights put texture coordinates in the wrong place.
+
+The fix is to interpolate in screen space only things that *are* linear there. After the divide, *a*/*w* and 1/*w* are linear in screen space. So the rasteriser interpolates *a*/*w* and 1/*w* with the screen-space barycentrics, and divides one by the other per pixel. Written as weights: multiply each λ by its vertex's 1/*w*, then renormalise so they sum to 1 again.
+
+<RenderWidget kind="perspective" />
+
+Switch to **Affine** and the checkerboard bends: each of the two triangles stretches the texture linearly across the screen, and the seam between them shows down the middle. That's the warping texture of PlayStation 1 games, whose hardware interpolated this way. Here 711 of the floor's 1,496 pixels pick the wrong colour, and texture coordinates are out by up to 10.9 squares near the horizon. Step a pixel to see both sets of weights and both answers.
+
+GPUs interpolate perspective-correctly by default. HLSL's `noperspective` (GLSL's `noperspective`, WGSL's `@interpolate(linear)`) asks for screen-space interpolation, which is right for things that really are screen-space, such as a post-process's pixel position. Depth is the exception that needs no correction: what's stored is *z*/*w*, which is already linear in screen space, so it's interpolated with the plain λ. That fact matters in the [depth lesson](/rendering/depth/).
+
+## MSAA: coverage per sample, shading per pixel
+
+One sample per pixel makes every edge a staircase, and thin triangles flicker as they move, because they hit some pixel centres and slip between others. Pick **Sliver and speck**: the long sliver covers only 4 pixels, in a broken line, and the small triangle covers none, because it misses every centre.
+
+**Multisample anti-aliasing** tests coverage at several **sample** positions in each pixel instead of one. Switch to **4× MSAA**: the dots move to the four standard positions D3D and Vulkan define for 4× (a rotated grid, so no two share a row or a column). Depth is tested and stored per sample too. The sliver now covers 29 samples and the speck 1.
+
+What MSAA doesn't do is shade per sample. The fragment shader runs **once per pixel per triangle**, at the pixel centre, and its colour is written to whichever of that triangle's samples are covered. At the end the samples are averaged (**resolved**) into one colour per pixel. So MSAA smooths edges, where coverage changes inside a pixel, and costs little in the middle of triangles. On the shared-edge quad, 32 pixels are partly covered, and the fragment shader runs 100 times, against 75 without MSAA: the extra runs are pixels on the edges where both triangles, or a triangle and the background, share a pixel. That's the cost of MSAA, and it grows with the number of edges, which is why lots of tiny triangles make it expensive.
+
+<Tip title="Centroid">
+Shading at the pixel centre means a partly covered pixel can evaluate attributes at a point *outside* the triangle: extrapolation. Usually harmless, it can sample the wrong part of a texture atlas or produce a negative lighting term. The `centroid` qualifier moves the evaluation point inside the covered samples.
+</Tip>
+
+Deferred renderers, which shade from G-buffers after rasterisation, don't get MSAA's cheap edges for free, and most games today use temporal anti-aliasing instead. The lighting lessons come back to that.
+
+## Takeaways
+
+- Coverage is three **edge functions** per pixel, evaluated on positions **snapped to fixed point** (1/256 pixel in D3D).
+- The **top-left rule** gives every pixel on a shared edge to exactly one triangle; exact integer maths is what makes that possible.
+- Edge functions over the area are the **barycentrics**; interpolate *a*/*w* and 1/*w* with them for **perspective-correct** attributes. Depth (*z*/*w*) is already linear on screen.
+- **MSAA** tests coverage and depth per sample but shades once per pixel per triangle, so it costs extra only along edges.

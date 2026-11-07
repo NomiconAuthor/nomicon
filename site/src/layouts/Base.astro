@@ -20,15 +20,16 @@ interface Props {
   title: string;
   description?: string;
   /** Which navbar entry is current. */
-  section?: 'engine' | 'flecs' | 'ai' | 'physics' | 'network' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'feel-lab' | 'home';
+  section?: 'engine' | 'flecs' | 'ai' | 'physics' | 'rendering' | 'network' | 'labs' | 'pathing-lab' | 'tactics-lab' | 'feel-lab' | 'home';
 }
-const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, physics, networking, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
+const { title, description = 'Interactive explainers for game programmers: engine fundamentals, flecs, game AI, physics, rendering, networking, pathfinding and tactical analysis.', section = 'home' } = Astro.props;
 const fullTitle = section === 'home' ? title : `${title} · nomicon`;
 const nav = [
   { id: 'engine', label: 'engine', href: '/engine/' },
   { id: 'flecs', label: 'flecs', href: '/flecs/' },
   { id: 'ai', label: 'ai', href: '/ai/' },
   { id: 'physics', label: 'physics', href: '/physics/' },
+  { id: 'rendering', label: 'rendering', href: '/rendering/' },
   { id: 'network', label: 'network', href: '/network/' },
   { id: 'labs', label: 'labs', href: '/labs/' },
 ];

@@ -1,0 +1,116 @@
+/* Rendering lesson widgets. Colours come from the theme tokens. */
+.rd-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.rd-two {
+  display: grid;
+  grid-template-columns: minmax(0, 16fr) minmax(0, 9fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 760px) {
+  .rd-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rd-top {
+    max-width: 260px;
+  }
+}
+.rd-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  counter-reset: stage;
+}
+.rd-stages li {
+  counter-increment: stage;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.rd-stages li::before {
+  content: counter(stage) '. ';
+}
+.rd-stages li.on {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.rd-say {
+  margin: 0;
+  color: var(--body);
+  min-height: 2.6em;
+}
+.rd-draws {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  color: var(--body);
+}
+.rd-draws li {
+  padding: 2px 8px;
+  border-left: 3px solid transparent;
+}
+.rd-draws li.on {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.rd-draws b {
+  color: var(--ink);
+  font-weight: 500;
+}
+.rd-read p {
+  margin: 0 0 6px;
+}
+.rd-read {
+  overflow-x: auto;
+}
+.rd-tab {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  min-width: 100%;
+}
+.rd-tab th,
+.rd-tab td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  white-space: nowrap;
+}
+.rd-tab td {
+  font-family: var(--f-mono);
+  color: var(--ink);
+}
+.rd-tab th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.rd-chart {
+  max-height: 260px;
+}
+.rd-heat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.rd-heat-legend i.h1 {
+  background: color-mix(in srgb, var(--ink) 25%, var(--bg));
+}
+.rd-heat-legend i.h2 {
+  background: color-mix(in srgb, var(--warn) 70%, var(--bg));
+}
+.rd-heat-legend i.h3 {
+  background: var(--alert);
+}
