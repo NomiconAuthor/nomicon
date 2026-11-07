@@ -105,7 +105,7 @@ export type RasterPreset = 'shared' | 'sliver';
 /** Vertex positions in pixels for each preset: two triangles, A then B. */
 export function rasterPoints(p: RasterPreset): Array<[number, number]> {
   if (p === 'shared')
-    // A quad split along a 45° diagonal that runs exactly through eight pixel centres. A's top
+    // A quad split along a 45° diagonal that runs exactly through nine pixel centres. A's top
     // edge and B's bottom edge are horizontal and also run through pixel centres.
     return [
       [1.5, 0.5],
@@ -290,12 +290,14 @@ export function zFight(s: DepthSettings): { road: number; fighting: number; towe
 
 /**
  * The depth buffer's resolution at distance z: how far apart two surfaces must be (along the view
- * direction) to get different stored values, measured as the gap to the next storable value.
+ * direction) to be sure of different stored values: the width, in distance, of the range of
+ * depths that round to the same value as z (halfway to the storable value on each side).
  */
 export function resolution(z: number, near: number, far: number, fmt: DepthFormat, reverseZ: boolean): number {
   const q = quantise(depthAt(z, near, far, reverseZ), fmt);
-  const next = neighbour(q, fmt, reverseZ ? -1 : 1);
-  return Math.abs(distanceAt(next, near, far, reverseZ) - distanceAt(q, near, far, reverseZ));
+  const lo = Math.max(0, (q + neighbour(q, fmt, -1)) / 2);
+  const hi = Math.min(1, (q + neighbour(q, fmt, 1)) / 2);
+  return Math.abs(distanceAt(hi, near, far, reverseZ) - distanceAt(lo, near, far, reverseZ));
 }
 /** The inverse of depthAt: the distance that maps to depth d. */
 export function distanceAt(d: number, near: number, far: number, reverseZ: boolean): number {

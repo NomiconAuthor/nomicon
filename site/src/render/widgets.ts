@@ -309,7 +309,7 @@ export class RasterViz {
         btn('Whole frame', () => s.finish()),
         btn('Clear', () => s.reset()),
       ),
-      h('div', { class: 'll-h' }, 'Drag a corner to move it (it snaps to 1/16 pixel)'),
+      h('div', { class: 'll-h' }, 'Drag a corner to move it (in 1/16-pixel steps, so it can land exactly on a pixel centre)'),
       this.cv,
       this.read,
       this.sum,
@@ -480,7 +480,7 @@ export class RasterViz {
     }
     const names = last.draw ? ['B'] : ['A'];
     const e = last.edges;
-    const tie = { none: '', 'top-left': 'The centre is exactly on an edge, and that edge is a top or left edge: the top-left rule says this triangle owns it.', 'not-top-left': 'The centre is exactly on an edge, but not a top or left edge: the top-left rule gives this pixel to the triangle on the other side.', inclusive: 'The centre is exactly on an edge, and "include edges" counts it.', exclusive: 'The centre is exactly on an edge, and "exclude edges" drops it.' }[this.samples === 1 ? last.tie : 'none'];
+    const tie = { none: '', 'top-left': 'The centre is exactly on an edge, and that edge is a top or left edge: the top-left rule says this triangle owns it.', 'not-top-left': 'The centre is exactly on an edge, but it\'s a right or bottom edge, so this triangle doesn\'t take it. A triangle on the other side would take it; if there\'s none, or the centre is on its right or bottom edge too, nothing draws it.', inclusive: 'The centre is exactly on an edge, and "include edges" counts it.', exclusive: 'The centre is exactly on an edge, and "exclude edges" drops it.' }[this.samples === 1 ? last.tie : 'none'];
     const row = (label: string, ...cells: string[]) => h('tr', {}, h('th', {}, label), ...cells.map((c) => h('td', {}, c)));
     this.read.replaceChildren(
       h('p', {}, h('b', {}, `Pixel (${last.x}, ${last.y}), triangle ${names[0]}: `), last.mask ? (this.samples === 4 ? `${popcount(last.mask)} of 4 samples covered.` : 'covered.') : 'not covered.', tie ? ` ${tie}` : ''),

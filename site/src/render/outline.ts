@@ -42,7 +42,7 @@ export const OUTLINE: Part[] = [
       { title: 'Render graphs', summary: 'Describing a frame as passes that read and write resources, so the engine can order them, insert barriers, cull unused passes and alias transient memory.' },
       { title: 'GPU-driven rendering', summary: 'Moving culling and draw submission onto the GPU: indirect draws, compute culling, bindless resources, and where mesh shaders fit.' },
       { title: 'Quirky solutions: texture atlases for 2D sprites', summary: 'Packing many sprites into one texture: shelf, skyline, guillotine and MaxRects packers, bleeding at the edges and why padding and extrusion fix it, and what mipmaps do to an atlas.' },
-      { title: 'Quirky solutions: Nanite in brief', summary: 'Unreal\'s virtualised geometry: clusters of 128 triangles in a DAG of levels of detail, software rasterisation of small triangles in compute, a visibility buffer written with 64-bit atomics. Why people get excited, and what it costs: memory and disk, overdraw on aggregates such as foliage, and occlusion that leans on last frame\'s depth.' },
+      { title: 'Quirky solutions: Nanite in brief', summary: 'Unreal\'s virtualised geometry: clusters of 128 triangles in a DAG of levels of detail, software rasterisation of small triangles in compute, a visibility buffer written with 64-bit atomics. Why people get excited, and what it costs: big source assets (the format is compact, but it invites film-density meshes), overdraw on aggregates such as foliage (what the newer Nanite Foliage works around), and occlusion that leans on last frame\'s depth.' },
     ],
   },
   {

@@ -19,6 +19,7 @@ By the time you draw, you've already set up **state**: the shaders, the layout o
 ```cpp
 // D3D12: 36 indices, one instance, starting at index 0, no offset added to the indices.
 cmd->SetPipelineState(opaque_pso);
+cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 cmd->IASetVertexBuffers(0, 1, &box_vertices);
 cmd->IASetIndexBuffer(&box_indices);
 cmd->DrawIndexedInstanced(36, 1, 0, 0, 0);
@@ -29,7 +30,7 @@ cmd->DrawIndexedInstanced(36, 1, 0, 0, 0);
 
 An **index buffer** lets triangles share vertices: three indices per triangle, each picking a vertex from the vertex buffer. The box in the widget below has 24 vertices (four per face, because each face has its own shade) and 36 indices for its 12 triangles.
 
-The call is cheap for the GPU to start and comparatively expensive for the CPU to issue: the driver validates state and writes commands for every one. That's why engines batch and instance, which a later lesson covers.
+The call is cheap for the GPU to start but not free for the CPU. On D3D11 and OpenGL the driver validates state and writes commands for every one; D3D12 and Vulkan move validation to pipeline creation, but each state or binding change between draws still costs. That's why engines batch and instance, which a later lesson covers.
 
 ## Step through a frame
 
@@ -47,14 +48,14 @@ This frame has 28 vertex shader runs: the floor's 4 and the box's 24. That's onc
 
 **Primitive assembly** reads the indices three at a time and makes triangles. 14 triangles go in. Each then goes through three cheap tests before any pixel is touched:
 
-1. **Trivial reject.** If all three vertices are outside the same edge of the view, the triangle is dropped.
-2. **Clipping.** A triangle that crosses the **near plane** must be cut there. Behind the camera *w* is zero or negative, and dividing by it flips or explodes the position. Clipping a triangle against a plane leaves a polygon of three or four corners, which is split back into triangles. Here both floor triangles cross the near plane and come out as 3 triangles. The sides of the screen are usually *not* clipped: the rasteriser only visits pixels inside the target anyway, so a triangle hanging off the side costs nothing extra. That margin is the **guard band**, and only triangles that go far outside it need real clipping.
+1. **Trivial reject.** If all three vertices are outside the same plane of the view (a side, the near plane or the far plane), the triangle is dropped.
+2. **Clipping.** A triangle that crosses the **near plane** is cut there. Behind the camera *w* is zero or negative, and dividing by it flips or explodes the position. Clipping a triangle against a plane leaves a polygon of three or four corners, which is split back into triangles. Here both floor triangles cross the near plane and come out as 3 triangles. The sides of the screen are usually *not* clipped: the rasteriser only visits pixels inside the target anyway, so a triangle hanging off the side costs nothing extra. The rasteriser can handle coordinates well beyond the screen edges; that margin is the **guard band**, and only triangles that reach past it need real clipping.
 3. **Back-face culling.** After the divide, the triangle's winding on screen says which way it faces. This rasteriser treats counter-clockwise as front-facing, as OpenGL and WebGPU do by default (D3D defaults to clockwise, and Vulkan makes you choose). 6 of the box's 12 face away from the camera, and are dropped. Untick **Cull back faces** and they're drawn too, only to be hidden by the front faces: 1826 fragments, 62 of which fail the depth test, against 1722 fragments with culling on.
 
 Set the near plane to **4.6 m**. It now cuts through the box as well: 7 of the 14 triangles are clipped, into 13. The box opens up, and with culling on you see straight through it to the floor, because its far side faces away. That's the near plane eating into geometry: the same thing happens when a camera backs into a wall.
 
 <Tip title="Depth clamp">
-Clipping at the far plane is optional on modern APIs: with **depth clamp** (D3D's `DepthClipEnable = FALSE`, Vulkan's `depthClampEnable`), geometry beyond it is drawn at the far depth instead of cut off. Shadow maps use it so that casters between the light and the shadow frustum aren't lost. The near plane still has to be clipped or handled in the rasteriser, because of the divide.
+Clipping at the near and far planes can be turned off: with **depth clamp** (D3D's `DepthClipEnable = FALSE`, Vulkan's `depthClampEnable`), geometry beyond them is drawn at the near or far depth instead of being cut off. Shadow maps use it so that casters between the light and the shadow frustum still cast shadows. What can't be turned off is clipping at *w* = 0, the plane through the eye, because of the divide.
 </Tip>
 
 ## Rasterisation
@@ -87,5 +88,5 @@ None of that changes what a frame looks like, which is why stepping a sequential
 
 - A **draw call** is state you set earlier plus counts: how many indices, from where, how many instances.
 - **Vertex shader**: clip-space position out; *w* is the distance in front of the camera.
-- **Primitive assembly** makes triangles; the **near plane** must be clipped because of the divide; the sides are left to the **guard band**; **back faces** are culled by their winding on screen.
+- **Primitive assembly** makes triangles; the **near plane** is clipped because of the divide; the sides are left to the **guard band**; **back faces** are culled by their winding on screen.
 - The **rasteriser** turns triangles into fragments; the **fragment shader** colours them; the **output merger** depth-tests, blends and writes, in submission order.

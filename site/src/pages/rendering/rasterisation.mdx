@@ -31,10 +31,10 @@ Two triangles that share an edge must between them cover every pixel along it **
 The **Shared edge** preset is a quad split along a 45° diagonal that passes through nine pixel centres. A's top edge and B's bottom edge also run through centres.
 
 - **Include edges** (*E* ≥ 0): 9 pixels are drawn twice, all on the diagonal.
-- **Exclude edges** (*E* > 0): 16 pixels are drawn by neither: the diagonal, and A's top edge.
+- **Exclude edges** (*E* > 0): 16 pixels are drawn by neither: A's top edge and the diagonal, except the diagonal's two ends, which only "include" draws (each is also on a right or bottom edge).
 - **Top-left**: A covers 37 pixels and B covers 38, none twice, none missed.
 
-The **top-left rule**, which D3D specifies exactly, settles a tie by the edge: a centre on an edge counts only if it's a **top edge** (exactly horizontal, with the triangle below it) or a **left edge** (the triangle is to its right). A shared edge is a left edge for one triangle and a right edge for the other, so exactly one of them takes it. Step through the diagonal and the readout says which rule decided each pixel. OpenGL and Vulkan don't fix the rule, only that ties are broken consistently so shared edges are drawn once; in practice the hardware is the same.
+The **top-left rule**, which D3D specifies exactly, settles a tie by the edge: a centre on an edge counts only if it's a **top edge** (exactly horizontal, with the triangle below it) or a **left edge** (the triangle is to its right). A shared edge is top or left for one triangle and bottom or right for the other, so exactly one of them takes it. Step through the diagonal and the readout says which rule decided each pixel. OpenGL and Vulkan don't fix the rule, only that ties are broken consistently so shared edges are drawn once; in practice the hardware is the same.
 
 The rule only works because the arithmetic is exact. With floating-point edge functions, the two triangles could compute slightly different values at the same point, and the guarantee would be gone. That's the reason for snapping.
 
@@ -66,13 +66,13 @@ The fix is to interpolate in screen space only things that *are* linear there. A
 
 Switch to **Affine** and the checkerboard bends: each of the two triangles stretches the texture linearly across the screen, and the seam between them shows down the middle. That's the warping texture of PlayStation 1 games, whose hardware interpolated this way. Here 711 of the floor's 1,496 pixels pick the wrong colour, and texture coordinates are out by up to 10.9 squares near the horizon. Step a pixel to see both sets of weights and both answers.
 
-GPUs interpolate perspective-correctly by default. HLSL's `noperspective` (GLSL's `noperspective`, WGSL's `@interpolate(linear)`) asks for screen-space interpolation, which is right for things that really are screen-space, such as a post-process's pixel position. Depth is the exception that needs no correction: what's stored is *z*/*w*, which is already linear in screen space, so it's interpolated with the plain λ. That fact matters in the [depth lesson](/rendering/depth/).
+GPUs interpolate perspective-correctly by default. HLSL's `noperspective` (desktop GLSL's `noperspective`, WGSL's `@interpolate(linear)`; GLSL ES and so WebGL2 lack it) asks for screen-space interpolation, which is right for things that really are screen-space, such as a post-process's pixel position. Depth is the exception that needs no correction: what's stored is *z*/*w*, which is already linear in screen space, so it's interpolated with the plain λ. That fact matters in the [depth lesson](/rendering/depth/).
 
 ## MSAA: coverage per sample, shading per pixel
 
 One sample per pixel makes every edge a staircase, and thin triangles flicker as they move, because they hit some pixel centres and slip between others. Pick **Sliver and speck**: the long sliver covers only 4 pixels, in a broken line, and the small triangle covers none, because it misses every centre.
 
-**Multisample anti-aliasing** tests coverage at several **sample** positions in each pixel instead of one. Switch to **4× MSAA**: the dots move to the four standard positions D3D and Vulkan define for 4× (a rotated grid, so no two share a row or a column). Depth is tested and stored per sample too. The sliver now covers 29 samples and the speck 1.
+**Multisample anti-aliasing** tests coverage at several **sample** positions in each pixel instead of one. Switch to **4× MSAA**: the dots move to the four standard positions D3D and Vulkan define for 4× (a rotated grid, so no two share a row or a column). D3D uses them when you ask for the standard pattern, Vulkan on devices that report `standardSampleLocations`; otherwise the pattern is up to the GPU. Depth is tested and stored per sample too. The sliver now covers 29 samples and the speck 1.
 
 What MSAA doesn't do is shade per sample. The fragment shader runs **once per pixel per triangle**, at the pixel centre, and its colour is written to whichever of that triangle's samples are covered. At the end the samples are averaged (**resolved**) into one colour per pixel. So MSAA smooths edges, where coverage changes inside a pixel, and costs little in the middle of triangles. On the shared-edge quad, 32 pixels are partly covered, and the fragment shader runs 100 times, against 75 without MSAA: the extra runs are pixels on the edges where both triangles, or a triangle and the background, share a pixel. That's the cost of MSAA, and it grows with the number of edges, which is why lots of tiny triangles make it expensive.
 

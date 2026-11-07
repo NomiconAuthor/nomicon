@@ -26,13 +26,13 @@ The widget looks down at a field from 50 m up, with a far plane at 5 km. A road 
 
 A depth format can only store so many values: 65,536 for 16 bits, about 16.8 million for 24. Because *d* follows 1/*z*, the stored values are packed tightly near the camera and spread thin further away: the gap in distance between two neighbouring values grows roughly with *z*² / *n*. When the ground and the road both round to the same value, or round the wrong way round, the test can't tell which is in front, and the result changes from pixel to pixel and frame to frame. That's **z-fighting**.
 
-With a **16-bit** buffer and the near plane at 0.1 m, the ground shows through on 392 of the road's 408 pixels. The chart under the frame shows why: at 100 m, two surfaces 1.6 m apart can still get the same 16-bit value.
+With a **16-bit** buffer and the near plane at 0.1 m, the ground shows through on 392 of the road's 408 pixels. The chart under the frame shows why: at 100 m, two surfaces 1.5 m apart can still get the same 16-bit value.
 
 How far apart two surfaces must be to get different depths, with the near plane at 0.1 m and the far plane at 5 km:
 
 | Format | at 10 m | at 100 m | at 1 km |
 |---|---|---|---|
-| 16-bit | 1.5 cm | 1.6 m | 196 m |
+| 16-bit | 1.5 cm | 1.5 m | 166 m |
 | 24-bit | 60 µm | 6.0 mm | 60 cm |
 | 32-bit float | 60 µm | 6.0 mm | 60 cm |
 | 32-bit float, reverse-Z | 0.9 µm | 12 µm | 73 µm |
@@ -67,7 +67,7 @@ The widget computes depth in double precision and rounds it only when it stores 
 
 Formats, for reference: D3D has `D16_UNORM`, `D24_UNORM_S8_UINT`, `D32_FLOAT` and `D32_FLOAT_S8X24_UINT` (with stencil); WebGPU has `depth16unorm`, `depth32float` and `depth24plus`, which promises at least 24 bits and leaves the real format to the implementation.
 
-Turn the **Depth test** off and the draw order decides instead: the ground, drawn after the tower, paints over the bottom of it.
+Turn the **Depth test** off and the draw order decides instead: the ground, drawn after the tower, paints over all of it below the horizon.
 
 ## Early Z and late Z
 
@@ -75,7 +75,7 @@ The API puts the depth test after the fragment shader. If GPUs did it there, eve
 
 The shader can get in the way:
 
-- **It writes depth** (`SV_Depth`): the depth isn't known until the shader has run. Declaring it **conservative** (`SV_DepthGreaterEqual` or `SV_DepthLessEqual`) tells the GPU which way it can move, so early rejection still works.
+- **It writes depth** (`SV_Depth`): the depth isn't known until the shader has run. Declaring it **conservative** (`SV_DepthGreaterEqual` or `SV_DepthLessEqual`) tells the GPU which way it can move. If that's away from the camera for your depth test (`SV_DepthGreaterEqual` with "less", `SV_DepthLessEqual` with reverse-Z's "greater"), early rejection still works.
 - **It discards** (alpha test, `clip()`, alpha to coverage): the test can still run early, but the depth write has to wait until the shader has decided whether the fragment exists.
 - **It has side effects**, such as writes to a storage buffer: those must happen for every fragment the API would shade, unless you ask for early tests explicitly (`[earlydepthstencil]` in HLSL, `layout(early_fragment_tests)` in GLSL).
 

@@ -328,7 +328,7 @@ export function setup(v: ClipVert[], w: number, h: number): { tri: ScreenTri; fr
   const attrs = v.map((p) => p.a) as [number[], number[], number[]];
   let area = edge(x[0], y[0], x[1], y[1], x[2], y[2]);
   if (area === 0) return null;
-  // Counter-clockwise in clip space (y up) turns clockwise on screen (y down): negative area here.
+  // Counter-clockwise as seen (y up) gives a negative area in these y-down coordinates.
   const front = area < 0;
   if (front) {
     // Swap vertices 1 and 2 so the inside is positive for every edge.
