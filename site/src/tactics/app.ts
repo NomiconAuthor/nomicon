@@ -147,6 +147,13 @@ export class TacticsApp {
   private stage: HTMLElement | null = null;
   private peerHost: HTMLElement | null = null;
   private seenVersion = -1;
+  /** The embedded widget's outer element. */
+  private shell: HTMLElement | null = null;
+  /** Lesson widgets put the readouts beside the map from this width (px); keep in step with tactics-embed.css. */
+  private static readonly WIDE = 820;
+  private static readonly ASIDE = 230;
+  private static readonly GAP = 14;
+  private static readonly LANE_PAD = 12;
 
   constructor(root: HTMLElement, embed: EmbedOptions | null = null) {
     this.embed = embed;
@@ -167,11 +174,28 @@ export class TacticsApp {
     this.player = new Player(() => this.draw());
     // Full lab and compare lanes keep the transport bar in place (disabled when a layer has no run) so the map never jumps.
     this.player.keep = !embed || !!embed.peer;
-    const lane = h('section', { class: 'lane' }, this.player.el, this.player.captionEl, h('div', { class: 'map-wrap' }, this.cnv), this.legend, this.stats, this.info);
+    const lesson = !!embed && !embed.peer;
+    if (embed) this.layerBox.className = 'tl-embed-controls';
+    // In a lesson the controls, caption and stats sit in a column beside the map (legend and notes
+    // under it) when the widget is wide enough (a container query in tactics-embed.css), and stack around it otherwise.
+    const lane = lesson
+      ? h(
+          'section',
+          { class: 'lane' },
+          this.player.el,
+          h(
+            'div',
+            { class: 'tl-body' },
+            h('div', { class: 'tl-mapcol' }, h('div', { class: 'map-wrap' }, this.cnv), this.legend, this.info),
+            h('div', { class: 'tl-aside' }, this.layerBox, this.player.captionEl, this.stats),
+          ),
+        )
+      : h('section', { class: 'lane' }, this.player.el, this.player.captionEl, h('div', { class: 'map-wrap' }, this.cnv), this.legend, this.stats, this.info);
     if (embed) {
       // Lesson mode: just this layer's controls, the transport and the map.
-      this.layerBox.className = 'tl-embed-controls';
-      root.replaceChildren(h('div', { class: embed.peer ? 'tl-embed tl-peer' : 'tl-embed' }, this.layerBox, lane));
+      this.shell = h('div', { class: embed.peer ? 'tl-embed tl-peer' : 'tl-embed tl-lesson' }, ...(lesson ? [] : [this.layerBox]), lane);
+      root.replaceChildren(this.shell);
+      if (lesson) window.addEventListener('resize', () => this.fit());
       this.layerList = h('div');
       if (embed.peer) {
         this.link = embed.peer;
@@ -471,11 +495,11 @@ export class TacticsApp {
           this.wagon ? h('button', { type: 'button', onclick: () => this.rotateWagon() }, 'Rotate wagon') : null,
           h('button', { type: 'button', onclick: () => this.rebake() }, 'Re-bake everything'),
         ),
-        h('p', { class: 'hint' }, `The cover bake is stored in ${TILE} × ${TILE} m tiles (thin grid). Painting with the tools on the left counts as a change too.`),
+        h('p', { class: 'hint' }, `The cover bake is stored in ${TILE} × ${TILE} m tiles (thin grid).${this.embed && !this.embed.peer ? '' : ' Painting with the tools on the left counts as a change too.'}`),
       );
     } else if (this.layer === 'exposure' || this.layer === 'query') {
       kids.push(h('div', { class: 'field' }, 'Unit is', this.seg<'standing' | 'crouched'>([['crouched', 'Crouched (0.8 m)'], ['standing', 'Standing (1.5 m)']], this.exposureStance, (v) => ((this.exposureStance = v), this.draw()))));
-      kids.push(h('p', { class: 'hint' }, 'Threats see from 1.7 m. Add threats with the Threat tool; drag them to move.'));
+      kids.push(h('p', { class: 'hint' }, this.embed && !this.embed.peer ? 'Threats see from 1.7 m. Drag them to move.' : 'Threats see from 1.7 m. Add threats with the Threat tool; drag them to move.'));
     } else if (this.layer === 'montecarlo') {
       kids.push(
         h(
@@ -791,15 +815,27 @@ export class TacticsApp {
 
   private fit(): void {
     if (!this.t) return;
-    const lane = this.cnv.parentElement!;
-    const wpx = Math.max(200, lane.clientWidth);
-    const maxH = Math.max(300, window.innerHeight * 0.72);
+    let wpx: number, maxH: number;
+    if (this.embed && !this.embed.peer && this.shell) {
+      // Lesson widget: at most 640 px wide and 60% of the window tall, so the map, its controls
+      // and its readouts fit one screen. Beside-layout threshold and aside width match tactics-embed.css.
+      const w = this.shell.clientWidth;
+      const inner = w - 2 * (TacticsApp.LANE_PAD + 1);
+      const avail = w >= TacticsApp.WIDE ? inner - TacticsApp.ASIDE - TacticsApp.GAP : inner;
+      wpx = Math.max(120, Math.min(640, avail));
+      maxH = Math.max(240, window.innerHeight * 0.6);
+    } else {
+      // Full lab and compare lanes: the lab is a full-page app, so the map takes the lane.
+      wpx = Math.max(200, this.cnv.parentElement!.clientWidth);
+      maxH = Math.max(300, window.innerHeight * 0.72);
+    }
     this.cs = Math.max(3, Math.min(16, Math.floor(Math.min(wpx / this.t.w, maxH / this.t.h))));
     const dpr = window.devicePixelRatio || 1;
     this.cnv.width = Math.round(this.t.w * this.cs * dpr);
     this.cnv.height = Math.round(this.t.h * this.cs * dpr);
     this.cnv.style.width = `${this.t.w * this.cs}px`;
     this.cnv.style.height = `${this.t.h * this.cs}px`;
+    this.shell?.style.setProperty('--tl-map-w', `${this.t.w * this.cs}px`);
     this.draw();
   }
 
@@ -1077,11 +1113,13 @@ export class TacticsApp {
           const y = C(Math.floor(r.i / t.w));
           ctx.fillStyle = this.col(k === 0 ? '--good' : '--cache');
           ctx.beginPath();
-          ctx.arc(x, y, Math.max(3, cs * (k === 0 ? 0.6 : 0.42)), 0, Math.PI * 2);
+          // Lesson maps are smaller than the lab's: keep the rank digits at least 10 px, in a dot big enough to hold them.
+          const lesson = !!this.embed && !this.embed.peer && cs >= 7;
+          ctx.arc(x, y, Math.max(lesson ? 6.5 : 3, cs * (k === 0 ? 0.6 : 0.42)), 0, Math.PI * 2);
           ctx.fill();
           if (cs >= 7) {
             ctx.fillStyle = this.col('--bg');
-            ctx.font = `700 ${Math.max(8, cs * 0.65)}px ${this.pal.get('--f-mono')}`;
+            ctx.font = `700 ${Math.max(lesson ? 10 : 8, cs * 0.65)}px ${this.pal.get('--f-mono')}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(String(k + 1), x, y + 0.5);

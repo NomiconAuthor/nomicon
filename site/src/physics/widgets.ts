@@ -4,7 +4,7 @@ import { box } from './collide';
 import { v } from './math';
 import { type Scene, bin, bridge, crowd, joints as jointScene, pyramid, tower, tunnel } from './scenes';
 import { type Continuous, type Settings, type SolverKind } from './world';
-import { PhysicsView, statLine } from './view';
+import { PhysicsView, fitCanvas, logicalSize, phCanvas, phCtx, phStage, statLine } from './view';
 
 function chk(label: string, on: boolean, change: (v: boolean) => void): HTMLElement {
   const i = h('input', { type: 'checkbox', onchange: (e: Event) => change((e.target as HTMLInputElement).checked) }) as HTMLInputElement;
@@ -57,11 +57,15 @@ export class StepViz {
     this.view.ground = sc.ground;
     this.view.onStep = () => this.stats();
     root.append(
-      seg<'pyramid' | 'bin'>('Scene', [['bin', 'Bin of shapes'], ['pyramid', 'Pyramid']], this.scene, (s) => {
-        this.scene = s;
-        this.reset();
-      }).el,
-      seg<string>('Physics rate', [['15', '15 Hz'], ['30', '30 Hz'], ['60', '60 Hz'], ['120', '120 Hz']], '60', (s) => (this.view.hz = Number(s))).el,
+      h(
+        'div',
+        { class: 'll-row' },
+        seg<'pyramid' | 'bin'>('Scene', [['bin', 'Bin of shapes'], ['pyramid', 'Pyramid']], this.scene, (s) => {
+          this.scene = s;
+          this.reset();
+        }).el,
+        seg<string>('Physics rate', [['15', '15 Hz'], ['30', '30 Hz'], ['60', '60 Hz'], ['120', '120 Hz']], '60', (s) => (this.view.hz = Number(s))).el,
+      ),
       h(
         'div',
         { class: 'll-row' },
@@ -71,10 +75,7 @@ export class StepViz {
         seg<string>('Speed', [['1', '×1'], ['0.25', '×¼']], '1', (s) => (this.view.speed = Number(s))).el,
       ),
       transport(this.view, () => this.reset(), [btn('Hitch: one 0.2 s frame', () => this.view.hitch(0.2))]),
-      this.view.canvas,
-      this.frameInfo,
-      h('div', { class: 'll-h' }, 'The last physics step'),
-      this.phases,
+      phStage(this.view.canvas, [this.frameInfo, h('div', { class: 'll-h' }, 'The last physics step'), this.phases]),
     );
     this.stats();
     setInterval(() => this.frameNote(), 250);
@@ -128,25 +129,30 @@ export class BroadphaseViz {
     this.view.overlays.aabbs = true;
     this.view.onStep = () => this.stats();
     root.append(
-      seg<'brute' | 'sap'>('Broadphase', [['brute', 'Every pair'], ['sap', 'Sort and sweep']], this.method, (m) => {
-        this.method = m;
-        this.view.world.settings.broadphase = m;
-      }).el,
-      seg<string>('Bodies', [['50', '50'], ['150', '150'], ['400', '400']], '150', (n) => {
-        this.count = Number(n);
-        this.reset();
-      }).el,
       h(
         'div',
         { class: 'll-row' },
-        h('span', { class: 'll-muted' }, 'Collide:'),
-        chk('blue with orange', true, (on) => ((this.blueOrange = on), this.applyMasks())),
-        chk('orange with orange', true, (on) => ((this.orangeOrange = on), this.applyMasks())),
+        seg<'brute' | 'sap'>('Broadphase', [['brute', 'Every pair'], ['sap', 'Sort and sweep']], this.method, (m) => {
+          this.method = m;
+          this.view.world.settings.broadphase = m;
+        }).el,
+        seg<string>('Bodies', [['50', '50'], ['150', '150'], ['400', '400']], '150', (n) => {
+          this.count = Number(n);
+          this.reset();
+        }).el,
       ),
-      h('div', { class: 'll-row' }, chk('Bounding boxes', true, (on) => (this.view.overlays.aabbs = on)), chk('Candidate pairs', false, (on) => (this.view.overlays.pairs = on))),
       transport(this.view, () => this.reset()),
-      this.view.canvas,
-      this.out,
+      phStage(this.view.canvas, [
+        h(
+          'div',
+          { class: 'll-row' },
+          h('span', { class: 'll-muted' }, 'Collide:'),
+          chk('blue with orange', true, (on) => ((this.blueOrange = on), this.applyMasks())),
+          chk('orange with orange', true, (on) => ((this.orangeOrange = on), this.applyMasks())),
+        ),
+        h('div', { class: 'll-row' }, chk('Bounding boxes', true, (on) => (this.view.overlays.aabbs = on)), chk('Candidate pairs', false, (on) => (this.view.overlays.pairs = on))),
+        this.out,
+      ]),
     );
     this.stats();
   }
@@ -193,7 +199,7 @@ export class SolverViz {
   private scene: 'pyramid' | 'tower' = 'pyramid';
   private s: Partial<Settings> = { solver: 'soft', substeps: 4, iterations: 1, warmStarting: true, sleeping: true };
   private out = h('div', { class: 'll-stats' });
-  private chart = h('canvas', { class: 'ph-chart', width: '960', height: '120', 'aria-label': 'Kinetic energy over time' });
+  private chart = phCanvas(4, 'Kinetic energy over time', 560, 'ph-chart');
   private energy: number[] = [];
   private start: Array<{ x: number; y: number }> = [];
   private iterSeg!: { el: HTMLElement; set: (v: string) => void };
@@ -208,24 +214,25 @@ export class SolverViz {
     this.iterSeg = seg<string>('Iterations', [['1', '1'], ['4', '4'], ['10', '10'], ['20', '20']], '1', (n) => this.set({ iterations: Number(n) }));
     this.subRow = seg<string>('Substeps', [['1', '1'], ['2', '2'], ['4', '4'], ['8', '8']], '4', (n) => this.set({ substeps: Number(n) })).el;
     root.append(
-      seg<'pyramid' | 'tower'>('Scene', [['pyramid', 'Pyramid (55 boxes)'], ['tower', 'Tower (12 boxes)']], this.scene, (s) => {
-        this.scene = s;
-        this.reset();
-      }).el,
-      seg<SolverKind>('Solver', [['soft', 'Soft step'], ['baumgarte', 'Baumgarte']], 'soft', (k) => {
-        this.set({ solver: k, iterations: k === 'soft' ? 1 : 10 });
-        this.iterSeg.set(k === 'soft' ? '1' : '10');
-        this.subRow.hidden = k !== 'soft';
-      }).el,
-      this.subRow,
-      this.iterSeg.el,
+      h(
+        'div',
+        { class: 'll-row' },
+        seg<'pyramid' | 'tower'>('Scene', [['pyramid', 'Pyramid (55 boxes)'], ['tower', 'Tower (12 boxes)']], this.scene, (s) => {
+          this.scene = s;
+          this.reset();
+        }).el,
+        seg<SolverKind>('Solver', [['soft', 'Soft step'], ['baumgarte', 'Baumgarte']], 'soft', (k) => {
+          this.set({ solver: k, iterations: k === 'soft' ? 1 : 10 });
+          this.iterSeg.set(k === 'soft' ? '1' : '10');
+          this.subRow.hidden = k !== 'soft';
+        }).el,
+      ),
+      h('div', { class: 'll-row' }, this.subRow, this.iterSeg.el),
       h('div', { class: 'll-row' }, chk('Warm starting', true, (on) => this.set({ warmStarting: on })), chk('Sleeping', true, (on) => this.set({ sleeping: on })), chk('Contacts', false, (on) => (this.view.overlays.contacts = on))),
       transport(this.view, () => this.reset()),
-      this.view.canvas,
-      this.out,
-      h('div', { class: 'll-h' }, 'Kinetic energy, last 10 seconds'),
-      this.chart,
+      phStage(this.view.canvas, [this.out, h('div', { class: 'll-h' }, 'Kinetic energy, last 10 seconds'), this.chart]),
     );
+    fitCanvas(this.chart, () => this.drawChart());
     this.reset();
   }
   private make(): Scene {
@@ -264,11 +271,12 @@ export class SolverViz {
   }
   private drawChart(): void {
     const c = this.chart;
-    const ctx = c.getContext('2d')!;
+    const ctx = phCtx(c);
+    const { w: W, h: H } = logicalSize(c);
     const cs = getComputedStyle(c);
     const col = (n: string) => cs.getPropertyValue(n).trim() || '#888';
     ctx.fillStyle = col('--bg');
-    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillRect(0, 0, W, H);
     const e = this.energy;
     if (e.length < 2) return;
     const max = Math.max(0.5, ...e);
@@ -276,15 +284,15 @@ export class SolverViz {
     ctx.lineWidth = 2;
     ctx.beginPath();
     e.forEach((x, i) => {
-      const px = (i / 600) * c.width;
-      const py = c.height - 6 - (Math.log10(1 + x * 10) / Math.log10(1 + max * 10)) * (c.height - 12);
+      const px = (i / 600) * W;
+      const py = H - 4 - (Math.log10(1 + x * 10) / Math.log10(1 + max * 10)) * (H - 22);
       if (i) ctx.lineTo(px, py);
       else ctx.moveTo(px, py);
     });
     ctx.stroke();
     ctx.fillStyle = col('--muted');
-    ctx.font = '20px sans-serif';
-    ctx.fillText(`${e[e.length - 1].toFixed(3)} J now (log scale, max ${max.toFixed(2)} J)`, 10, 24);
+    ctx.font = '12px sans-serif';
+    ctx.fillText(`${e[e.length - 1].toFixed(3)} J now (log scale, max ${max.toFixed(2)} J)`, 6, 14);
   }
 }
 
@@ -317,9 +325,7 @@ export class SleepViz {
         btn('Drop a box', () => this.drop()),
       ),
       transport(this.view, () => this.reset()),
-      this.view.canvas,
-      this.out,
-      h('p', { class: 'll-muted ph-note' }, 'Drag a shape to wake its island. Faded shapes are asleep.'),
+      phStage(this.view.canvas, [this.out, h('p', { class: 'll-muted ph-note' }, 'Drag a shape to wake its island. Faded shapes are asleep.')]),
     );
     this.stats();
   }
@@ -364,13 +370,17 @@ export class TunnelViz {
         this.mode = m;
         this.reset();
       }).el,
-      seg<string>('Ball speed', [['20', '20 m/s'], ['30', '30 m/s'], ['120', '120 m/s'], ['400', '400 m/s']], '120', (s) => {
-        this.speed = Number(s);
-        this.reset();
-      }).el,
-      h('div', { class: 'll-row' }, btn('Fire again', () => this.reset(), true), seg<string>('Speed', [['1', '×1'], ['0.1', '×⅒']], '0.1', (s) => (this.view.speed = Number(s))).el),
-      this.view.canvas,
-      this.out,
+      h(
+        'div',
+        { class: 'll-row' },
+        seg<string>('Ball speed', [['20', '20 m/s'], ['30', '30 m/s'], ['120', '120 m/s'], ['400', '400 m/s']], '120', (s) => {
+          this.speed = Number(s);
+          this.reset();
+        }).el,
+        btn('Fire again', () => this.reset(), true),
+        seg<string>('Speed', [['1', '×1'], ['0.1', '×⅒']], '0.1', (s) => (this.view.speed = Number(s))).el,
+      ),
+      phStage(this.view.canvas, [this.out]),
     );
     this.view.speed = 0.1;
     this.result();
@@ -430,19 +440,20 @@ export class JointViz {
     this.view.ground = sc.ground;
     this.view.onStep = () => this.stats();
     root.append(
-      seg<'joints' | 'bridge'>('Scene', [['joints', 'One of each'], ['bridge', 'Rope bridge']], this.scene, (s) => {
-        this.scene = s;
-        this.reset();
-      }).el,
-      seg<SolverKind>('Solver', [['soft', 'Soft step, 4 substeps'], ['baumgarte', 'Baumgarte, 10 iterations']], this.solver, (s) => {
-        this.solver = s;
-        this.reset();
-      }).el,
-      h('div', { class: 'll-row' }, btn('Drop a heavy box', () => this.heavy())),
-      transport(this.view, () => this.reset()),
-      this.view.canvas,
-      this.out,
-      h('p', { class: 'll-muted ph-note' }, 'Drag anything. The heavy box is 30 to 60 times denser than everything else.'),
+      h(
+        'div',
+        { class: 'll-row' },
+        seg<'joints' | 'bridge'>('Scene', [['joints', 'One of each'], ['bridge', 'Rope bridge']], this.scene, (s) => {
+          this.scene = s;
+          this.reset();
+        }).el,
+        seg<SolverKind>('Solver', [['soft', 'Soft step, 4 substeps'], ['baumgarte', 'Baumgarte, 10 iterations']], this.solver, (s) => {
+          this.solver = s;
+          this.reset();
+        }).el,
+      ),
+      transport(this.view, () => this.reset(), [btn('Drop a heavy box', () => this.heavy())]),
+      phStage(this.view.canvas, [this.out, h('p', { class: 'll-muted ph-note' }, 'Drag anything. The heavy box is 30 to 60 times denser than everything else.')]),
     );
     this.stats();
   }

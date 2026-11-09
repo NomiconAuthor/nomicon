@@ -1,7 +1,7 @@
 /** "When physics goes wrong": four mistakes, each with its fix one tick away. */
 import { h, seg } from '../engine/dom';
 import { type Problem, type TroubleScene, troubleScene } from './trouble';
-import { PhysicsView } from './view';
+import { PhysicsView, phStage } from './view';
 
 const NOTES: Record<Problem, { label: string; symptom: (x: number) => string; fix: string }> = {
   crush: {
@@ -59,10 +59,8 @@ export class TroubleViz {
         this.problem = p;
         this.reset();
       }).el,
-      h('div', { class: 'll-row' }, h('label', { class: 'll-chk' }, this.fixBox, ' Fix: ', this.fixText)),
-      h('div', { class: 'll-row' }, play, h('button', { type: 'button', class: 'll-btn', onclick: () => this.reset() }, 'Run again')),
-      this.view.canvas,
-      this.out,
+      h('div', { class: 'll-row' }, play, h('button', { type: 'button', class: 'll-btn', onclick: () => this.reset() }, 'Run again'), h('label', { class: 'll-chk' }, this.fixBox, ' Fix: ', this.fixText)),
+      phStage(this.view.canvas, [this.out]),
     );
     this.result();
   }

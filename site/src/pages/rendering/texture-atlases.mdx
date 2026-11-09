@@ -1,0 +1,92 @@
+---
+layout: ../../layouts/Lesson.astro
+title: 'Quirky solutions: texture atlases for 2D sprites'
+order: 12
+part: Engine-side rendering
+summary: 'Packing many sprites into one texture: shelf, skyline, guillotine and MaxRects packers, power-of-two sizes and rotation, bleeding at the edges and why padding and extrusion fix it, and what mipmaps do to an atlas.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A 2D game draws thousands of small sprites a frame. If every sprite is its own texture, every change of sprite is a change of binding, and the draws can't be merged: the problem batching solves, in its purest form. A **texture atlas** (sprite sheet) puts many sprites into one texture, and each sprite becomes a rectangle of texture coordinates. Then a whole layer of sprites, a tile map or a UI screen can go out as one draw.
+
+That leaves two problems, and they're what this lesson is about. Someone has to decide where each sprite goes: a packing problem. And filtering doesn't know where one sprite ends and the next begins, so neighbours bleed into each other unless the atlas is built for it.
+
+Both widgets here run on the CPU. Packing happens when the atlas is built, in a tool or at load time, and the sampling widget does exactly what a GPU's bilinear filter does, a texel at a time, so you can see where each pixel's colour comes from.
+
+## Packing rectangles
+
+Fitting rectangles into a bin as tightly as possible is NP-hard, so atlas tools use greedy rules that place one rectangle at a time and never move it again. Jukka Jylänki's survey [*A Thousand Ways to Pack the Bin*](https://github.com/juj/RectangleBinPack) classifies them and measures dozens of variants; four families matter:
+
+- **Shelf.** Fill rows left to right. A row is as tall as the first sprite placed on it, so every shorter sprite on it wastes the space above itself. Sorting by height first helps a lot. Simple and fast, and the worst of the four.
+- **Skyline.** Keep only the top edge of everything placed so far, as a list of horizontal segments, and put each sprite where its top would be lowest (bottom-left; ties go to the leftmost here, where Jylänki's code picks the narrowest segment). Gaps under an overhang are lost for good, unless a "waste map" keeps them.
+- **Guillotine.** Keep a list of free rectangles that don't overlap. Place a sprite in the corner of one (here, the smallest that fits: *best area fit*) and cut the rest of it in two with a single straight cut, along the shorter leftover side.
+- **MaxRects.** Keep *every* maximal free rectangle, even though they overlap. After each placement, every free rectangle the sprite touches is split into up to four, and any that end up inside another are dropped. More bookkeeping, and the best packings. The rule for choosing where to go matters: *best short side fit* (BSSF) picks the free rectangle that leaves the smallest gap along its shorter side; *bottom-left* (BL) the placement whose far edge is nearest the top of the atlas, then the leftmost; *best area fit* the smallest free rectangle.
+
+The widget packs the same 68 sprites, 60,768 pixels of them, sizes from 8 × 8 icons to 60 × 64 props and a few long UI bars, into an atlas 256 texels wide, and searches for the smallest height each packer manages. Step through it: the dashed outlines are a free list (guillotine and MaxRects), the thick line is the skyline, and horizontal lines are shelf floors. The table compares every packer at the same settings.
+
+<RenderWidget kind="atlas-pack" />
+
+With no padding and no rotation, sprites fed in largest first (tallest first for shelves):
+
+| Packer | Smallest atlas | Sprite pixels | Power of two | Sprite pixels |
+|---|---|---|---|---|
+| Shelf | 256 × 272 | 87.3% | 256 × 512 | 46.4% |
+| Skyline | 256 × 280 | 84.8% | 256 × 512 | 46.4% |
+| Guillotine, best area fit | 256 × 256 | 92.7% | 256 × 256 | 92.7% |
+| MaxRects, best short side fit | 256 × 253 | 93.8% | 256 × 256 | 92.7% |
+| MaxRects, bottom-left | 256 × 248 | 95.7% | 256 × 256 | 92.7% |
+
+Jylänki's tests over many random inputs rank them the same way on average: MaxRects best, guillotine and skyline close behind, shelves well behind. On any one set the ranking can shuffle: here bottom-left beats best short side fit, and skyline does worse than shelves until rotation is allowed. Real tools try several rules and keep the best result; TexturePacker's MaxRects has a *Best* setting that does exactly that.
+
+## Power of two, rotation and padding
+
+Look at the power-of-two column. Shelf and skyline need a few rows more than 256, and the next power of two is 512: the same atlas at 256 × 512 is only 46.4% sprite. Power-of-two sizes used to be required: older hardware and OpenGL ES 2 / WebGL 1 can't mipmap or repeat a texture whose sides aren't powers of two. Today's desktop and console APIs, and WebGL 2, take any size. What remains is that block-compressed formats work in blocks (4 × 4 texels for BC and ETC; ASTC has several block sizes), and APIs such as WebGPU require a compressed texture's size to be a whole number of blocks (Chrome now offers an optional [`texture-compression-unaligned`](https://developer.chrome.com/blog/new-in-webgpu-155-156) feature that lifts this). Many pipelines still produce power-of-two atlases out of habit or for older targets; if yours doesn't need them, the shelf packer's 256 × 272 atlas takes 53% of the memory of the 256 × 512 one it would otherwise round up to.
+
+**Rotation** lets the packer store a sprite turned by 90°, and the sprite's texture coordinates turn with it, so drawing costs nothing extra. Tick **Allow rotation**: MaxRects with best short side fit goes from 253 rows to 248, and skyline from 280 to 260. The renderer, and anything else that reads the sprite (collision masks taken from the texture, say), has to know a sprite is stored turned.
+
+**Padding** is the price of the next section. Set **Padding** to 1 texel (rotation off): the best packer needs 256 × 290, and no packer fits 256 × 256 any more, so a power-of-two atlas doubles.
+
+## Bleeding
+
+A sprite's rectangle in the atlas ends exactly at its edge texels' outer edges. The GPU doesn't know that. Bilinear filtering takes the four texels nearest the sample point and blends them, so a sample within half a texel of the sprite's edge reads the texel *outside* it: the neighbour's colour, or whatever empty space the packer left. Mipmapping makes it worse: each level averages 2 × 2 texels of the level above, across sprite boundaries, so the further out you sample, the more the neighbours are mixed in.
+
+The widget's atlas holds four 16 × 16 sprites in a 2 × 2 grid. It draws sprite A on screen at the size you pick, which also picks the mip level (1/2 reads level 1, 1/4 level 2), shifted by a fraction of a pixel. Each pixel records how much of its colour came from sprite A, and the red outlines mark pixels where any of it didn't. Point at a pixel to see which texels it read.
+
+<RenderWidget kind="atlas-bleed" />
+
+With no padding at all, up to 72% of a pixel can come from somewhere else. Drawn at 1× on whole pixels, every pixel centre lands on a texel centre and bilinear reads only sprite A, even without padding: that's why pixel-art games with sprites snapped to whole pixels often see no bleeding, and then see it the first time the camera zooms or moves by a fraction of a pixel.
+
+**Padding** puts empty texels between sprites. With 1 texel of padding and nothing in it, a sprite drawn at 1× gets none of it from another sprite, but up to 75% of a pixel can be empty texels: the sprite's edge fades towards transparent, and with straight (not premultiplied) alpha the empty texels' colour, often black, darkens it into a fringe. For a sprite whose edges are transparent anyway that's harmless; for a tile that should butt against the next tile seamlessly, it's a visible seam.
+
+**Extrusion** fixes that: fill the padding with copies of the sprite's own edge texels, so what the filter reads outside the sprite is the sprite. TexturePacker calls this *Extrude*. With extruded padding, the worst share of a pixel that isn't sprite A, over sub-pixel offsets in steps of 1/16 pixel (finer steps raise the non-zero entries a little, towards 75% with no padding, but leave the zeros where they are):
+
+| Padding | 2× | 1× | 1/2 | 1/4 | 1/8 |
+|---|---|---|---|---|---|
+| 0 | 72% | 68% | 68% | 68% | 68% |
+| 1 | 0% | 0% | 0% | 57% | 67% |
+| 2 | 0% | 0% | 0% | 0% | 57% |
+| 4 | 0% | 0% | 0% | 0% | 0% |
+
+One texel of extrusion is enough for levels 0 and 1. Every level further down needs about twice the padding, because each of its texels is twice as wide, in texels of the full-size atlas: in this layout, 2 texels keep level 2 clean and 4 keep level 3. That's where the cost of mipmapped atlases goes: padding that grows with the number of levels you want clean.
+
+Alignment matters as much as padding. Switch the filter to **Nearest** with no padding: the sprites are 16 texels wide and start on multiples of 16, so every texel of every level up to 16 × 16 lies inside one sprite, and nothing bleeds. Add 1 texel of extruded padding and the cells become 18 texels wide, off the power-of-two grid: nearest filtering now bleeds up to 75% at 1/4. NVIDIA's 2004 white paper *Improve Batching Using Texture Atlases* makes the same point: power-of-two sprites placed on power-of-two boundaries keep their mip chains separate, and the last few levels, where a texel is bigger than a sprite, can't be kept clean at all, so atlases are often built with fewer mip levels than a full chain.
+
+<Tip title="Other ways out">
+**Half-texel inset**: shrink each sprite's texture coordinates by half a texel, so bilinear never reaches past the edge texel at full size. It needs no padding but squeezes the sprite slightly and does nothing for lower mip levels. **Clamp in the shader**: pass each sprite's rectangle and clamp the coordinate (or emulate wrapping) yourself, which also gives repeating sprites inside an atlas. **Texture arrays**: one layer per sprite, so nothing can bleed and each layer has its own mips, at the cost of every layer being the same size. **Bindless textures**: separate textures again, without a binding change per draw.
+</Tip>
+
+Building mip levels per sprite, rather than filtering the whole atlas, also keeps neighbours apart: each sprite's chain is filtered on its own and copied into place, which is what the NVIDIA paper's tool does.
+
+## Takeaways
+
+- An atlas turns many textures into one, so sprites can be **batched** into a few draws.
+- Packing is greedy: **MaxRects** packs best, **guillotine** and **skyline** are close and cheaper, **shelves** are simple and waste the most. Feed sprites in largest first, try several rules, allow **rotation** if the renderer supports it.
+- **Power-of-two** sizes are no longer required on modern APIs, but block compression needs whole blocks, and rounding up can double the atlas.
+- Bilinear filtering and mipmaps read **across sprite edges**. **Padding** stops neighbours; **extrusion** also stops the fade into empty space; each mip level you want clean needs about **twice the padding**, and sprites aligned to power-of-two boundaries.
+
+## Further reading
+
+- Jukka Jylänki, [*A Thousand Ways to Pack the Bin: A Practical Approach to Two-Dimensional Rectangle Bin Packing*](https://github.com/juj/RectangleBinPack) (2010), with public-domain code for every packer here.
+- NVIDIA, [*Improve Batching Using Texture Atlases*](https://www.jmeiners.com/shamans/papers/graphics/texture_atlas.pdf) (SDK white paper, 2004): mipmapping, filtering and address modes in atlases.
+- CodeAndWeb, [TexturePacker texture settings](https://www.codeandweb.com/texturepacker/documentation/texture-settings): padding, extrusion, rotation and size constraints as a production tool exposes them.

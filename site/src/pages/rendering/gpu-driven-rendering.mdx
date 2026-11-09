@@ -1,0 +1,80 @@
+---
+layout: ../../layouts/Lesson.astro
+title: GPU-driven rendering
+order: 11
+part: Engine-side rendering
+summary: 'Moving culling and draw submission onto the GPU: indirect draws (and multi-draw indirect, which WebGPU lacks in core), a compute shader that culls and writes draw arguments, bindless resources, and where mesh shaders fit. Live on WebGPU, with a CPU fallback on WebGL2.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The last three lessons made the CPU's side of a frame cheaper: fewer, sorted, instanced draws; fewer objects through culling; and a render graph that works out the rest. But the CPU still looks at every object every frame: it tests it, picks its level of detail, writes its data and decides its draw. With tens of thousands of objects that loop is the frame's critical path. **GPU-driven rendering** moves it to the GPU, which has thousands of lanes to test objects with, and leaves the CPU recording the same few commands whatever is in view.
+
+## Indirect draws
+
+A normal draw takes its arguments from the CPU: `drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)`. An **indirect draw** takes the same five values from a GPU buffer: `drawIndexedIndirect(buffer, offset)` reads 20 bytes there when the GPU gets to it. Whatever wrote those bytes, a compute shader earlier in the same frame for instance, decides how much is drawn, and the CPU never needs to know.
+
+| | Draw from a buffer | Many draws from a buffer | Count from a buffer too |
+|---|---|---|---|
+| WebGPU | `drawIndirect`, `drawIndexedIndirect` | no (proposed) | no (in Chrome's experimental MDI) |
+| D3D12 | `ExecuteIndirect` | `ExecuteIndirect` with `MaxCommandCount` | `ExecuteIndirect`'s count buffer |
+| Vulkan | `vkCmdDrawIndexedIndirect` | its `drawCount`, with the `multiDrawIndirect` feature | `vkCmdDrawIndexedIndirectCount` (Vulkan 1.2, `drawIndirectCount` feature) |
+| Metal | `drawIndexedPrimitives` with an indirect buffer | indirect command buffers | indirect command buffers |
+| OpenGL | `glDrawElementsIndirect` | `glMultiDrawElementsIndirect` | `glMultiDrawElementsIndirectCount` (4.6) |
+
+**Multi-draw indirect** (MDI) is what makes it scale: one call, many draws, each with its own arguments, and with a **count buffer** the GPU decides how many there are as well. D3D12's command signatures go further and let each draw change some bindings, such as root constants or vertex buffers ([Microsoft's indirect drawing docs](https://learn.microsoft.com/en-us/windows/win32/direct3d12/indirect-drawing)).
+
+WebGPU's core has single indirect draws only, and unless the device has the optional `indirect-first-instance` feature, a draw whose `firstInstance` isn't 0 is silently skipped (the GPU wrote it, so there's nothing to validate). That's why the widget's vertex shader indexes a visible list with the instance index rather than offsetting draws with `firstInstance`. Multi-draw indirect, with an optional count buffer, is proposed as an optional feature ([gpuweb PR 2315](https://github.com/gpuweb/gpuweb/pull/2315); [issue 1354](https://github.com/gpuweb/gpuweb/issues/1354) for the count); Chrome has an experimental `chromium-experimental-multi-draw-indirect`, count buffer included, behind its unsafe-WebGPU flag, which almost no one has switched on. So on WebGPU, a GPU-driven renderer issues one indirect draw per mesh (or per mesh and level of detail) rather than one call for everything. That's still a fixed number of calls, however many objects there are.
+
+## Culling in a compute shader
+
+The widget flies over a bigger version of the [culling lesson's](/rendering/culling/) city. On WebGPU, each frame:
+
+1. The CPU writes the camera's six planes and position, and resets three sets of draw arguments, one per level of detail, to an instance count of 0.
+2. A **compute shader** runs one thread per building. It tests the building's bounding sphere against the six planes; if it's inside, it picks a level of detail from the sphere's size on screen, takes a slot in that level's **visible list** with `atomicAdd` on the level's instance count, and writes the building's index there.
+3. The render pass draws the ground, then calls `drawIndexedIndirect` three times. The vertex shader reads its index from the visible list, using the instance index, and the building's record from a storage buffer uploaded once, at load.
+
+The CPU never sees which buildings are visible. Every 10 frames the widget copies the arguments back to show what the GPU counted; it arrives a frame or more later, and nothing waits for it.
+
+<RenderWidget kind="gpu-driven" />
+
+A WebGPU frame here is 32 calls with 4,096 buildings, with 16,384 and with 65,536: three buffer writes, the compute pass, the ground and three indirect draws. The work per building is all on the GPU. On WebGL2, which has neither compute shaders nor indirect draws, the widget falls back to doing the same cull on the CPU and uploading the survivors' records for three instanced draws, 23 calls a frame, but the CPU visits every building every frame first. Compare the CPU time per frame between the two paths as the city grows, if your browser has both.
+
+From the start of the flight (untick **Fly** to go back there), the camera sees 1,392 of the 4,096 buildings: 14 at the finest level, 360 at the middle one and 1,018 at the coarsest. With 65,536 buildings, the far plane at 700 m keeps it to 4,590 in the frustum. The GPU computes in 32-bit floats and the model in 64-bit, so a building whose sphere just touches a plane can come out differently; the widget says when its read-back differs from the model.
+
+## How far it goes
+
+The widget culls whole buildings against the frustum. Production GPU-driven renderers do much more in the same compute passes:
+
+- **Occlusion.** Test each object against a [hierarchical Z-buffer](/rendering/culling/#occlusion-culling-with-a-hierarchical-z-buffer). Haar and Aaltonen's [*GPU-Driven Rendering Pipelines*](https://advances.realtimerendering.com/s2015/aaltonenhaar_siggraph2015_combined_final_footer_220dpi.pdf) (SIGGRAPH 2015) covers two ways to get the depth: Assassin's Creed Unity used a prepass of its best occluders plus last frame's reprojected depth, and Aaltonen's RedLynx half of the talk used **two-phase** culling, so nothing newly revealed is lost. Unity drew about ten times as many objects as earlier games, with one to two orders of magnitude fewer draw calls from the CPU.
+- **Clusters.** Split meshes into small **clusters** (64 triangles in Assassin's Creed Unity, 128 in Nanite) and cull those, so a big mesh that's half hidden draws half its triangles.
+- **Triangles.** Graham Wihlidal's [*Optimizing the Graphics Pipeline with Compute*](https://www.slideshare.net/slideshow/optimizing-the-graphics-pipeline-with-compute-gdc-2016/59747720) (GDC 2016, Frostbite) culls single triangles in compute: back-facing, too small to cover a sample, outside the frustum, or behind the HZB, and compacts the survivors into a new index buffer. In his example scene, 78% of 443,429 triangles were culled before the rasteriser saw them.
+- **Async compute.** The culling passes run on an async compute queue alongside other work, as he and the [render graph lesson](/rendering/render-graphs/) describe.
+
+## Bindless resources
+
+Indirect draws only help if the draws they replace didn't need different bindings. Real objects have different textures and material parameters, and switching bind groups between draws is CPU work again. **Bindless** resources remove the switching: every texture goes in one huge table, and a shader indexes it with a number from the object's record. D3D12 has `ResourceDescriptorHeap` (Shader Model 6.6) and descriptor tables over the whole heap; Vulkan has descriptor indexing (core in 1.2); Metal has argument buffers. With bindless resources and MDI, the CPU's frame can be a handful of indirect calls per pipeline.
+
+WebGPU's core has no bindless resources yet. A [proposal](https://github.com/gpuweb/gpuweb/blob/main/proposals/bindless.md) is being standardised, and since October 2026 Chrome has an experimental first tier, sampled textures and samplers only, behind its unsafe-WebGPU flag on Windows, Linux and Android (`chromium-experimental-sampling-resource-table`; [Brandon Jones's write-up](https://toji.dev/2026/10/06/webgpu-bindless.html)). Until it ships, the usual tricks stand in: [texture atlases](/rendering/texture-atlases/) and texture arrays indexed per object, and material parameters in a storage buffer.
+
+## Where mesh shaders fit
+
+The vertex shader still runs once per vertex of whatever the indirect draw says, through the fixed-function input assembler. **Mesh shaders** replace that part of the pipeline with something like compute: a **task** (or **amplification**) shader decides, per group of clusters, which to draw, and a **mesh** shader outputs each cluster's vertices and triangles directly to the rasteriser. Culling clusters and triangles moves into the geometry pipeline itself, with no buffers of compacted indices in between. They're in D3D12 (Shader Model 6.5), Vulkan (`VK_EXT_mesh_shader`) and Metal 3. WebGPU has no mesh shaders, and they aren't on its near-term list. Nanite goes the other way for small triangles, rasterising them in compute ([Nanite in brief](/rendering/nanite-in-brief/)).
+
+<Tip title="What the GPU-driven path costs">
+The scene has to live on the GPU: every object's record, in buffers the shaders can index, kept up to date when things move. Debugging is harder, because the CPU no longer knows what was drawn; tools have to read the arguments back. And the work hasn't disappeared, it moved: a culling pass over 65,536 buildings is cheap on a GPU, but it's a pass, and it has to finish before the draws that depend on it.
+</Tip>
+
+## Takeaways
+
+- **Indirect draws** take their arguments from a GPU buffer, so the GPU can decide what's drawn. **Multi-draw indirect** with a count buffer makes it one call for everything; WebGPU's core has only single indirect draws.
+- A **compute shader** culls every object, picks levels of detail and writes the arguments and visible lists, with atomics to append. The CPU's calls per frame stop depending on the object count.
+- **Bindless** resources let one draw cover many materials; **mesh shaders** move cluster and triangle culling into the pipeline. WebGPU's core has neither yet (bindless is experimental in Chrome).
+
+## Further reading
+
+- Ulrich Haar and Sebastian Aaltonen, [*GPU-Driven Rendering Pipelines*](https://advances.realtimerendering.com/s2015/aaltonenhaar_siggraph2015_combined_final_footer_220dpi.pdf) (SIGGRAPH 2015).
+- Graham Wihlidal, [*Optimizing the Graphics Pipeline with Compute*](https://www.slideshare.net/slideshow/optimizing-the-graphics-pipeline-with-compute-gdc-2016/59747720) (GDC 2016).
+- MDN, [`drawIndexedIndirect()`](https://developer.mozilla.org/en-US/docs/Web/API/GPURenderPassEncoder/drawIndexedIndirect); the [WebGPU specification](https://www.w3.org/TR/webgpu/); [gpuweb PR 2315](https://github.com/gpuweb/gpuweb/pull/2315), [issue 1354](https://github.com/gpuweb/gpuweb/issues/1354) and Dawn's [multi-draw indirect notes](https://dawn.googlesource.com/dawn.git/+/chromium/7037/docs/dawn/features/multi_draw_indirect.md).
+- Microsoft, [*Indirect drawing*](https://learn.microsoft.com/en-us/windows/win32/direct3d12/indirect-drawing) in D3D12; Khronos, the [`VK_KHR_draw_indirect_count`](https://docs.vulkan.org/guide/latest/extensions/VK_KHR_draw_indirect_count.html) guide page.
+- Chrome, [*What's next for WebGPU*](https://developer.chrome.com/blog/next-for-webgpu) (November 2024); Brandon Jones, [*Experimenting with Bindless Textures in WebGPU*](https://toji.dev/2026/10/06/webgpu-bindless.html) (October 2026).

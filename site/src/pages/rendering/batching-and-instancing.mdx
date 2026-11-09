@@ -1,0 +1,96 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Batching and instancing
+order: 8
+part: Engine-side rendering
+summary: 'Why draw calls cost CPU time (and less on D3D12 and Vulkan than on D3D11 and OpenGL), sorting by state with sort keys, merging static geometry, instanced draws, and what each saves. On the real GPU, with the CPU cost measured live.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+The [last lesson](/rendering/same-frame-real-gpu/) followed one draw call down from the API to the GPU's command processor: validated by the browser, translated by the driver, queued by the OS. All of that is CPU work, paid per call, however small the draw. A scene of ten thousand objects drawn one call each pays it ten thousand times. This lesson is about the three standard ways to pay it less often: **sorting** draws so that state changes less, **merging** static objects into fewer meshes, and **instancing**, one draw for many copies of a mesh.
+
+## What a draw call costs
+
+A draw call itself is a few bytes in a command buffer. The cost is around it:
+
+- **Validation.** Is everything bound, of the right type, inside its buffer? D3D11 and OpenGL drivers check at every draw. D3D12 and Vulkan check much less (the validation layers do it during development), and WebGPU checks everything, because a web page must not be able to crash the GPU process.
+- **Resolving state.** D3D11 and OpenGL let you change any piece of state at any time, so at each draw the driver works out what changed and what that means for the hardware, sometimes down to patching or recompiling a shader. D3D12 and Vulkan bake that into pipeline objects ahead of time (see the [last lesson](/rendering/same-frame-real-gpu/#pipelines-and-why-their-state-is-baked-up-front)).
+- **Tracking resources.** An older driver tracks every resource a draw touches, so it can insert barriers and keep memory resident. In D3D12 and Vulkan that's the application's job, done once per pass rather than once per draw.
+- **Writing commands.** Binds and the draw become the GPU's own command packets.
+
+So the same draw is much cheaper on D3D12 and Vulkan, and they can record command lists on many threads at once, where a D3D11 or OpenGL context mostly records on one. 3DMark's API Overhead test measured it when D3D12 arrived: on one Core i7-5960X with a GTX 980, Legit Reviews got about 1.3 million draws a second through D3D11 on one thread, 2.8 million through D3D11 multithreaded, and 16.6 million through D3D12. Futuremark is clear that it's a test of APIs, not of hardware, and a real frame does more per draw than the test does. The ratio is the point: roughly an order of magnitude.
+
+That doesn't make draw calls free on the new APIs: an engine still pays for its own work per object (culling, choosing a level of detail, updating constants, building the list) and the GPU pays a little per draw too, for its command processor to set up each one. The techniques below cut both.
+
+## The same grid, four ways
+
+The widget draws a grid of objects: crates, wedges and pyramids, each in one of four materials. Two of the materials (stone and brass) use a plain lit shader and two (tile and moss) a banded one, so a material is a pipeline plus a colour. Choose how to draw it and how many objects there are.
+
+<RenderWidget kind="batching" />
+
+The counts on the right come from the frame's plan, and they're the same on every machine. The times below them are measured on yours, live: how long the page takes to build the list of draws, and to record and submit it. They're only the page's share. On WebGPU the browser checks and translates the commands again in its GPU process, and the driver does its own work after that; none of it is in these numbers. Watch how they change between methods and with the object count rather than what they are.
+
+With **1,024 objects**, one draw per object in the order the scene lists them makes 1,024 draw calls, and the binds around them barely ever repeat: 508 pipeline binds, 762 material binds and 664 mesh binds. Each object also binds its own constants, its position and scale. On WebGPU that's 4,654 calls a frame; on WebGL2, 3,988. (The WebGPU counts leave out the one `createView` a frame on the canvas texture, which the renderer doesn't record.)
+
+## Sorting by state
+
+Neighbouring draws that share a pipeline, a material or a mesh don't need to bind them again. So sort the draws, and the binds happen once per run of draws instead of once per draw.
+
+The usual way is a **sort key**: pack the state you want to group by into one integer, most expensive first, and sort the integers. Christer Ericson's [*Order your graphics draw calls around!*](https://realtimecollisiondetection.net/blog/?p=86) is the classic description. His 64-bit key starts with layers and viewports (game or HUD, split screen) and the translucency type, then depth and material, and he points out that either of those two can come first; the widget's 32-bit key is pipeline (4 bits), material (4 bits), mesh (4 bits) and depth (16 bits). Depth goes in the low bits, so it only orders draws whose state is the same: front to back for opaque objects, so that early depth testing rejects more of what's behind (see [Depth](/rendering/depth/)). Transparent objects are sorted back to front instead, and their depth has to go above the material, because [the order they blend in](/rendering/blending-and-transparency/) decides what you see.
+
+Sort the 1,024 draws and the binds fall to 2 pipeline binds, 4 material binds and 12 mesh binds. The draws are still 1,024, and so are the per-object constants, so a frame is 2,086 calls on WebGPU and 2,072 on WebGL2. The list beside the frame shows the first draws' keys, with the fields that changed from the draw before marked.
+
+Which state goes first? Whatever costs most to change. NVIDIA's *Beyond Porting* talk (Everitt and McDonald, 2014) ranked OpenGL state changes, in decreasing cost: render target, program, ROP state (blending, depth), texture bindings, vertex format, uniform buffer bindings, vertex bindings, uniform updates. On D3D12 and Vulkan the pipeline object takes in the program, the ROP state and the vertex format, so the order collapses to render target (the pass), pipeline, then bindings. Sorting costs CPU time too; the widget shows it as building and sorting the list. Engines keep each object's key between frames and only update what changed (Ericson suggests the same), and integer keys suit a radix sort.
+
+## Static batching
+
+Objects that never move can be merged. At load, copy every object's mesh into one big vertex buffer per material, already transformed into place, and draw each material with one call. That's **static batching**. **Static batches** in the widget draw the grid in 4 draws: one per material.
+
+The costs come with it:
+
+- **Memory.** Every object is now its own copy of its mesh. The three shared meshes take 2.0 KB; the merged ones for 1,024 objects take 746.5 KB, and 11.9 MB for 16,384. They also need 32-bit indices once a batch passes 65,536 vertices.
+- **Nothing moves.** The positions are baked into the vertices.
+- **Culling is coarse.** A batch is drawn whole, so an engine that batches a whole level draws everything, visible or not, unless it splits batches by area or draws sub-ranges of the index buffer. The [next lesson](/rendering/culling/) is about not drawing what you can't see.
+
+Merging only works for objects that share a material. Engines widen that by sharing more: many materials' textures in one [atlas](/rendering/texture-atlases/) or texture array, and material parameters in a buffer indexed per vertex or per object.
+
+## Instancing
+
+Most repeated objects are the same mesh many times: trees, rocks, crates, crowds. An **instanced draw** draws a mesh many times in one call, `drawIndexed(indexCount, instanceCount, ...)`, and the vertex shader gets an instance index to tell the copies apart. Per-instance data, here the same 16 bytes of position and scale each object binds when it's drawn on its own, goes in a vertex buffer that advances once per instance instead of once per vertex (`stepMode: 'instance'` in WebGPU, `vertexAttribDivisor(3, 1)` in WebGL2), or in a storage buffer the shader indexes.
+
+**Instanced** draws the grid in 12 draws, one per mesh and material, from 16.4 KB of instance records for 1,024 objects. WebGPU's `drawIndexed` takes a `firstInstance`, so all twelve groups read from one buffer and each draw starts at its own records: 51 calls a frame. WebGL2 has no first instance (a draft extension adds one, but browsers only expose it behind a flag), so each draw points the instance attribute at its group's records again, and the WebGL2 frame is 60 calls.
+
+Instances can move: rewrite their records each frame, which is cheap compared with a draw per object. They can be culled one by one, by writing only the visible ones' records; the [GPU-driven rendering](/rendering/gpu-driven-rendering/) lesson has the GPU do that itself. What instancing can't do is draw different meshes in one call. That needs indirect draws, also in that lesson.
+
+## What each saves
+
+At 1,024 objects:
+
+| | Draw calls | Pipeline binds | Material binds | Mesh binds | WebGPU calls | WebGL2 calls |
+|---|---|---|---|---|---|---|
+| One draw per object | 1,024 | 508 | 762 | 664 | 4,654 | 3,988 |
+| Sorted by state | 1,024 | 2 | 4 | 12 | 2,086 | 2,072 |
+| Static batches | 4 | 2 | 4 | 4 | 27 | 21 |
+| Instanced | 12 | 2 | 4 | 12 | 51 | 60 |
+
+Try 16,384 objects. The first two methods grow with the object count, in calls and in the time you see; the last two stay at 4 and 12 draws, and their time barely moves, because the GPU does the repeating.
+
+<Tip title="Constants per object, 256 bytes apart">
+Each object's constants are 16 bytes, but the per-object draws bind them at 256-byte offsets, because 256 is WebGPU's default `minUniformBufferOffsetAlignment` (WebGL2 reports its own `UNIFORM_BUFFER_OFFSET_ALIGNMENT`, which varies by GPU, and the renderer uses that). At 1,024 objects the per-object blocks take 262.1 KB, mostly padding. Engines on D3D12 and Vulkan put small per-draw values in root constants or push constants instead, or put every object's data in one storage buffer and pass only an index.
+</Tip>
+
+## Takeaways
+
+- A draw call costs CPU time for validation, state resolution, resource tracking and command writing. D3D12 and Vulkan moved most of that out of the draw and allow recording on many threads: about an order of magnitude more draws a second than D3D11 in the API overhead tests.
+- **Sort keys** group draws by state, most expensive state in the highest bits, depth in the lowest. Same draws, far fewer binds.
+- **Static batching** merges what never moves into one draw per material, at the cost of memory, movement and fine-grained culling.
+- **Instancing** draws one mesh many times from per-instance records; it keeps objects movable and cullable, but one draw is one mesh.
+
+## Further reading
+
+- Christer Ericson, [*Order your graphics draw calls around!*](https://realtimecollisiondetection.net/blog/?p=86) (2008): sort keys.
+- Legit Reviews, [*Looking at DirectX 12 performance: 3DMark API Overhead Feature Test*](https://www.legitreviews.com/?p=160936), and Futuremark's [description of the test](https://aws.futuremark.com/news/compare-directx-12-mantle-and-directx-11-with-3dmark).
+- Cass Everitt and John McDonald, [*Beyond Porting*](https://www.slideshare.net/slideshow/beyond-porting/30219704) (Steam Dev Days 2014): the relative cost of OpenGL state changes. Everitt, Foley, Sellers and McDonald, [*Approaching Zero Driver Overhead*](https://www.slideshare.net/slideshow/approaching-zero-driver-overhead/32554457): where driver time goes.
+- MDN, WebGPU's [`drawIndexed()`](https://developer.mozilla.org/en-US/docs/Web/API/GPURenderPassEncoder/drawIndexed) and WebGL2's [`vertexAttribDivisor()`](https://developer.mozilla.org/en-US/docs/Web/API/WebGL2RenderingContext/vertexAttribDivisor).
+- [web3dsurvey](https://web3dsurvey.com/webgl2/extensions/WEBGL_draw_instanced_base_vertex_base_instance): which browsers expose the draft extension that adds a base instance to WebGL2.

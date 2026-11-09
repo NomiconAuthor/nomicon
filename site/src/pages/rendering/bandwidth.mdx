@@ -1,0 +1,117 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Bandwidth
+order: 19
+part: Performance and profiling
+summary: "Render-target formats and their bytes per pixel, a frame's bandwidth worked out from its passes' load and store ops, framebuffer compression (DCC, AFBC) in brief, and tile-based GPUs, where keeping data on chip is the whole game: WebGPU's loadOp and storeOp, memoryless and transient attachments, and passes that never leave the chip."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Every render target a frame draws into lives in memory. A pass writes it out; a later pass reads it back. At two million pixels a frame and several bytes per pixel per target, that adds up to gigabytes a second, and memory bandwidth is shared with everything else the GPU reads: textures, vertices, shadow maps. On a phone it's also shared with the CPU, and every byte that crosses the bus costs battery. This lesson works out where a frame's render-target bytes go, and what you can do about each of them.
+
+## Bytes per pixel
+
+A format's size is its bytes per pixel times the pixels. The usual ones:
+
+| WebGPU | D3D (`DXGI_FORMAT_…`) | Vulkan (`VK_FORMAT_…`) | Bytes | Typical use |
+|---|---|---|---|---|
+| `rgba8unorm` | `R8G8B8A8_UNORM` | `R8G8B8A8_UNORM` | 4 | albedo, the final image (with an sRGB variant) |
+| `rgb10a2unorm` | `R10G10B10A2_UNORM` | `A2B10G10R10_UNORM_PACK32` | 4 | normals, 10-bit output |
+| `rg11b10ufloat` | `R11G11B10_FLOAT` | `B10G11R11_UFLOAT_PACK32` | 4 | HDR colour with no alpha |
+| `rgba16float` | `R16G16B16A16_FLOAT` | `R16G16B16A16_SFLOAT` | 8 | HDR colour, precise normals |
+| `rgba32float` | `R32G32B32A32_FLOAT` | `R32G32B32A32_SFLOAT` | 16 | rarely a render target |
+| `depth16unorm` | `D16_UNORM` | `D16_UNORM` | 2 | shadow maps, simple scenes |
+| `depth24plus-stencil8` | `D24_UNORM_S8_UINT` | `D24_UNORM_S8_UINT` | 4 | depth and stencil, packed |
+| `depth32float` | `D32_FLOAT` | `D32_SFLOAT` | 4 | depth, and reverse-Z |
+
+`rg11b10ufloat` is the HDR workhorse: three small floats (6-bit mantissas for red and green, 5-bit for blue, a 5-bit exponent each, no sign) in the space of an RGBA8 pixel, half the size of `rgba16float`. It can't hold negative values or alpha. In WebGPU you can render to it only on devices created with the optional `rg11b10ufloat-renderable` feature (WebGL2 needs `EXT_color_buffer_float`). WebGPU's `depth24plus` is "at least 24 bits", and it and `depth24plus-stencil8` leave the real format to the implementation, which may use a 32-bit float (some GPUs have no packed 24-bit depth with stencil at all); the widget's model counts them as 4 bytes. The [depth lesson](/rendering/depth/#precision-and-z-fighting) covers what each depth format does to precision.
+
+## A frame's bandwidth
+
+The widget draws a small deferred frame on your GPU in three passes. The first two run at the resolution you pick, not the canvas's, so their bytes are real:
+
+1. **G-buffer:** the [pipeline lesson's](/rendering/the-pipeline/) floor and box, writing albedo (`rgba8unorm`), a normal and depth.
+2. **Lighting:** one full-screen triangle reads albedo and normal, and depth for fog, and writes lit HDR colour.
+3. **Post:** one full-screen triangle tone-maps the HDR colour onto the widget's small canvas. The model counts it as a full-size swapchain image, as a game's would be.
+
+Each attachment has a **load op**, what happens to it when the pass starts, and a **store op**, what happens when it ends. In WebGPU they're part of the pass descriptor:
+
+```js
+encoder.beginRenderPass({
+  colorAttachments: [
+    { view: albedo, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 0 } },
+    { view: normal, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 0 } },
+  ],
+  depthStencilAttachment: { view: depth, depthLoadOp: 'clear', depthStoreOp: 'discard', depthClearValue: 1 },
+});
+```
+
+`load` reads the attachment's old contents in; `clear` starts from a constant and reads nothing. `store` writes the result out; `discard` throws it away. The model in the widget counts what that moves: a load reads the whole attachment, a store writes it, a later pass that samples it reads it once. That's exactly the render-target traffic of a tile-based GPU (below). On a desktop GPU it's a lower bound, since overdraw, blending and depth tests add traffic their caches only partly absorb, and compression takes some away.
+
+<RenderWidget kind="bandwidth" />
+
+At 1920 × 1080 with the starting formats the frame moves 107.8 MB, 6.47 GB/s at 60 frames a second. The G-buffer pass stores 33.2 MB (albedo 8.3, normal 16.6, depth 8.3), the lighting pass reads all of it back and writes 16.6 MB of HDR colour, and the post pass reads that and writes 8.3 MB to the swapchain image. Everything is written once and read once, so the formats decide most of it:
+
+- A `rgb10a2unorm` normal instead of `rgba16float`, or `rg11b10ufloat` HDR instead of `rgba16float`, each saves 16.6 MB: 91.2 MB a frame.
+- `rgba32float` HDR costs 141.0 MB.
+- At 3840 × 2160, four times the pixels, the starting frame moves 431.3 MB, 25.88 GB/s.
+
+And the ops decide the rest:
+
+- **Load instead of clear** reads a target nobody needed: albedo with `load` costs 8.3 MB more, 116.1 MB. Use `clear` (or, outside WebGPU, "don't care") unless you really draw on top of last frame's contents.
+- **Discard what nobody reads.** Turn fog off and nothing reads depth after the G-buffer pass. Set its store op to `discard` and the frame drops to 91.2 MB. With the smaller normal and HDR formats as well, 58.1 MB, 3.48 GB/s: about half the starting frame for the same picture.
+- **Discard something that is read** and the next pass gets garbage. Discard albedo and the lighting pass reads it anyway: in WebGPU, which never lets a page read memory it didn't write, a discarded attachment reads as zeros, so the lit scene goes black; native APIs leave it undefined.
+
+On WebGL2 there are no load and store ops. The widget's "clear" is a clear call, "load" is no call, and "discard" is `gl.invalidateFramebuffer` after the pass, a hint the driver may ignore. Open **The pass setup the renderer recorded** under the widget to see the real calls for each API.
+
+## Framebuffer compression
+
+GPUs compress render targets on the fly, without loss, to move fewer bytes. AMD calls theirs **delta colour compression** (DCC): a block of pixels is stored as one value at full precision and the rest as [deltas from it](https://gpuopen.com/dcc-overview/). Arm's is **AFBC** (Arm Frame Buffer Compression), which Arm says [cuts bandwidth by up to 50%](https://arm-software.github.io/vulkan_best_practice_for_mobile_developers/samples/performance/afbc/afbc_tutorial.html) (its Sponza sample measured a third less write bandwidth). NVIDIA's GPUs compress too. Both save bandwidth, not memory: the target still has its full allocation, plus some metadata.
+
+You don't turn it on; the driver does, when it can. What you control is not stopping it:
+
+- **Don't ask for usages you don't need.** A storage (UAV) usage on a render target turns compression off on many GPUs ([AMD](https://gpuopen.com/dcc-overview/), and on Mali, `VK_IMAGE_USAGE_STORAGE_BIT` stops AFBC). Copies can force a decompression first.
+- **Clear to simple values.** AMD recommends clearing to 0s and 1s, which the hardware can record as a "fast clear" without writing the pixels.
+- **Mind the format.** AFBC on Mali-G77 and later handles formats up to 32 bits a pixel; earlier Mali GPUs only a fixed list. AMD notes that D32F depth compresses as well as D16 or better.
+
+The model in the widget ignores compression; how much it saves depends on the content (flat colour compresses well, noise doesn't) and on the GPU.
+
+## Tile-based GPUs: keep it on chip
+
+Phones, tablets and Apple silicon Macs use **tile-based** GPUs. They split the target into small tiles, first work out which triangles touch each tile, then render one tile at a time into **tile memory**: fast storage on the GPU itself. Apple's documentation describes tile memory as having [many times the bandwidth, a fraction of the latency and much less energy per access](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering) than device memory. Only when a tile is finished is its result written out.
+
+So on a tile-based GPU the load and store ops are the render-target bandwidth. A `clear` reads nothing from memory (the tile starts from a constant), a `load` copies the attachment in from memory tile by tile, a `store` copies it out, a `discard` skips that. Apple's guidance is blunt: [choose "don't care" or clear unless you need the previous contents, and don't store depth you won't read](https://developer.apple.com/documentation/metal/setting-load-and-store-actions). Every API has the same switches under different names:
+
+| | Start of pass | End of pass |
+|---|---|---|
+| WebGPU | `loadOp`: `clear`, `load` | `storeOp`: `store`, `discard` |
+| Metal | `loadAction`: `clear`, `load`, `dontCare` | `storeAction`: `store`, `dontCare`, `multisampleResolve`, … |
+| Vulkan | `loadOp`: `CLEAR`, `LOAD`, `DONT_CARE` (and `NONE`) | `storeOp`: `STORE`, `DONT_CARE`, `NONE` |
+| D3D12 render passes | `D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR`, `_PRESERVE`, `_DISCARD` | `D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE`, `_DISCARD`, `_RESOLVE` |
+| OpenGL ES, WebGL2 | `glClear` | `glInvalidateFramebuffer` |
+
+WebGPU has no "don't care" load: `clear` is the cheap choice. On OpenGL ES the driver has to infer the ops from your calls, and Arm warns that invalidating [too late (in the next frame, say) is no use](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/mali-performance-2-how-to-correctly-handle-framebuffers): call it before the framebuffer is unbound.
+
+**Memoryless attachments.** An attachment that is cleared at the start, discarded at the end and never sampled doesn't need memory at all: it can live and die in tile memory. Metal has the `memoryless` storage mode, Vulkan has transient attachments backed by lazily allocated memory, and WebGPU added a [`TRANSIENT_ATTACHMENT`](https://developer.chrome.com/blog/new-in-webgpu-146) texture usage in Chrome 146. Its [rules](https://github.com/gpuweb/gpuweb/blob/main/proposals/transient-attachments.md) are the definition: the texture may have only that usage and `RENDER_ATTACHMENT`, and every pass that uses it must clear it and discard it. In the widget, turn fog off and set depth to clear and discard: if your browser has it, depth becomes a transient attachment (the status line says so). Depth, MSAA colour before the resolve and G-buffers in a single-pass deferred renderer are the classic candidates.
+
+**Passes that never leave the chip.** The biggest saving is one WebGPU can't express. In this frame the lighting pass reads the G-buffer at the same pixel it's shading, so on a tile-based GPU it could run in the same pass, while the G-buffer is still in tile memory, and the G-buffer would never be written out at all. Vulkan does it with subpasses and input attachments (or, with dynamic rendering, local reads), Metal with programmable blending, imageblocks and tile shaders, OpenGL ES with pixel local storage. Tick **G-buffer and lighting in one pass, on chip**: the model's frame drops from 107.8 MB to 41.5 MB, and the G-buffer's 33.2 MB could be memoryless. The reverse is just as real: when a driver has to flush a half-finished render target to memory and read it back in to carry on, Arm puts the cost at [+400% bandwidth](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/mali-performance-2-how-to-correctly-handle-framebuffers) against rendering it in one go.
+
+<Tip title="What the live times show">
+On a desktop GPU, render-target traffic at this size is a small share of the time, and caches and compression soften it: expect the format and the resolution to move the times more than store against discard. On a tile-based GPU (an Apple silicon Mac, a phone), the ops matter more. Either way, these are your GPU's numbers; the model's are the ones that hold everywhere.
+</Tip>
+
+## Takeaways
+
+- **Bandwidth is bytes per pixel × pixels × passes that touch them.** Pick the smallest format that holds what you need: `rg11b10ufloat` for HDR colour, 10-bit normals, 32-bit depth.
+- **Load and store ops** say what a pass moves: clear rather than load, discard what nobody reads. Discard something that is read and you read garbage.
+- **Framebuffer compression** (DCC, AFBC) saves bandwidth, not memory, and only when you don't stop it: no needless storage usage, simple clear values.
+- **Tile-based GPUs** render into tile memory, and only the ops cost render-target bandwidth. Memoryless and transient attachments need no memory at all, and merging passes keeps whole G-buffers on chip.
+
+## Further reading
+
+- Apple, [*Tailor your apps for Apple GPUs and tile-based deferred rendering*](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering) and [*Setting load and store actions*](https://developer.apple.com/documentation/metal/setting-load-and-store-actions).
+- Arm, [*Mali performance 2: how to correctly handle framebuffers*](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/mali-performance-2-how-to-correctly-handle-framebuffers), and the [AFBC sample](https://arm-software.github.io/vulkan_best_practice_for_mobile_developers/samples/performance/afbc/afbc_tutorial.html) from Arm's Vulkan best practices.
+- AMD GPUOpen, [*Getting the most out of delta color compression*](https://gpuopen.com/dcc-overview/).
+- Microsoft, [*Direct3D 12 render passes*](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-12-render-passes).
+- [*What's new in WebGPU (Chrome 146)*](https://developer.chrome.com/blog/new-in-webgpu-146) and the [transient attachments proposal](https://github.com/gpuweb/gpuweb/blob/main/proposals/transient-attachments.md).

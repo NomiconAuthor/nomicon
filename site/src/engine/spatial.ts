@@ -1,4 +1,5 @@
 import { h, seg, fmt } from './dom';
+import { llCanvas, llFit, llStage } from './fit';
 
 /**
  * Spatial partitioning lab. N moving circles in a 2D world, indexed by one of
@@ -605,7 +606,7 @@ export class SpatialLab {
   constructor(host: HTMLElement) {
     this.root = h('div', { class: 'll sp' });
     host.replaceChildren(this.root);
-    this.cnv = h('canvas', { class: 'sp-canvas', width: '1000', height: '625', 'aria-label': 'Objects and the spatial structure' });
+    this.cnv = llCanvas(WW, WH, 'Objects and the spatial structure', 'sp-canvas');
     const kind = seg<Kind>('Structure', (Object.keys(NAMES) as Kind[]).map((k) => [k, NAMES[k]]), this.kind, (v) => ((this.kind = v), this.rebuild()));
     const task = seg<Task>(
       'Question',
@@ -635,10 +636,10 @@ export class SpatialLab {
       h('div', { class: 'll-row' }, task.el),
       h('div', { class: 'll-row' }, count.el, layout.el, h('label', { class: 'sp-check' }, move, 'Moving')),
       this.params,
-      this.cnv,
-      this.stats,
-      this.note,
+      llStage(this.cnv, [this.stats, this.note]),
     );
+    // Drawing is in backing pixels (scale = backing width / world width), so a resize just redraws.
+    llFit(this.cnv, () => this.draw());
     const pick = (e: PointerEvent) => {
       const r = this.cnv.getBoundingClientRect();
       this.q.x = ((e.clientX - r.left) / r.width) * WW;

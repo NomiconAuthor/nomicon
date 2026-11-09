@@ -1,0 +1,162 @@
+/* Styles shared by the engine-side GPU lessons (batching, culling, render graphs, GPU-driven). */
+
+/* A short list of draws with their sort keys; fields that changed from the draw before are marked. */
+.rd-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  display: grid;
+  gap: 1px;
+}
+.rd-keys code {
+  font-size: 12px;
+  color: var(--ink);
+  background: none;
+  padding: 0;
+}
+.rd-keys .ch {
+  color: var(--warn);
+  font-weight: 600;
+}
+/* A side panel's readouts measured live, kept apart from the pinned ones. */
+.rd-live b {
+  color: var(--accent);
+}
+.rd-bad b {
+  color: var(--alert);
+}
+/* A range input with its value beside it. */
+.rd-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.rd-slider input {
+  flex: 1 1 auto;
+  min-width: 6rem;
+}
+.rd-slider output {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+/* Colour keys under a figure. */
+.rd-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.rd-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.rd-swatch i {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+/* The culling widget: a square map beside a 16:9 camera view, stacked when narrow. */
+.rd-cullpair {
+  --rd-ar: 2.78;
+  --rd-max-w: 980px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.78fr);
+  gap: 12px;
+  align-items: start;
+}
+.rd-cullpair .rd-canvas {
+  width: 100%;
+}
+@container rd (max-width: 560px) {
+  .rd-cullpair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rd-cullpair > div:first-child {
+    max-width: 320px;
+  }
+}
+/* The render graph widget: the pass list beside the chart, and the selected pass's details. */
+.rd-graph {
+  --rd-side-min: 18rem;
+}
+.rd-passes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12.5px;
+  display: grid;
+  gap: 1px;
+  color: var(--ink);
+}
+.rd-passes li {
+  cursor: pointer;
+  padding: 1px 6px;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+}
+.rd-passes li.sel {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.rd-passes li.culled {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.rd-passes li.culled .ll-muted {
+  text-decoration: none;
+}
+.rd-passes .n {
+  display: inline-block;
+  min-width: 1.6em;
+  color: var(--muted);
+}
+/* On a phone the pass list goes into two columns of names; the details show on click. */
+@container rd (max-width: 560px) {
+  .rd-graph .rd-passes {
+    grid-template-columns: 1fr 1fr;
+  }
+  .rd-graph .rd-passes .ll-muted {
+    display: none;
+  }
+}
+.rd-pass-detail {
+  font-size: 12.5px;
+  color: var(--body);
+}
+.rd-pass-detail p {
+  margin: 0 0 4px;
+}
+/* Secondary detail in a side panel, collapsed. */
+.rd-note > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+/* Culling: counts that double as the map's colour key, and the camera's heading with its frame stats. */
+.ll-stat > .rd-key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+.rd-cull-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+}
+.rd-cull-h .ll-stats {
+  gap: 0 10px;
+  font-size: 12px;
+}

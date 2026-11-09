@@ -1,5 +1,6 @@
 /** Shared drawing and playback helpers for the AI widgets. */
 import { h } from '../engine/dom';
+import { textPx } from './fit';
 import { type ActionId, type World, ACTIONS, ACTION_COL, ACTION_NAMES, CRYSTALS, CRATES, CRATE_R, H, CHARGES, POTION, RANGE, TICK_HZ, W } from './world';
 import type { Brain } from './brains';
 import { drawMissile, drawSprite, launch, onSprites } from '../sprites/sprites';
@@ -126,10 +127,12 @@ export function drawArena(cnv: HTMLCanvasElement, w: World, opt: { caption?: str
     ctx.globalAlpha = on ? 1 : 0.3;
     ctx.fillStyle = col;
     ctx.beginPath();
-    ctx.roundRect(P(x) - 10, P(y) - 10, 20, 20, 4);
+    const gs = textPx(cnv, 13, 9);
+    const r = Math.max(10, gs * 0.77);
+    ctx.roundRect(P(x) - r, P(y) - r, 2 * r, 2 * r, 4);
     ctx.fill();
     ctx.fillStyle = c('--bg');
-    ctx.font = `bold 13px ${c('--f-body')}`;
+    ctx.font = `bold ${gs}px ${c('--f-body')}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(glyph, P(x), P(y) + 1);
@@ -187,21 +190,23 @@ export function drawArena(cnv: HTMLCanvasElement, w: World, opt: { caption?: str
     ctx.stroke();
     ctx.lineWidth = 1;
   }
-  ctx.font = `600 12px ${c('--f-body')}`;
+  // Text keeps a readable size however small the arena is shown (fit.ts).
+  const fs = textPx(cnv, 12);
+  ctx.font = `600 ${fs}px ${c('--f-body')}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   const label = ACTION_NAMES[a.action];
-  const ty = a.y < 2 ? P(a.y) + 40 : P(a.y) - 30;
+  const ty = a.y < 2 ? P(a.y) + 28 + fs : P(a.y) - 30;
   ctx.fillStyle = c('--bg');
   const tw = ctx.measureText(label).width + 8;
   ctx.globalAlpha = 0.8;
-  ctx.fillRect(P(a.x) - tw / 2, ty - 12, tw, 16);
+  ctx.fillRect(P(a.x) - tw / 2, ty - fs, tw, fs + 4);
   ctx.globalAlpha = 1;
   ctx.fillStyle = actCol;
   ctx.fillText(label, P(a.x), ty);
 
   ctx.textAlign = 'left';
-  ctx.font = `12px ${c('--f-mono')}`;
+  ctx.font = `${fs}px ${c('--f-mono')}`;
   ctx.fillStyle = muted;
   ctx.fillText(`${w.seconds.toFixed(1)} s · wave ${w.wave}${opt.caption ? ' · ' + opt.caption : ''}`, 8, cnv.height - 8);
   if (w.dead) {
@@ -210,7 +215,7 @@ export function drawArena(cnv: HTMLCanvasElement, w: World, opt: { caption?: str
     ctx.fillRect(0, 0, cnv.width, cnv.height);
     ctx.globalAlpha = 1;
     ctx.fillStyle = alert;
-    ctx.font = `600 22px ${c('--f-body')}`;
+    ctx.font = `600 ${textPx(cnv, 22, 15)}px ${c('--f-body')}`;
     ctx.textAlign = 'center';
     ctx.fillText(`Down after ${w.seconds.toFixed(0)} s, ${w.stats.kills} kills`, cnv.width / 2, cnv.height / 2);
   }
@@ -274,7 +279,7 @@ export function drawScores(cnv: HTMLCanvasElement, hist: History, actions: Actio
   }
   ctx.stroke();
   ctx.fillStyle = tok(cnv, '--muted');
-  ctx.font = `10px ${tok(cnv, '--f-mono')}`;
+  ctx.font = `${textPx(cnv, 10)}px ${tok(cnv, '--f-mono')}`;
   ctx.fillText('1.0', 3, Y(1) + 11);
   const n = hist.span;
   const dx = cw / n;

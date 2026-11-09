@@ -1,0 +1,104 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Depth
+order: 3
+part: Pipeline fundamentals
+summary: 'The z-buffer and what it really stores: why precision piles up at the near plane, z-fighting and how the near plane, the depth format and reverse-Z change it, and when the depth test runs before the fragment shader: early Z, late Z and the depth prepass.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Triangles arrive in whatever order the draw calls send them, and the nearest one has to win at every pixel. The **depth buffer** (z-buffer) solves that with one number per pixel, or per sample: the depth of the nearest thing drawn there so far. Each fragment compares its depth with the stored one, and is written only if it's nearer. It's simple, order-independent for opaque geometry, and everything else in this lesson is about its two weaknesses: limited precision, and the cost of shading fragments that then lose.
+
+## What the buffer stores
+
+The value stored isn't the distance. After the divide by *w*, a perspective projection leaves
+
+> *d* = *f* / (*f* − *n*) · (1 − *n* / *z*)
+
+for a point at distance *z*, with near plane *n* and far plane *f*: 0 at the near plane, 1 at the far plane, in D3D, Vulkan and WebGPU. It's chosen because *z*/*w* is linear in screen space, so the rasteriser can interpolate it with plain barycentrics, as the [rasterisation lesson](/rendering/rasterisation/) showed. The price is that *d* is a linear function of **1/*z***, not of *z*. Half the range, *d* from 0 to 0.5, is used up by about twice the near distance: with the near plane at 10 cm, everything beyond 20 cm shares the other half.
+
+The widget looks down at a field from 50 m up, with a far plane at 5 km. A road is painted on as its own quad, 2 cm above the ground: a decal. The tower, the ground and the road are drawn in that order. Switch **Show** to **Depth buffer** to see what's stored (the grey is stretched over the stored range; the readout says what that range is).
+
+<RenderWidget kind="depth" />
+
+## Precision and z-fighting
+
+A depth format can only store so many values: 65,536 for 16 bits, about 16.8 million for 24. Because *d* follows 1/*z*, the stored values are packed tightly near the camera and spread thin further away: the gap in distance between two neighbouring values grows roughly with *z*² / *n*. When the ground and the road both round to the same value, or round the wrong way round, the test can't tell which is in front, and the result changes from pixel to pixel and frame to frame. That's **z-fighting**.
+
+With a **16-bit** buffer and the near plane at 0.1 m, the ground shows through on 392 of the road's 408 pixels. The widget's resolution chart shows why: at 100 m, two surfaces 1.5 m apart can still get the same 16-bit value.
+
+How far apart two surfaces must be to get different depths, with the near plane at 0.1 m and the far plane at 5 km:
+
+| Format | at 10 m | at 100 m | at 1 km |
+|---|---|---|---|
+| 16-bit | 1.5 cm | 1.5 m | 166 m |
+| 24-bit | 60 µm | 6.0 mm | 60 cm |
+| 32-bit float | 60 µm | 6.0 mm | 60 cm |
+| 32-bit float, reverse-Z | 0.9 µm | 12 µm | 73 µm |
+
+## The near plane matters most
+
+The precision depends on *z* / *n*, so the near plane is the setting that counts; the far plane hardly matters (pushing it to infinity costs very little). With 16 bits, moving the near plane from 0.1 m to 10 m takes the fighting from 392 pixels down to 8. With 24 bits, the road is clean at 0.1 m, but pull the near plane in to 0.01 m (the widget's starting setting, and a common way to stop a first-person weapon clipping into walls) and the ground shows through on 90 pixels.
+
+So set the near plane as far out as the game allows. First-person weapons are usually drawn in a separate pass with their own projection, rather than dragging the near plane in for the whole world.
+
+## Reverse-Z
+
+Notice the third row of the table: a 32-bit float buffer is no better than 24-bit. At the near plane 0.01 m it fights on the same 90 pixels. A 32-bit float has 24 bits of precision in its mantissa, and almost everything in the scene has *d* between 0.5 and 1, where floats are spaced exactly 2<sup>−24</sup> apart, the same as a 24-bit integer. All the float's extra precision near zero is spent on the first few centimetres in front of the camera, which already had plenty.
+
+**Reverse-Z** flips the mapping: the near plane gets depth 1 and the far plane 0. Now the far, coarse end of the 1/*z* curve lands near zero, where floats are densest, and the two unevennesses roughly cancel. Tick **Reverse-Z** with **32-bit float**: the fighting is gone even at the 0.01 m near plane, and the last row of the table shows micrometres at a kilometre. With an integer format, reverse-Z changes nothing: the values are evenly spaced, so flipping them just moves the same precision around. Nathan Reed's [*Depth precision visualized*](https://developer.nvidia.com/content/depth-precision-visualized) makes the same comparison with charts and measured error rates.
+
+It's a small change to an engine:
+
+```cpp
+// Projection: map near to 1 and far to 0. With an infinite far plane, d = n / z.
+//   d = n / (f - n) * (f / z - 1)
+clear_depth(0.0f);                                   // the far plane is now 0
+pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;  // nearer is bigger
+// and a 32-bit float format: DXGI_FORMAT_D32_FLOAT (Vulkan VK_FORMAT_D32_SFLOAT, WebGPU "depth32float")
+```
+
+D3D, Vulkan, Metal and WebGPU all map depth to 0..1, so reverse-Z needs nothing else. OpenGL's default −1..1 range wastes the trick: the precise part of the float range ends up in the middle. Desktop GL 4.5 can switch to 0..1 with `glClipControl`; OpenGL ES and WebGL need the `EXT_clip_control` extension, which not every device has.
+
+<Tip kind="note" title="What this widget simplifies">
+The widget computes depth in double precision and rounds it only when it stores it, so what you see is the limit of the format. A GPU also does the projection and the interpolation in 32-bit float, and that rounding adds error of its own (Reed's article measures it). Reverse-Z helps there too.
+</Tip>
+
+Formats, for reference: D3D has `D16_UNORM`, `D24_UNORM_S8_UINT`, `D32_FLOAT` and `D32_FLOAT_S8X24_UINT` (with stencil); WebGPU has `depth16unorm`, `depth32float` and `depth24plus`, which promises at least 24 bits and leaves the real format to the implementation.
+
+Turn the **Depth test** off and the draw order decides instead: the ground, drawn after the tower, paints over all of it below the horizon.
+
+## Early Z and late Z
+
+The API puts the depth test after the fragment shader. If GPUs did it there, every fragment would be shaded, including the ones that lose. So they test **before** shading (**early Z**) whenever the answer can't depend on the shader, and skip the fragments that fail. Many also keep a coarse per-tile copy of the depth buffer (**hierarchical Z**) to reject whole blocks of pixels before they're even rasterised in detail.
+
+The shader can get in the way:
+
+- **It writes depth** (`SV_Depth`): the depth isn't known until the shader has run. Declaring it **conservative** (`SV_DepthGreaterEqual` or `SV_DepthLessEqual`) tells the GPU which way it can move. If that's away from the camera for your depth test (`SV_DepthGreaterEqual` with "less", `SV_DepthLessEqual` with reverse-Z's "greater"), early rejection still works.
+- **It discards** (alpha test, `clip()`, alpha to coverage): the test can still run early, but the depth write has to wait until the shader has decided whether the fragment exists.
+- **It has side effects**, such as writes to a storage buffer: those must happen for every fragment the API would shade, unless you ask for early tests explicitly (`[earlydepthstencil]` in HLSL, `layout(early_fragment_tests)` in GLSL).
+
+Early Z only helps if the nearest surface is drawn **first**. The widget draws a street of buildings, a ground and a wall, and the heat map counts fragment shader runs per pixel:
+
+<RenderWidget kind="overdraw" />
+
+Back to front with late Z, the fragment shader runs 5,028 times for 2,816 pixels on screen, 1.79× per pixel. **Early Z doesn't help back to front at all**: every fragment is nearer than what's already there, so they all pass, still 5,028. Draw **front to back** with early Z and it drops to 2,816: each pixel is shaded once. That's why engines sort opaque draws roughly front to back (by object distance; per-pixel order within an object is up to the mesh).
+
+## The depth prepass
+
+Sorting is approximate and sometimes impossible: large objects overlap themselves, and the order you'd like for depth fights the order you'd like for fewer state changes. A **depth prepass** draws the opaque geometry twice. The first pass has no fragment shader and writes only depth; the second draws everything again with the depth test set to **equal** (or less-equal; greater-equal with reverse-Z) and depth writes off, so only the fragment that won is shaded. Choose **Prepass, then early Z**: 2,816 runs whatever the order, after 5,028 depth-only fragments in the prepass.
+
+It isn't free: every vertex is shaded twice and every draw call issued twice. It pays when shading is expensive and overdraw high, and its depth buffer is useful on its own: screen-space ambient occlusion, decals and light culling can read it before the main pass. Many engines prepass only the big occluders, or let a visibility buffer play the same role. For alpha-tested foliage it's especially valuable: the prepass pays for the discards, and the main pass can run with early Z.
+
+<Tip title="Don't flip the comparison mid-frame">
+Hierarchical Z keeps one bound per tile, built for one direction of comparison. Giesen notes that switching between "less" and "greater" in the middle of a frame can turn it off until the next clear. With reverse-Z, flip every pass that uses that depth buffer, not just the main one.
+</Tip>
+
+## Takeaways
+
+- The buffer stores *z*/*w*, which follows **1/*z***: precision piles up near the camera, and the step size grows with *z*² / *n*.
+- **z-fighting** is two surfaces rounding to the same value. Push the **near plane** out first; the far plane barely matters.
+- A plain float buffer is no better than 24-bit. **Reverse-Z with 32-bit float** gives near-uniform precision; with integer formats it changes nothing.
+- **Early Z** skips shading hidden fragments, but only for what's drawn behind something already there: sort **front to back**. Writing depth, discarding and side effects limit it.
+- A **depth prepass** shades each pixel once, at the cost of drawing the geometry twice.

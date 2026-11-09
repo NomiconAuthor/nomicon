@@ -397,8 +397,27 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 78vh;
+  max-height: 60vh;
   overflow: auto;
+}
+/* With columns side by side, each column scrolls on its own and is capped at a screen minus the
+   toolbar, so the whole tool fits one screen (it used to be 914 px tall at 1366×768). */
+@media (min-width: 761px) {
+  .sbx-side,
+  .sbx-center {
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .sbx-log {
+    max-height: calc(100vh - 150px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .sbx-side {
+    padding-right: 4px;
+    scrollbar-width: thin;
+  }
 }
 .sbx-entry {
   background: var(--paper);

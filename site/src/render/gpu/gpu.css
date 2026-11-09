@@ -1,0 +1,159 @@
+/* GPU lesson widgets (src/render/gpu/). Imported by the lesson modules that use them; the sizing
+   rule itself is render.css's (.rd-canvas, .rd-fig, .rd-stage). */
+
+/* Two frames side by side (software and GPU), equal columns; stacked on narrow widgets. */
+.rd-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@container rd (max-width: 560px) {
+  .rd-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.rd-pair .rd-canvas {
+  width: 100%;
+}
+.rd-gpu-host {
+  min-width: 0;
+}
+.rd-gpu-api {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+}
+.rd-gpu-api.webgl2 {
+  background: var(--c2);
+  color: var(--bg);
+}
+.rd-gpu-api.off {
+  background: var(--alert);
+}
+.rd-gpu-status:empty {
+  display: none;
+}
+.rd-gpu-status {
+  margin: 0;
+  color: var(--warn);
+}
+
+/* The inspector: a list of recorded calls, scrolling inside a box no taller than the frame beside it. */
+.rd-insp {
+  --rd-side-min: 24rem;
+}
+.rd-calls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(24rem, 50vh);
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: var(--f-mono);
+  font-size: 12px;
+  counter-reset: call;
+}
+.rd-calls li {
+  counter-increment: call;
+  border-bottom: 1px solid var(--line-soft);
+}
+.rd-calls li:last-child {
+  border-bottom: 0;
+}
+.rd-calls details > summary {
+  cursor: pointer;
+  padding: 3px 8px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  list-style: none;
+}
+.rd-calls details > summary::-webkit-details-marker {
+  display: none;
+}
+.rd-calls details > summary::before {
+  content: counter(call);
+  display: inline-block;
+  min-width: 2.2em;
+  color: var(--muted);
+}
+.rd-calls details[open] > summary {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.rd-calls .tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-family: var(--f-body, inherit);
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.rd-calls .draw > details > summary {
+  font-weight: 600;
+}
+.rd-calls pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 12px;
+  padding: 4px 8px 8px 2.6em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--body);
+}
+.rd-eq {
+  margin: 0 8px 8px 2.6em;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  font-family: var(--f-body, inherit);
+  color: var(--body);
+}
+.rd-eq dt {
+  color: var(--muted);
+}
+.rd-eq dd {
+  margin: 0;
+  font-family: var(--f-mono);
+  overflow-wrap: anywhere;
+}
+.rd-gpu-switch:empty {
+  display: none;
+}
+
+/* A backend row (the API switch, then the backend line): one line, with the adapter's name cut by an
+   ellipsis (whole in its tooltip), and as tall as the switch from the start, so the widget doesn't
+   jump when the switch appears once the device is up. */
+.ll-row:has(> .rd-gpu-switch) {
+  flex-wrap: nowrap;
+  min-width: 0;
+  min-height: 2.15rem;
+}
+/* Before the device is up, the GPU widgets' backend row (their first row) is still empty. */
+:is(.rd-gpu, .rd-bandwidth, .rd-fill, .rd-timing) > .ll-row:first-child:empty {
+  min-height: 2.15rem;
+}
+.ll-row:has(> .rd-gpu-switch) > .rd-gpu-switch {
+  flex: none;
+}
+.ll-row:has(> .rd-gpu-switch) > :not(.rd-gpu-switch) {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* On a phone the frame sits above the list, so keep the list shorter. */
+@container rd (max-width: 560px) {
+  .rd-calls {
+    max-height: min(16rem, 40vh);
+  }
+}

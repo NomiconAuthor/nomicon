@@ -1,4 +1,50 @@
 /* AI lesson widgets. Builds on the engine widget styles (.ll, .ll-row, .ll-btn …). */
+
+/* Size budget (ai/fit.ts has the JS half). Maps and canvases stay within --ai-max-w (640 px) and
+   --ai-max-h (60vh); once the widget is 880 px wide, an .ai-stage puts its first child (the figure)
+   beside its .ai-side panel of readouts, and above it otherwise. */
+.ai-fit {
+  container: aifit / inline-size;
+  --ai-max-w: 640px;
+  --ai-max-h: 60vh;
+}
+.ai-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: start;
+}
+.ai-side {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+/* A canvas with a fixed backing store (steer, course, formation, crowd, the arenas) is shown at its
+   aspect ratio --ar, within the budget. In a stage, set --ar on the .ai-stage.ai-ar instead. */
+.ai-fit canvas.ai-fitc {
+  width: min(100%, var(--ai-max-w), calc(var(--ai-max-h) * var(--ar, 1.6)));
+  height: auto;
+}
+.ai-fit .ai-stage.ai-ar > .ai-fig canvas.ai-fitc {
+  width: 100%;
+}
+.ai-fit .ai-stage.ai-ar > .ai-fig {
+  width: min(100%, var(--ai-max-w), calc(var(--ai-max-h) * var(--ar, 1.6)));
+}
+@container aifit (min-width: 880px) {
+  /* JS-sized maps: the figure column is as wide as the map fit.ts drew (or --fig-w, when the
+     figure's column also holds text). */
+  .ai-stage:has(> .ai-side) {
+    grid-template-columns: var(--fig-w, auto) minmax(0, 1fr);
+  }
+  .ai-stage.ai-ar:has(> .ai-side) {
+    grid-template-columns: min(var(--ai-max-w), calc(var(--ai-max-h) * var(--ar, 1.6)), 100% - 16rem - 14px) minmax(0, 1fr);
+  }
+  .ai-fit .ai-stage.ai-ar:has(> .ai-side) > .ai-fig {
+    width: 100%;
+  }
+}
 .ai canvas {
   display: block;
   width: 100%;
@@ -252,9 +298,28 @@
 /* behaviour tree */
 .ai-bt-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
+  /* The arena within the size budget (720 × 440 backing); the tree or the score chart beside it. */
+  grid-template-columns: min(var(--ai-max-w), calc(var(--ai-max-h) * 720 / 440), 100% - 260px - 14px) minmax(260px, 1fr);
   gap: 14px;
   align-items: start;
+}
+@container aifit (min-width: 880px) {
+  /* The tree is longer than the arena; it scrolls beside it rather than making the widget taller. */
+  .ai-bt-grid > .ai-tree {
+    max-height: calc(var(--ai-max-h) + 150px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+@container aifit (min-width: 1100px) {
+  /* Room for the root's branches in two columns. */
+  .ai-tree-root > li > ul {
+    columns: 2;
+    column-gap: 16px;
+  }
+  .ai-tree-root > li > ul > li {
+    break-inside: avoid;
+  }
 }
 .ai-tree ul {
   list-style: none;
@@ -268,14 +333,14 @@
   margin-top: 6px;
 }
 .ai-tree li {
-  margin: 2px 0;
+  margin: 1px 0;
 }
 .ai-node {
   display: grid;
   grid-template-columns: 1.3em minmax(0, 1fr) auto;
   gap: 4px;
   align-items: center;
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 5px;
   font-size: 12.5px;
   color: var(--muted);
@@ -404,7 +469,7 @@
 }
 .ai-extra {
   font-size: 11.5px;
-  min-height: 3em;
+  min-height: 2.6em;
 }
 
 @media (max-width: 760px) {
@@ -483,6 +548,12 @@
 }
 @media (max-width: 640px) {
   .bf-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container aifit (min-width: 880px) {
+  /* Beside the map: the threat table, then the cleric's panel, one under the other. */
+  .ai-side .bf-panels {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -688,6 +759,28 @@
 .kn-mapwrap {
   overflow: hidden;
 }
+.kn-mapcol {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.kn .kn-side [hidden] {
+  display: none;
+}
+@container aifit (min-width: 880px) {
+  /* Beside the map: the boards one under another, scrolling within the map's height. */
+  .kn-scroll {
+    max-height: calc(var(--kn-map-h, 384px) + 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .kn-side .kn-boards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kn-side .kn-card ul {
+    max-height: none;
+  }
+}
 @media (max-width: 700px) {
   /* Phones: the map keeps a readable scale and scrolls sideways (knowledge/viz.ts follows the chosen party). */
   .kn-mapwrap {
@@ -885,8 +978,27 @@
   margin: 0;
   font-size: 11.5px;
 }
+.htn-left {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+@container aifit (min-width: 880px) {
+  /* The domain is a reference list; beside the decomposition it scrolls rather than running off screen. */
+  .ai-htn .htn-domain {
+    position: relative;
+    max-height: calc(var(--ai-max-h) + 60px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
+  }
+}
 .ai-lanes.two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Two rows of arenas share the height budget, so each is at most half of it. */
+  grid-template-columns: repeat(2, minmax(0, calc(var(--ai-max-h) * 0.47 * 720 / 440)));
+  justify-content: center;
+  row-gap: 6px;
 }
 @media (max-width: 760px) {
   .htn-cols,

@@ -1,15 +1,88 @@
-/* Networking lesson widgets. Colours come from the theme tokens. */
+/* Networking lesson widgets. Colours come from the theme tokens.
+
+   Sizing rule (widgets.ts has the JS half: Surface, stage()). The figure (one arena canvas, or two
+   arenas side by side over a readout strip) is no wider than --net-fig-w: 640 px, less when that
+   would make it taller than about --net-max-h (60vh), and never wider than the column. Once the
+   widget is wide enough the readouts sit beside the figure, otherwise under it. */
+.net {
+  container: net / inline-size;
+  --net-max-w: 640px;
+  --net-max-h: 60vh;
+  /* One 5:3 arena. */
+  --net-fig-w: min(var(--net-max-w), calc(var(--net-max-h) * 5 / 3));
+}
+/* Two arenas side by side (each 5:3 plus a caption) over a strip of about 180 px. */
+.net.net-pairs {
+  --net-fig-w: min(var(--net-max-w), calc((var(--net-max-h) - 180px) * 3.2));
+}
 .net-canvas {
   width: 100%;
   height: auto;
   display: block;
+  box-sizing: border-box;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--bg);
 }
-.net-canvas:focus-visible {
+.net-canvas:focus-visible,
+.net-pics:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.net-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 16px;
+  align-items: start;
+}
+.net-fig {
+  width: min(100%, var(--net-fig-w));
+  min-width: 0;
+}
+.net-side {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+@container net (min-width: 880px) {
+  .net-stage {
+    grid-template-columns: min(var(--net-fig-w), 100% - 16rem - 16px) minmax(0, 1fr);
+  }
+  .net-fig {
+    width: 100%;
+  }
+  .net-side .ll-stats {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+.net-pics {
+  display: grid;
+  gap: 8px;
+  border-radius: 8px;
+}
+.net-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+/* On a phone the two arenas stack, so each stays big enough to see. */
+@container net (max-width: 520px) {
+  .net-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.net-arena {
+  margin: 0;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.net-cap {
+  font-size: 12px;
+  color: var(--muted);
 }
 .net-note {
   margin: 0;

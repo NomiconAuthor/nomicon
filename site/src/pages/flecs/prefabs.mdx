@@ -10,7 +10,7 @@ import Tip from '../../components/lesson/Tip.astro';
 
 A **prefab** is an entity used as a template. Creating an instance is adding one pair, `(IsA, SpaceShip)`, and the instance gets the prefab's components. What "gets" means is decided per component by its `OnInstantiate` trait:
 
-- **Override** (the default): the component is **copied** into the instance's own table.
+- **Copy** (the default): the component is **copied** into the instance's own table.
 - **Inherit**: the component is **not** copied. The instance reads the prefab's value, so every instance shares one copy, and queries still match it.
 - **DontInherit**: the instance doesn't get it at all.
 
@@ -32,5 +32,5 @@ Inherit data that's the same for every instance and rarely changes per instance:
 </Tip>
 
 <Tip kind="note" title="Prefabs and hierarchies">
-Prefabs can have children. With the newer `Parent` storage for hierarchies (see [fragmentation](/flecs/fragmentation/)), instantiating a prefab's children doesn't create a table per instance, and flecs can cache the structure of the whole tree. If you spawn many small hierarchies, that combination is much cheaper.
+Prefabs can have children. With the newer `Parent` storage for hierarchies (see [fragmentation](/flecs/fragmentation/)), instantiating a prefab's children doesn't create a table per instance, and flecs can cache the structure of the whole tree. If you spawn many small hierarchies, that combination is much cheaper. Flecs Script uses `Parent` for children declared inside a `prefab` scope, and their copies on instances are unnamed, so `S1.Cannon` won't resolve.
 </Tip>

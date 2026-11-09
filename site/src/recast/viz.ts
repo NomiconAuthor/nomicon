@@ -1,4 +1,5 @@
 /** Recast's pipeline as a stepper: a top view and a cross-section, stage by stage. */
+import { cellScale, figWidth } from '../ai/fit';
 import { fmt, h, seg } from '../engine/dom';
 import { AGENT_HEIGHT, BOXES, CH, CS, DEFAULT_OPTIONS, RAMPS, SCENE_D, SCENE_W, runStages, type RegionMode, type StageOptions, type Stages } from './stages';
 
@@ -71,6 +72,9 @@ export const STAGES: StageInfo[] = [
   },
 ];
 
+/** Height of the cross-section, px. */
+const SIDE_H = 120;
+
 function css(el: Element) {
   const cs = getComputedStyle(el);
   const g = (n: string, f = '#888') => cs.getPropertyValue(n).trim() || f;
@@ -91,7 +95,7 @@ export class RecastStagesViz {
   private busy = 0;
 
   constructor(host: HTMLElement) {
-    this.root = h('div', { class: 'll rc' });
+    this.root = h('div', { class: 'll rc ai-fit' });
     host.replaceChildren(this.root);
     const tabs = h('div', { class: 'rc-tabs', role: 'tablist' });
     STAGES.forEach((s, i) => {
@@ -122,7 +126,10 @@ export class RecastStagesViz {
       h('button', { type: 'button', class: 'll-btn', onclick: () => this.show(Math.max(0, this.stage - 1)) }, '◀ Previous stage'),
       h('button', { type: 'button', class: 'll-btn primary', onclick: () => this.show(Math.min(STAGES.length - 1, this.stage + 1)) }, 'Next stage ▶'),
     );
-    this.root.append(tabs, nav, this.caption, h('div', { class: 'rc-views' }, this.top, h('div', { class: 'rc-side-wrap' }, h('div', { class: 'll-h' }, 'Cross-section (click the top view to move it)'), this.side)), opts, this.stats);
+    this.root.append(
+      tabs,
+      h('div', { class: 'ai-stage' }, h('div', { class: 'rc-views' }, this.top, h('div', { class: 'rc-side-wrap' }, h('div', { class: 'll-h' }, 'Cross-section (click the top view to move it)'), this.side)), h('div', { class: 'ai-side' }, nav, this.caption, opts, this.stats)),
+    );
     this.top.addEventListener('pointerdown', (e) => {
       const r = this.top.getBoundingClientRect();
       const d = this.data;
@@ -131,6 +138,7 @@ export class RecastStagesViz {
       this.draw();
     });
     new ResizeObserver(() => this.draw()).observe(this.root);
+    addEventListener('resize', () => this.draw());
     new MutationObserver(() => this.draw()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     this.build();
   }
@@ -162,8 +170,8 @@ export class RecastStagesViz {
     const st = STAGES[this.stage];
     this.caption.replaceChildren(h('p', {}, h('b', {}, st.name.replace(/^\d+\. /, '')), ' ', st.what), h('p', { class: 'rc-stop' }, h('b', {}, 'Stop here if… '), st.stop));
     const dpr = window.devicePixelRatio || 1;
-    const avail = Math.max(260, this.root.clientWidth);
-    const S = Math.max(2.5, Math.min(9, Math.floor(avail / d.w)));
+    // The top view and the cross-section under it (SIDE_H + its heading) share a height budget of 75vh.
+    const S = cellScale(Math.max(260, figWidth(this.root)), d.w, d.h, { min: 2.5, max: 9, int: true, maxH: 0.75 * innerHeight - SIDE_H - 30 });
     const W = d.w * S;
     const H = d.h * S;
     this.top.width = W * dpr;
@@ -317,7 +325,7 @@ export class RecastStagesViz {
     const dpr = window.devicePixelRatio || 1;
     const W = d.w * S;
     const vh = 3.2; // metres shown
-    const H = 150;
+    const H = SIDE_H;
     this.side.width = W * dpr;
     this.side.height = H * dpr;
     this.side.style.width = `${W}px`;

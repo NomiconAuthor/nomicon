@@ -1,6 +1,6 @@
 /**
  * A physics engine wired into a real flecs world through handles: the integration the
- * "Physics in flecs" lesson describes, running on the site's flecs.wasm (flecs master) with the
+ * "Physics in flecs" lesson describes, running on the site's flecs.wasm (the flecs release in flecs/version.ts) with the
  * teaching engine standing in for Jolt or Box3D.
  *
  * - Gameplay owns RigidBody (what the body should be) and Position/Rotation (where it is).

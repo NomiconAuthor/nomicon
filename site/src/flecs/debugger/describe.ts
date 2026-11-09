@@ -141,7 +141,7 @@ export function describe(ev: TraceEvent, s: Session, types: (table: number) => s
         title: `Hook ${ev.event.replace('On', 'on_').toLowerCase()} for ${ev.id}${ev.entity ? ` on ${n(ev.entity)}` : ''}`,
         fn: 'flecs_invoke_hook',
         tone: 'callback',
-        why: 'Component hooks are per-component callbacks (one per hook kind) that run before observers. flecs uses them itself, for example to keep the name index in sync with (Identifier, Name).',
+        why: 'Component hooks are per-component callbacks (one per hook kind). On add and set they run before observers, on remove after them. flecs uses them itself, for example to keep the name index in sync with (Identifier, Name).',
       };
     case 'flushBegin':
       return {
@@ -248,6 +248,10 @@ export function describe(ev: TraceEvent, s: Session, types: (table: number) => s
           ? 'The write goes to whoever occupies that row now. No flecs operation happens, no OnSet fires, and nothing reports the problem.'
           : 'The write lands in freed or unused memory. Nothing visible changes now, but whatever reuses that memory later gets corrupted.',
       };
+    default:
+      // Frame trace events (pipeline build, runs, stages, nesting) belong to the frame widget,
+      // and are only recorded when it asks for them.
+      return { title: ev.k, tone: 'muted' };
   }
 }
 

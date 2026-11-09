@@ -1,0 +1,34 @@
+---
+/** Mounts one of the rendering lesson widgets (src/render/registry.ts lists them by kind). */
+import type { WidgetKind } from '../render/registry';
+interface Props {
+  kind: WidgetKind;
+}
+const { kind } = Astro.props;
+---
+
+<render-widget data-kind={kind}><p class="ll-loading">Loading…</p></render-widget>
+
+<script>
+  import '../engine/engine.css';
+  import '../render/render.css';
+  import { WIDGETS, type WidgetKind } from '../render/registry';
+
+  class RenderWidget extends HTMLElement {
+    async connectedCallback() {
+      if (this.dataset.ready) return;
+      this.dataset.ready = '1';
+      const load = WIDGETS[this.dataset.kind as WidgetKind];
+      if (!load) throw new Error(`no rendering widget "${this.dataset.kind}" in src/render/registry.ts`);
+      const Widget = await load();
+      new Widget(this);
+    }
+  }
+  if (!customElements.get('render-widget')) customElements.define('render-widget', RenderWidget);
+</script>
+
+<style>
+  render-widget {
+    display: block;
+  }
+</style>

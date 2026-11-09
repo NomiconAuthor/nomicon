@@ -372,7 +372,7 @@ abstract class ArenaWidget {
   abstract brain: Brain;
 
   constructor(host: HTMLElement, cls: string) {
-    this.root = h('div', { class: `ll ai ${cls}` });
+    this.root = h('div', { class: `ll ai ai-fit ${cls}` });
     host.replaceChildren(this.root);
     this.runner = new Runner(
       this.root,
@@ -790,7 +790,7 @@ export class Compare {
   private batch = h('div', { class: 'ai-batch' });
 
   constructor(host: HTMLElement, lanes: string[] = ['utility', 'bt', 'goap', 'htn']) {
-    this.root = h('div', { class: 'll ai ai-cmp' });
+    this.root = h('div', { class: 'll ai ai-fit ai-cmp' });
     host.replaceChildren(this.root);
     const mk = (name: string, make: () => Brain): Lane => ({
       name,
@@ -839,14 +839,14 @@ export class Compare {
         h('button', { type: 'button', class: 'll-btn', onclick: () => this.restart(this.seed) }, 'Restart'),
         h('button', { type: 'button', class: 'll-btn', onclick: () => this.restart(newSeed()) }, 'New fight'),
         spd.el,
+        h('button', { type: 'button', class: 'll-btn', onclick: () => this.runBatch(), title: 'Runs headless in a few hundred milliseconds; same 40 seeds for every brain.' }, 'Run 40 fights each (3 minutes max)'),
       ),
       h(
         'div',
         { class: `ai-lanes ${this.lanes.length % 2 === 0 ? 'two' : ''}` },
         ...this.lanes.map((l) => h('div', { class: 'ai-lane' }, h('div', { class: 'ai-lane-h' }, l.name), l.cnv, l.strip, l.stats, l.extra)),
       ),
-      legend(),
-      h('div', { class: 'll-row' }, h('button', { type: 'button', class: 'll-btn', onclick: () => this.runBatch() }, 'Run 40 fights each (3 minutes max)'), h('span', { class: 'll-muted' }, 'Runs headless in a few hundred milliseconds; same 40 seeds for every brain.')),
+      h('div', { class: 'll-row' }, legend(), h('span', { class: 'll-muted' }, 'Run 40 fights: headless, a few hundred ms, the same 40 seeds for every brain.')),
       this.batch,
     );
     onTheme(() => this.draw());

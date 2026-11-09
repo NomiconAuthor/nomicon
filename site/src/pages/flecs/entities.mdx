@@ -15,7 +15,7 @@ The id has two parts:
 - **The index** (the low 32 bits) is a slot in flecs' entity index, which records the table and row the entity lives in.
 - **The version** (16 bits above the index; also called the generation) counts how many times that slot has been reused. The bits above it are reserved for flags such as the pair marker.
 
-When you delete an entity, its index goes back on a free list, and the next entity you create gets it, with the version bumped by one. So `483` and `483 v1` are different entities that share a slot. Any copy of the old id you kept now refers to something that's gone.
+When you delete an entity, its index goes back on a free list, and the next entity you create gets it, with the version bumped by one. So `481` and `481 v1` are different entities that share a slot. Any copy of the old id you kept now refers to something that's gone.
 
 ## Watch an id get reused
 

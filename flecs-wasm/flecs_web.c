@@ -14,6 +14,16 @@
  * entity index plus generation).
  */
 #include "flecs.c" /* one translation unit, so the glue can see table internals */
+
+/* Since flecs 4.2 prefabs, cached queries, query plans, entity ranges and the
+ * constraint traits (Exclusive, OneOf, ...) are separate add-ons. The default
+ * build enables them all; fail here rather than in a lesson if one goes missing. */
+#if !defined(FLECS_PREFAB) || !defined(FLECS_CACHED_QUERIES) || !defined(FLECS_QUERY_PLANS) || \
+    !defined(FLECS_ENTITY_RANGES) || !defined(FLECS_CONSTRAINT_TRAITS) || !defined(FLECS_SCRIPT) || \
+    !defined(FLECS_REST) || !defined(FLECS_META) || !defined(FLECS_PIPELINE) || !defined(FLECS_SYSTEM)
+#error "flecs_web.c needs the PREFAB, CACHED_QUERIES, QUERY_PLANS, ENTITY_RANGES, CONSTRAINT_TRAITS, SCRIPT, REST, META, PIPELINE and SYSTEM add-ons"
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -35,6 +45,11 @@ int fw_tracing = 0;
 void fw_trace(int32_t kind, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
     js_on_trace(kind, a, b, c, d, e);
 }
+
+/* Worker stages without threads (see fw_set_stages). */
+int fw_sim_workers = 0;
+/* Sets from callbacks go through the C++ path (ecs_cpp_set), see fw_it_set. */
+static int fw_it_cpp = 0;
 
 /* ---------------- Socket stubs (see shim/wasi_net_shim.h) ---------------- */
 int setsockopt(int fd, int level, int name, const void *value, socklen_t len) { (void)fd; (void)level; (void)name; (void)value; (void)len; return -1; }
@@ -97,6 +112,8 @@ FW_EXPORT(fw_init) int32_t fw_init(void) {
         ecs_fini(world);
     }
     ecs_log_enable_colors(false);
+    fw_sim_workers = 0;
+    fw_it_cpp = 0;
     world = ecs_init();
     rest = ecs_rest_server_init(world, NULL);
     return world && rest ? 0 : 1;
@@ -204,6 +221,7 @@ FW_EXPORT(fw_is_alive) int32_t fw_is_alive(double e) { return ecs_is_alive(world
 /* ---------------- Systems and observers with JavaScript callbacks ---------------- */
 static void fw_system_cb(ecs_iter_t *it) {
     if (fw_tracing) fw_trace(FW_ITER, it->system, it->table ? it->table->id : 0, (uint64_t)it->count, (uint64_t)it->offset, it->count ? it->entities[0] : 0);
+    if (fw_tracing) fw_trace(FW_ITER_AT, it->system, (uint64_t)ecs_stage_get_id(it->stage), it->table ? it->table->id : 0, (uint64_t)it->offset, (uint64_t)it->count);
     js_on_system((double)it->system, it);
 }
 static void fw_observer_cb(ecs_iter_t *it) { js_on_observer((double)it->system, it); }
@@ -221,7 +239,7 @@ static ecs_entity_t fw_phase(const char *phase) {
 }
 
 /** A system matching `expr` that calls back into JavaScript. `flags`: 1 = cached query,
- * 2 = immediate system (runs on a writable world). Returns 0 on a bad query. */
+ * 2 = immediate system (runs on a writable world), 4 = multi_threaded. Returns 0 on a bad query. */
 FW_EXPORT(fw_system) double fw_system(const char *name, const char *expr, const char *phase, int32_t flags) {
     ecs_entity_t e = ecs_entity(world, { .name = name });
     ecs_entity_t s = ecs_system(world, {
@@ -230,6 +248,7 @@ FW_EXPORT(fw_system) double fw_system(const char *name, const char *expr, const 
         .query.expr = expr,
         .query.cache_kind = (flags & 1) ? EcsQueryCacheAuto : EcsQueryCacheNone,
         .immediate = (flags & 2) != 0,
+        .multi_threaded = (flags & 4) != 0,
         .callback = fw_system_cb,
     });
     if (!s) ecs_delete(world, e);
@@ -280,6 +299,7 @@ FW_EXPORT(fw_emit) void fw_emit(const char *event, double entity, double id) {
 
 /* Iterator accessors, valid during fw_on_system / fw_on_observer. */
 FW_EXPORT(fw_it_count) int32_t fw_it_count(ecs_iter_t *it) { return it->count; }
+FW_EXPORT(fw_it_stage) int32_t fw_it_stage(ecs_iter_t *it) { return ecs_stage_get_id(it->stage); }
 FW_EXPORT(fw_it_entity) double fw_it_entity(ecs_iter_t *it, int32_t i) { return (double)it->entities[i]; }
 FW_EXPORT(fw_it_table) double fw_it_table(ecs_iter_t *it) { return it->table ? (double)flecs_table_id(it->table) : -1; }
 FW_EXPORT(fw_it_other_table) double fw_it_other_table(ecs_iter_t *it) { return it->other_table ? (double)flecs_table_id(it->other_table) : -1; }
@@ -541,7 +561,15 @@ FW_EXPORT(fw_it_set) int32_t fw_it_set(ecs_iter_t *it, double e, const char *id,
     void *tmp = ecs_os_calloc(ti->size);
     if (ti->hooks.ctor) ti->hooks.ctor(tmp, 1, ti);
     int32_t err = ecs_ptr_from_json(world, type, tmp, json, NULL) ? 0 : 1;
-    if (!err) ecs_set_id(FW_IT_DST(it), (ecs_entity_t)e, i, (size_t)ti->size, tmp);
+    if (!err && fw_it_cpp) {
+        /* What C++ e.set<T>(v) does (flecs::_::write_component<ecs_cpp_set>): a value the
+         * entity already has is written in place, also with several stages. */
+        ecs_world_t *dst = FW_IT_DST(it);
+        ecs_cpp_get_mut_t res = ecs_cpp_set(dst, (ecs_entity_t)e, i, tmp, (size_t)ti->size);
+        if (ti->hooks.copy) ti->hooks.copy(res.ptr, tmp, 1, ti); else ecs_os_memcpy(res.ptr, tmp, ti->size);
+        if (res.stage) flecs_commands_end(res.world, res.stage);
+        if (res.call_modified) ecs_modified_id(dst, (ecs_entity_t)e, i);
+    } else if (!err) ecs_set_id(FW_IT_DST(it), (ecs_entity_t)e, i, (size_t)ti->size, tmp);
     if (ti->hooks.dtor) ti->hooks.dtor(tmp, 1, ti);
     ecs_os_free(tmp);
     return err;
@@ -893,4 +921,119 @@ FW_EXPORT(fw_entity_json) char *fw_entity_json(uint64_t e) {
     ecs_entity_to_json_desc_t desc = ECS_ENTITY_TO_JSON_INIT;
     char *r = ecs_entity_to_json(world, e, &desc);
     return r ? r : ecs_os_strdup("null");
+}
+
+
+/* ---------------- Frames in detail: stages, schedule, pipelines ----------------
+ * wasm32-wasi has no threads, so ecs_set_threads can't start workers. Instead the
+ * world gets real stages (ecs_set_stage_count: one command queue each) and
+ * instrument.py makes flecs_run_pipeline call fw_sim_run_workers where it would
+ * signal the workers and wait for them. That runs each worker stage's part of
+ * the op exactly as flecs_worker (addons/pipeline/worker.c) would, one stage
+ * after the other. Rows are split by flecs' own ecs_worker_iter. */
+void fw_sim_run_workers(ecs_world_t *w) {
+    int32_t i, n = w->stage_count;
+    for (i = 1; i < n; i ++) {
+        ecs_stage_t *stage = w->stages[i];
+        FW_TRACE(FW_WORKER_BEGIN, i, n, 0, 0, 0);
+        ecs_entity_t old_scope = ecs_set_scope((ecs_world_t*)stage, 0);
+        flecs_run_pipeline_ops(w, stage, stage->id, n, w->info.delta_time);
+        ecs_set_scope((ecs_world_t*)stage, old_scope);
+        FW_TRACE(FW_WORKER_END, i, n, 0, 0, 0);
+    }
+}
+
+/** Give the world `n` stages (main + n-1 "workers"), like world.set_threads(n). */
+FW_EXPORT(fw_set_stages) void fw_set_stages(int32_t n) {
+    if (n < 1) n = 1;
+    ecs_set_stage_count(world, n);
+    fw_sim_workers = n > 1;
+}
+
+/** Sets from callbacks: 1 = like C++ e.set<T>() (ecs_cpp_set), 0 = like C ecs_set. */
+FW_EXPORT(fw_it_cpp_set) void fw_it_cpp_set(int32_t on) { fw_it_cpp = on; }
+
+static ecs_pipeline_state_t *fw_pq(double pipeline) {
+    ecs_entity_t p = pipeline ? (ecs_entity_t)pipeline : world->pipeline;
+    const EcsPipeline *pp = ecs_get(world, p, EcsPipeline);
+    return pp ? pp->state : NULL;
+}
+
+/** The pipeline's schedule as flecs built it: ops (offset, count, flags) and system ids. */
+FW_EXPORT(fw_pipeline_schedule) char *fw_pipeline_schedule(double pipeline) {
+    ecs_pipeline_state_t *pq = fw_pq(pipeline);
+    if (!pq) return ecs_os_strdup("null");
+    ecs_strbuf_t out = ECS_STRBUF_INIT;
+    ecs_strbuf_appendlit(&out, "{\"rebuilds\":");
+    ecs_strbuf_appendint(&out, pq->rebuild_count);
+    ecs_strbuf_appendlit(&out, ",\"ops\":[");
+    int32_t i, n = ecs_vec_count(&pq->ops);
+    ecs_pipeline_op_t *ops = ecs_vec_first_t(&pq->ops, ecs_pipeline_op_t);
+    for (i = 0; i < n; i ++) {
+        if (i) ecs_strbuf_appendch(&out, ',');
+        ecs_strbuf_append(&out, "{\"offset\":%d,\"count\":%d,\"multiThreaded\":%s,\"immediate\":%s,\"commands\":%d}",
+            ops[i].offset, ops[i].count, ops[i].multi_threaded ? "true" : "false",
+            ops[i].immediate ? "true" : "false", (int32_t)ops[i].commands_enqueued);
+    }
+    ecs_strbuf_appendlit(&out, "],\"systems\":[");
+    n = ecs_vec_count(&pq->systems);
+    ecs_system_t **sys = ecs_vec_first_t(&pq->systems, ecs_system_t*);
+    for (i = 0; i < n; i ++) {
+        if (i) ecs_strbuf_appendch(&out, ',');
+        ecs_strbuf_appendint(&out, (int64_t)sys[i]->query->entity);
+    }
+    ecs_strbuf_appendlit(&out, "]}");
+    return ecs_strbuf_get(&out);
+}
+
+/** Make the next run of a pipeline rebuild its schedule (so the trace shows why each merge is there). */
+FW_EXPORT(fw_pipeline_force_rebuild) void fw_pipeline_force_rebuild(double pipeline) {
+    ecs_pipeline_state_t *pq = fw_pq(pipeline);
+    if (pq) pq->match_count = -1;
+}
+
+/** A custom pipeline: `expr` is its query and must start with flecs.system.System. */
+FW_EXPORT(fw_pipeline_new) double fw_pipeline_new(const char *name, const char *expr) {
+    ecs_entity_t e = ecs_entity(world, { .name = name });
+    return (double)ecs_pipeline(world, { .entity = e, .query.expr = expr });
+}
+
+/** Run a pipeline once (world.run_pipeline(p)): its own runs and merges, no frame begin/end. */
+FW_EXPORT(fw_run_pipeline) void fw_run_pipeline(double pipeline, float dt) {
+    if (fw_tracing) fw_trace(FW_FRAME_BEGIN, (uint64_t)ecs_get_world_info(world)->frame_count_total, (uint64_t)pipeline, 0, 0, 0);
+    ecs_run_pipeline(world, (ecs_entity_t)pipeline, dt);
+    if (fw_tracing) fw_trace(FW_FRAME_END, (uint64_t)ecs_get_world_info(world)->frame_count_total, (uint64_t)pipeline, 0, 0, 0);
+}
+
+/* Hooks for the frame lesson: traced no-ops, plus an on_validate that rejects a
+ * value whose first f32 member is below a minimum (one component at a time). */
+static ecs_entity_t fw_validate_comp;
+static float fw_validate_min;
+static bool fw_validate_hook(ecs_world_t *w, ecs_entity_t e, void *ptr) {
+    (void)w; (void)e;
+    return *(const float*)ptr >= fw_validate_min;
+}
+
+/** Hooks by mask: 1 on_add, 2 on_set, 4 on_remove, 8 on_replace, 16 on_validate (rejects first field < min). */
+FW_EXPORT(fw_hooks_mask) int32_t fw_hooks_mask(const char *component, int32_t mask, float min) {
+    ecs_entity_t c = ecs_lookup(world, component);
+    if (!c || !ecs_has(world, c, EcsComponent)) return 1;
+    ecs_type_hooks_t hooks = *ecs_get_hooks_id(world, c);
+    if (mask & 1) hooks.on_add = fw_noop_hook;
+    if (mask & 2) hooks.on_set = fw_noop_hook;
+    if (mask & 4) hooks.on_remove = fw_noop_hook;
+    if (mask & 8) hooks.on_replace = fw_noop_hook;
+    if (mask & 16) { hooks.on_validate = fw_validate_hook; fw_validate_comp = c; fw_validate_min = min; }
+    ecs_set_hooks_id(world, c, &hooks);
+    return 0;
+}
+
+/** Tables whose lock count isn't zero (should always be 0 between frames). */
+FW_EXPORT(fw_locked_tables) int32_t fw_locked_tables(void) {
+    int32_t i, n = flecs_sparse_count(&world->store.tables), locked = 0;
+    for (i = 0; i < n; i ++) {
+        ecs_table_t *t = flecs_sparse_get_dense_t(&world->store.tables, ecs_table_t, i);
+        if (t && t->_ && t->_->lock) locked ++;
+    }
+    return locked;
 }

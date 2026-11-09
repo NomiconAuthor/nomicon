@@ -20,7 +20,7 @@ export class HtnViz {
   private playBtn = h('button', { type: 'button', class: 'll-btn primary', onclick: () => this.togglePlay() }, 'Play') as HTMLButtonElement;
 
   constructor(host: HTMLElement) {
-    this.root = h('div', { class: 'll ai ai-htn' });
+    this.root = h('div', { class: 'll ai ai-fit ai-htn' });
     host.replaceChildren(this.root);
     this.root.append(
       h('div', { class: 'll-h' }, 'Current world state (click to toggle)'),
@@ -35,8 +35,8 @@ export class HtnViz {
         h('button', { type: 'button', class: 'll-btn', title: 'Jump to the result', onclick: () => (this.pause(), this.show(this.res.events.length)) }, '⏭'),
         this.count,
       ),
-      h('div', { class: 'htn-cols' }, h('div', {}, h('div', { class: 'll-h' }, 'Decomposition'), this.trace), h('div', {}, h('div', { class: 'll-h' }, 'The domain (methods in priority order)'), this.domain)),
-      this.out,
+      // The plan goes under the decomposition, so it's on screen with it; the domain is the reference beside them.
+      h('div', { class: 'htn-cols' }, h('div', { class: 'htn-left' }, h('div', { class: 'll-h' }, 'Decomposition'), this.trace, this.out), h('div', {}, h('div', { class: 'll-h' }, 'The domain (methods in priority order)'), this.domain)),
     );
     this.replan();
   }
@@ -143,6 +143,13 @@ export class HtnViz {
       }),
       h('p', { class: 'll-muted htn-key' }, h('span', { class: 'htn-c' }, 'Compound'), ' tasks decompose further; ', h('span', { class: 'htn-p' }, 'primitive'), ' tasks are the GOAP actions, with the same needs and effects.'),
     );
+    // When the domain scrolls in its own box (wide widgets, ai.css), keep the current task in view.
+    const curEl = this.domain.querySelector<HTMLElement>('.htn-task.cur');
+    const d = this.domain;
+    if (curEl && d.scrollHeight > d.clientHeight + 1) {
+      const top = curEl.offsetTop; // the domain is positioned when it scrolls, so this is relative to it
+      if (top < d.scrollTop || top + curEl.offsetHeight > d.scrollTop + d.clientHeight) d.scrollTop = Math.max(0, top - 8);
+    }
   }
 
   private renderResult(done: boolean): void {

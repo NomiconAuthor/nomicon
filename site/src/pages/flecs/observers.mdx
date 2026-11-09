@@ -30,7 +30,7 @@ What the trace shows on current flecs:
 
 Some details worth knowing:
 
-- **`OnAdd` can't see the value from `set`.** It runs before the value is written. If you need the value, observe `OnSet`.
+- **`OnAdd` can't rely on the value from `set`.** It runs before the value is written, except when a merge batches several commands for the entity. If you need the value, observe `OnSet`.
 - **`OnAdd` fires once, when the component actually arrives.** Setting a component the entity already has only produces `OnSet`.
 - **Multi-term observers check their whole query.** `StartsMoving` listens for `Position, Velocity`. It is invoked whenever either is added, but only calls back once both are present. The first time, Ship has no `Velocity` yet, and the log shows it being checked and not called.
 - **Custom events work like any other.** `Collided` isn't a component change at all. `world.event<Collided>()...emit()` delivers it to observers listening for that event on the entity's `Position`.
@@ -55,7 +55,7 @@ The rules that fall out of this:
 
 - **Put defaults in the component's constructor** (or an `on_add` hook), not in an `OnAdd` observer. Those run before any value is set, so they can't fight it.
 - **Don't `set` the observed component inside its own `OnSet` observer.** If a value must always be clamped or derived, do it where it's written, in a hook (`on_set` can change the value in place), or in a system that runs before the readers.
-- **When several observers write the same component, the last write wins**, and the order between observers isn't something to build on.
+- **When several observers write the same component, the last write wins**, and the order between observers isn't something to build on: in a debug build of this same world, `ResetShield` runs first and `WatchShield` never sees 50.
 
 <Tip kind="note" title="When to use which">
 Use a **hook** when the component itself needs it, such as allocating or freeing a resource or keeping a cached value valid. Use an **observer** when *other* code wants to know, and only for things that happen rarely (spawning, destruction, a window being resized). If you find yourself adding and removing components just to trigger an observer, use a system: it runs once per table rather than once per event, and it's easier to reason about. Observers run in the middle of a storage change, so keep them small.

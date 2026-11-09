@@ -2,6 +2,7 @@
 import { drawSprite, onSprites, spriteSize } from '../sprites/sprites';
 import { fmt, h, seg } from '../engine/dom';
 import { touchScroll } from '../engine/touch';
+import { cellScale, figWidth } from '../ai/fit';
 import { MOVE_SPEED, influence, makeScene, possiblePositions, route, threatMap, type Route, type Scene, type Spread, type Unit } from './sim';
 
 type Layer = 'control' | 'tension' | 'threat';
@@ -51,7 +52,7 @@ export class InfluenceViz {
   private pending = 0;
 
   constructor(host: HTMLElement) {
-    this.root = h('div', { class: 'll im' });
+    this.root = h('div', { class: 'll im ai-fit' });
     host.replaceChildren(this.root);
     this.root.append(
       h(
@@ -88,11 +89,12 @@ export class InfluenceViz {
         }).el,
         seg<string>('Route weighs threat ×', ['2', '10', '30'].map((x) => [x, x] as [string, string]), String(this.k), (v) => ((this.k = Number(v)), this.compute())).el,
       ),
-      this.keys,
-      h('div', { class: 'wt-wrap im-wrap' }, this.cnv, this.tip),
-      this.stats,
-      this.note,
-      h('p', { class: 'll-muted' }, 'Drag the units, the start (S) or the objective (flag). The dashed line is the shortest route; the solid one weighs threat.'),
+      h(
+        'div',
+        { class: 'ai-stage' },
+        h('div', { class: 'wt-wrap im-wrap' }, this.cnv, this.tip),
+        h('div', { class: 'ai-side' }, this.keys, this.stats, this.note, h('p', { class: 'll-muted' }, 'Drag the units, the start (S) or the objective (flag). The dashed line is the shortest route; the solid one weighs threat.')),
+      ),
     );
     touchScroll(this.cnv, { grab: (e) => this.grabs(e), panX: true });
     this.cnv.addEventListener('pointerdown', (e) => this.down(e));
@@ -100,6 +102,7 @@ export class InfluenceViz {
     this.cnv.addEventListener('pointerup', () => this.up());
     this.cnv.addEventListener('pointerleave', () => (this.tip.hidden = true));
     new ResizeObserver(() => this.draw()).observe(this.root);
+    addEventListener('resize', () => this.draw());
     new MutationObserver(() => this.draw()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     onSprites(() => this.draw());
     this.compute();
@@ -196,8 +199,7 @@ export class InfluenceViz {
     if (!this.threat) return;
     const c = css(this.root);
     const t = this.scene.t;
-    const wpx = Math.max(280, this.cnv.parentElement!.clientWidth);
-    const S = Math.max(3, Math.min(10, Math.floor(wpx / t.w)));
+    const S = cellScale(figWidth(this.root), t.w, t.h, { min: 3, max: 10, int: true });
     this.S = S;
     const dpr = window.devicePixelRatio || 1;
     this.cnv.width = t.w * S * dpr;
@@ -308,10 +310,10 @@ export class InfluenceViz {
     ctx.fillStyle = c.ink;
     ctx.strokeStyle = c.bg;
     ctx.lineWidth = 2;
-    const sz = Math.max(8, S * 1.6);
+    const sz = Math.max(13, S * 1.6);
     ctx.fillRect((s.start.x + 0.5) * S - sz / 2, (s.start.y + 0.5) * S - sz / 2, sz, sz);
     ctx.fillStyle = c.bg;
-    ctx.font = `600 ${Math.max(8, S)}px ${c.mono}`;
+    ctx.font = `600 ${Math.max(10, S)}px ${c.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('S', (s.start.x + 0.5) * S, (s.start.y + 0.5) * S + 0.5);

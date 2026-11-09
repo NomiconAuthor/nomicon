@@ -1,0 +1,107 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Textures and sampling
+order: 4
+part: Pipeline fundamentals
+summary: 'From texels to pixels: nearest and bilinear filtering, mipmaps and how the GPU picks a level from the derivatives across a 2 × 2 quad, trilinear and anisotropic filtering, and block compression (BC1–BC7, ASTC) in brief.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+A fragment shader reads a texture at a point, but a pixel isn't a point. Seen on a floor running to the horizon, one pixel near the camera covers a fraction of a texel, and one near the horizon covers a long sliver of hundreds of texels. The right colour for the pixel is the texture **averaged over that footprint**. Reading the one texel under the pixel centre gets it right only when the footprint is about one texel. Everything a sampler does, from bilinear filtering to mipmaps to anisotropic filtering, is a cheaper or better way to estimate that average.
+
+## Texels to pixels
+
+A texture is a grid of **texels**, addressed by coordinates *u*, *v* from 0 to 1 across it (wrapping around here, so the floor repeats). Texel *i* covers *i* to *i* + 1 in texel units, with its centre at *i* + ½.
+
+- **Nearest** (point) filtering returns the texel the point falls in: one read.
+- **Bilinear** filtering takes the four texel centres around the point and blends them by distance: four reads. When a texel covers many pixels (**magnification**) it turns blocky steps into smooth ramps.
+
+Neither helps when a pixel covers many texels (**minification**). The sample still lands on one spot, and which spot changes from pixel to pixel, so the image is a scatter of whichever texels the centres happen to hit: **aliasing**, which shimmers as the camera moves.
+
+The widget draws a checkerboard texture, 64 texels across in squares of 8, on a floor seen from 80 cm up. **Next quad** steps the rasteriser a 2 × 2 quad at a time; click a pixel to see what its sample did. The panel shows the texture under the pixel: the outlined shape is the pixel's square mapped onto the texture, and the dots are where the sampler read, each circle as wide as a texel of the level it read (between the two levels, for trilinear).
+
+<RenderWidget kind="texture" />
+
+The widget measures each filter against a **reference**: every pixel averaged from 256 rays through it, each reading the full-size texture (**Show → Reference**). Over the floor's 4,512 pixels:
+
+| Filter | Texels read per pixel | Average error |
+|---|---|---|
+| Nearest, no mipmaps | 1.00 | 0.108 |
+| Bilinear, no mipmaps | 4.00 | 0.086 |
+| Bilinear, nearest mip | 4.00 | 0.047 |
+| Trilinear | 6.04 | 0.047 |
+| Anisotropic, 16× | 27.31 | 0.024 |
+
+Brightness runs from 0 to 1, so the first row is wrong by a tenth of the range on average, and much more near the horizon.
+
+## Mipmaps
+
+A **mipmap** is the texture stored again at half the width and height, and again, down to 1 × 1, each texel the average of the 2 × 2 above it. The chain costs a third more memory (¼ + ¹⁄₁₆ + … = ⅓) and lets the sampler read a level where one texel is about as big as the pixel's footprint, so the averaging over the footprint has already been done.
+
+The level is chosen from the **level of detail**, λ. Vulkan and OpenGL define it as log₂ of the footprint's longer side, measured in texels of the full-size texture: λ = 0 when a pixel covers one texel, 1 when it covers two across, 2 for four. λ ≤ 0 is magnification, which reads level 0. **Bilinear, nearest mip** rounds λ to the nearest level, and **trilinear** filtering reads the two levels either side and blends them by λ's fraction: eight texels instead of four. Switch **Show** to **Mip level read** to see the bands.
+
+Trilinear hardly changes the average error (0.047 either way). What it removes is the visible seam where one level hands over to the next, which in a moving game crawls along the floor with the camera. It reads 6.04 texels a pixel, not 8, because 1,920 of the floor's 4,512 pixels are magnified and 288 are beyond the last level, and those read only one level.
+
+At the horizon the floor asks for level 12.1, but a 64-texel texture stops at level 6, a single grey texel. That's why distant floors fade to the average colour: the footprint covers so much texture that the right answer *is* close to the average, at least across the screen.
+
+## Where the footprint comes from: 2 × 2 quads
+
+To know the footprint, the sampler needs to know how fast *u* and *v* change from one pixel to the next: the screen-space **derivatives** ∂*u*/∂*x*, ∂*v*/∂*x*, ∂*u*/∂*y* and ∂*v*/∂*y*. A fragment shader runs on one pixel and can't compute those alone. So GPUs shade pixels in **2 × 2 quads**, and take differences between the quad's lanes: D3D's spec puts it as "Pixel Shaders always run in minimum 2x2 quanta to be able to support derivative calculations".
+
+The widget computes **coarse** derivatives, one pair per quad: *x* from the quad's top row and *y* from its left column, which is one of the choices D3D's documentation for `ddx_coarse` describes. **Fine** derivatives (`ddx_fine`, GLSL's `dFdxFine`, WGSL's `dpdxFine`) use the pixel's own row or column instead. Plain `ddx` and implicit derivatives in `Sample` may be either. Notice in the mip-level view that the level changes only in steps of 2 × 2 pixels.
+
+Every pixel of a quad needs a value, even where the triangle doesn't cover it. The GPU runs the shader there too, as a **helper lane**, extrapolating the vertex outputs past the edge; its results feed the derivatives and are thrown away. On a big triangle that's a few lanes along the edges. On tiny ones it's most of the work, which [How shaders run](/rendering/how-shaders-run/) counts.
+
+<Tip title="Sampling inside a branch">
+Derivatives need all four lanes of the quad to compute the same value at the same point in the code. The Vulkan spec says implicit derivatives are well-defined only when the control flow is uniform across the quad; otherwise the level of detail is undefined. A `Sample` inside an `if` that only some pixels of a quad take can pick a wrong level, usually visible as a ring of blocky or blurry pixels along the branch's boundary. Sample before the branch, or compute the gradients outside it and use `SampleGrad` (`textureGrad`), or pick the level yourself with `SampleLevel` (`textureLod`).
+</Tip>
+
+## Anisotropic filtering
+
+On a floor seen at a glancing angle the footprint isn't square: it's long towards the horizon and narrow across. In this scene it gets up to 219 times as long as it is wide. Mipmaps are square, so trilinear filtering has to choose a level by the *long* side, and it blurs across the narrow one: the checkerboard turns grey long before it needs to.
+
+**Anisotropic filtering** takes several samples instead, spread along the long axis, each from a sharper level. The `EXT_texture_filter_anisotropic` extension describes one way to do it (it calls the exact scheme implementation-dependent): with *P*<sub>max</sub> and *P*<sub>min</sub> the long and short sides of the footprint, take *N* = min(⌈*P*<sub>max</sub> / *P*<sub>min</sub>⌉, max anisotropy) samples, at λ = log₂(*P*<sub>max</sub> / *N*), spaced evenly along the long axis. The widget does exactly that, with trilinear samples. Choose **Anisotropic** and step a quad near the horizon: the dots line up along the footprint.
+
+At 16× the error halves again, to 0.024, and the squares stay sharp much further away. It costs 27.31 texel reads a pixel against trilinear's 6.04, but only where the footprint is stretched; on a wall seen face-on it costs the same as trilinear. Texture units and their caches are built for this, and on desktop GPUs many games use 16× for most textures. D3D11's `MaxAnisotropy` goes up to 16; WebGPU's `maxAnisotropy` is clamped to what the platform supports, usually 16; Vulkan reports its limit as `maxSamplerAnisotropy`. The GL extension and the Vulkan spec both leave the exact scheme to the implementation, and real hardware shapes its footprint and spaces its samples in its own ways, so the same setting looks a little different on different GPUs.
+
+## Texture compression
+
+Textures are most of a game's memory, and reading them is a large share of its bandwidth. GPUs store them **block-compressed**: the texture is cut into fixed-size blocks (4 × 4 texels for BC), each compressed to a fixed number of bits. Because every block is the same size, the texture unit can find any texel's block directly and decode it on the fly, and the data stays compressed in memory and in the caches. That's what rules out JPEG-style variable-rate formats.
+
+- **BC1** stores two colours per block in 5:6:5 bits, and a 2-bit index per texel choosing one of four colours on the line between them: 64 bits for 16 texels, 4 bits per texel. Smooth gradients are fine, sharp edges with many colours aren't.
+- **BC3** adds a separately coded alpha block, for 8 bits per texel in all. **BC4** and **BC5** store one and two channels: masks and roughness, and tangent-space normal maps (two channels, the third rebuilt in the shader).
+- **BC6H** stores HDR colour in half floats, and **BC7** high-quality RGB or RGBA, both at 8 bits per texel. BC7 is the usual choice for colour when quality matters; its encoder is slow, its decoder isn't.
+- **ASTC**, the usual format on mobile GPUs, has 128-bit blocks whose footprint you choose, from 4 × 4 (8 bits per texel) to 12 × 12 (under 1 bit per texel), so quality and size can be traded per texture. (ETC2 is the older mobile standard.)
+
+A 2048 × 2048 texture with its mip chain:
+
+| Format | Bits per texel | Size with mipmaps |
+|---|---|---|
+| RGBA8 (uncompressed) | 32 | 22.4 MB |
+| BC1 | 4 | 2.8 MB |
+| BC7 | 8 | 5.6 MB |
+| ASTC 4 × 4 | 8 | 5.6 MB |
+| ASTC 8 × 8 | 2 | 1.4 MB |
+
+Compression is lossy and usually happens offline, in the asset pipeline, because the best encoders are slow; fast GPU encoders handle textures generated at run time. Mipmaps are built from the uncompressed image first, then each level is compressed.
+
+<Tip kind="note" title="What the widget simplifies">
+Real samplers work in fixed point with a limited number of bits for the bilinear and level weights, filter in a format's linear space (sRGB textures are converted to linear before filtering), and are allowed to approximate the footprint more cheaply than the square roots used here, which can move the chosen level by up to about half a level at some angles.
+</Tip>
+
+## Takeaways
+
+- A pixel's colour should be the texture averaged over its **footprint**. **Nearest** reads one texel, **bilinear** four; both alias when a pixel covers many texels.
+- **Mipmaps** store the averages in advance, for a third more memory. The level is λ = log₂ of the footprint in texels; **trilinear** blends two levels.
+- The footprint comes from **derivatives across a 2 × 2 quad**, which is why pixel shaders run in quads, with **helper lanes** where the triangle doesn't reach, and why sampling in divergent branches is undefined.
+- **Anisotropic filtering** takes up to 16 samples along a stretched footprint, each from a sharper level; it costs reads only where the footprint is stretched.
+- **Block compression** (BC1–BC7 on desktop, ASTC on mobile) keeps textures at about 1–8 bits per texel, decoded by the texture unit.
+
+## Further reading
+
+- The [Vulkan specification, Textures chapter](https://docs.vulkan.org/spec/latest/chapters/textures.html): the level-of-detail calculation, mip level selection and anisotropy.
+- [`EXT_texture_filter_anisotropic`](https://github.com/KhronosGroup/OpenGL-Registry/blob/main/extensions/EXT/EXT_texture_filter_anisotropic.txt), the extension that brought anisotropic filtering to OpenGL, with an example footprint and sample spacing.
+- The [D3D11.3 functional spec](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm), §3.5.7 on pixel shader derivatives and 2 × 2 quads, and the [`deriv_rtx_coarse`](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/deriv-rtx-coarse--sm5---asm-) reference.
+- Microsoft's [Texture block compression in Direct3D 11](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11): what BC1–BC7 store.
+- Fabian Giesen's [*A trip through the graphics pipeline*](https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/), part 4, on texture samplers and their caches.

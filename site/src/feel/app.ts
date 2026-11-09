@@ -5,11 +5,11 @@
  */
 import { h } from '../lab/ui/dom';
 import { Learn } from '../lab/ui/learn';
-import { Camera, DT, HALF_W, HEIGHT, type Keys, type Level, PRESETS, Player, type Settings, TIGHT, type TickEvents, jumpPhysics, makeLevel } from './controller';
+import { Camera, DT, HALF_W, HEIGHT, type Keys, type Level, PRESETS, Player, type Settings, TIGHT, type TickEvents, jumpPhysics, landingTrauma, makeLevel } from './controller';
 import { CONCEPTS, GLOSSARY, type FConcept, type FScenario } from './concepts';
 
-const VIEW_W = 24;
-const VIEW_H = 13.5;
+export const VIEW_W = 24;
+export const VIEW_H = 13.5;
 const STRIP_TICKS = 300; // five seconds
 
 interface Sample {
@@ -34,7 +34,7 @@ interface Slider {
 }
 
 const secs = (v: number) => (v === 0 ? 'off' : `${Math.round(v * 1000)} ms`);
-const SLIDERS: Record<string, { title: string; concept: string; sliders: Slider[] }> = {
+export const SLIDERS: Record<string, { title: string; concept: string; sliders: Slider[] }> = {
   run: {
     title: 'Run',
     concept: 'run',
@@ -348,8 +348,8 @@ export class FeelApp {
     if (ev.cornered) this.counts.corner++;
     if (ev.cut) this.counts.cut++;
     // Shake scales with how far the player fell beyond a normal jump: nothing for an ordinary jump, a lot for the shaft.
-    const fell = ev.drop === undefined ? 0 : ev.drop - this.s.jumpHeight - 1;
-    if (this.s.shake && fell > 0) this.cam.trauma = Math.min(1, this.cam.trauma + fell / 8);
+    const trauma = landingTrauma(ev.drop, this.s);
+    if (this.s.shake && trauma > 0) this.cam.trauma = Math.min(1, this.cam.trauma + trauma);
     if (!p.grounded || ev.landed) {
       this.trail.push({ x: p.x, y: p.y });
       if (this.trail.length > 240) this.trail.shift();

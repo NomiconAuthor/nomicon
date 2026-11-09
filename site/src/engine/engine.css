@@ -12,6 +12,49 @@
 .ll-loading {
   color: var(--muted);
 }
+/* Opt-in sizing (fit.ts has the JS half). Nothing here applies unless a widget uses these classes.
+   .ll-canvas / .ll-fig: shown at --ll-ar, no wider than --ll-max-w, no taller than --ll-max-h, never
+   wider than the column. .ll-stage: the figure, with .ll-side beside it once both fit (figure +
+   --ll-side-min), under it otherwise. Override the limits on the canvas, fig or widget root. */
+.ll-canvas,
+.ll-fig {
+  --ll-fig-w: min(var(--ll-max-w, 640px), calc(var(--ll-max-h, 60vh) * var(--ll-ar, 1.6)));
+  width: min(100%, var(--ll-fig-w));
+  box-sizing: border-box;
+}
+.ll-canvas {
+  display: block;
+  height: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.ll-fig {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.ll-fig > .ll-canvas {
+  width: 100%;
+}
+.ll-stage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-start;
+}
+.ll-stage > .ll-canvas,
+.ll-stage > .ll-fig {
+  flex: 0 1 auto;
+}
+.ll-side {
+  flex: 1 1 var(--ll-side-min, 16rem);
+  min-width: min(100%, var(--ll-side-min, 16rem));
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
 .ll-h {
   font-size: 11px;
   font-weight: 500;
@@ -477,10 +520,11 @@
 }
 
 /* Game loop */
-.lp-scene,
+/* The scene is sized by .ll-canvas / .ll-fig (fit.ts); the timeline strip fills the figure. */
 .lp-time {
   width: 100%;
-  height: auto;
+  height: 120px;
+  box-sizing: border-box;
   display: block;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
@@ -502,9 +546,6 @@
 .lp-headless {
   color: var(--body);
   min-height: 1.4em;
-}
-.lp-scene {
-  max-width: 760px;
 }
 /* Theme rules for inline code in lessons shouldn't restyle the widgets' code boxes. */
 .lesson .ll code.ll-code {
@@ -653,12 +694,8 @@
 }
 
 /* Spatial partitioning */
+/* Sized by .ll-canvas (fit.ts). */
 .sp-canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
   touch-action: none;
   cursor: crosshair;
 }
@@ -773,9 +810,28 @@
 .pf > * {
   min-width: 0;
 }
+/* The tree and the function list scroll inside a capped box, so the chart, the view switch and
+   the table fit one screen together. */
 .pf-tablewrap {
-  overflow-x: auto;
+  overflow: auto;
   max-width: 100%;
+  max-height: min(40vh, 440px);
+  overscroll-behavior: contain;
+}
+.ll .pf-table {
+  margin: 0;
+  font-size: 12.5px;
+}
+.ll .pf-table th,
+.ll .pf-table td {
+  padding: 3px 8px;
+  vertical-align: middle;
+}
+.ll .pf-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--paper);
 }
 .pf-table {
   width: 100%;

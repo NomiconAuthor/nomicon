@@ -1,0 +1,81 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Overdraw and fill rate
+order: 18
+part: Performance and profiling
+summary: "Measuring how many times each pixel is shaded, with a heat map on the real GPU: opaque overdraw and the sorting and prepass that fix it, then particles, where no depth test helps and the fixes are fewer and smaller particles, trimmed quads, half-resolution buffers and cheaper shaders."
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+**Fill rate** is how fast a GPU turns fragments into pixels: shading them, testing them, blending them and writing them to memory. **Overdraw** is spending it on the same pixel more than once in a frame. A 1920 × 1080 frame has about two million pixels; if each is shaded eight times, the GPU does the work of eight frames to show one.
+
+The [depth lesson](/rendering/depth/#early-z-and-late-z) showed overdraw on the software rasteriser, for opaque geometry, and how early Z, front-to-back sorting and a [depth prepass](/rendering/depth/#the-depth-prepass) remove it. This lesson measures it on your real GPU and moves on to the overdraw those tools can't touch: blended particles.
+
+## A heat map of fragments
+
+To see overdraw, draw the frame again with every fragment shader replaced by one that outputs 1/255, into an RGBA8 target with additive blending. Same draws, same depth tests, so every fragment that would have been shaded adds one to its pixel, and the target ends up holding the count. Engines ship views like it for debugging (Unreal has Shader Complexity and Quad Overdraw), and RenderDoc has one as an overlay: [Quad Overdraw](https://renderdoc.org/docs/window/texture_viewer.html), which counts 2 × 2 quads, because that's how the GPU shades (the [helper lanes](/rendering/how-shaders-run/#tiny-triangles-and-helper-lanes) in the quads are paid for too).
+
+The widget draws a forest with a smoke plume on the GPU: a background, 26 opaque trunks and bushes at different depths, and up to 1,200 smoke particles, alpha blended, tested against the opaque depth but not writing it. Switch **Show** to the heat map. Beside it, a CPU model of the same frame counts the fragments each pass shades: it repeats the GPU's coverage test (pixel centres) and early depth test by hand, on the same cards in the same order, so those numbers are the ones you'd count in the heat map. Under them is the GPU time each pass takes on your machine, measured live.
+
+<RenderWidget kind="fill-rate" />
+
+With the starting settings the frame has 129,600 pixels and shades 1,038,228 fragments: 8.01 per pixel. The particles are 832,100 of them, 80%. The trees cost little by comparison, and it's the plume, not the forest, that glows in the heat map.
+
+## Opaque overdraw: sort, or prepass
+
+The opaque cards come first. **Unsorted** (in the order they were made, with the background drawn first, as a sky usually isn't), they shade 206,128 fragments, 1.59 per pixel. **Back to front**, the worst order, every card passes the depth test against everything drawn so far: 233,564, 1.80 per pixel. **Front to back**, each pixel is shaded once by the card that wins and every card behind it fails the early depth test: 129,600, one per pixel. A **depth prepass** gets the same 129,600 in any order, after 233,564 depth-only fragments that run no shader at all. The depth lesson has the details and the caveats (shaders that write depth or discard turn early Z off).
+
+Tile-based GPUs do much of this in hardware. Apple's GPUs process all of a pass's geometry for a tile before shading it and [shade only the visible primitives](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering). Arm's Mali GPUs cancel fragment threads already in flight when a later opaque fragment covers them ([Forward Pixel Kill](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/killing-pixels---a-new-optimization-for-shading-on-arm-mali-gpus)), and the Immortalis-G925 adds a [fragment pre-pass](https://community.arm.com/arm-community-blogs/b/graphics-gaming-and-vr-blog/posts/immortalis-g925-the-fragment-prepass) that gets the same culling in any draw order. So sorting opaque draws matters less there. None of it helps with blending.
+
+## Particles: overdraw no depth test removes
+
+A blended fragment has to be shaded and blended even when something else will be drawn over it, because what's behind shows through. Early Z only removes particles that are hidden behind opaque geometry: here, 99,756 particle fragments fail the depth test against the trees and are never shaded. The rest are all paid for, every layer of smoke at every pixel. Sorting doesn't change the count either: blended particles must be drawn back to front to look right, and the count is the same in any order.
+
+Foliage is the other classic case. Leaves are cut-out cards, many layers deep, and a shader that discards [delays the depth write](/rendering/depth/#early-z-and-late-z) until it has run, which weakens early Z. That's why foliage is where a prepass most often pays: the prepass pays for the discards once, and the main pass runs with early Z.
+
+The fixes all cut either the number of fragments or what each one costs.
+
+**Fewer, smaller particles.** Fragments grow with the square of the size. At **96 px** the plume shades 3,161,704 fragments and the frame 3,367,832, 25.99 per pixel. The usual trade is fewer particles with more detail in each texture, and fewer layers close to the camera, where each particle covers the most pixels.
+
+**Trim the quad.** Most of a smoke sprite's square is transparent, and those pixels are shaded and blended for nothing. Draw the sprite on a polygon that hugs its visible part instead of a quad. For this widget's round puffs, a regular octagon around the circle covers 83% of the square; **Trimmed octagons** cuts the particle fragments from 832,100 to 700,983, 84% (the octagons are snapped outwards to half pixels). Real smoke textures have more empty space: Emil Persson's [particle trimmer](https://www.humus.name/index.php?ID=266) cut one smoke puff's fill to 60% of the quad with four vertices and 52% with eight. The extra vertices cost far less than the pixels they save.
+
+**Render particles at a lower resolution.** Draw them into a buffer half the width and half the height, a quarter of the pixels, then blend that buffer over the scene. Iain Cantlay's [*High-Speed, Off-Screen Particles*](https://developer.nvidia.com/gpugems/gpugems3/part-iv-image-effects/chapter-23-high-speed-screen-particles) (GPU Gems 3) gives the recipe the widget follows:
+
+- **Downsample depth**, taking the farthest of each 2 × 2 block, so the particles are still hidden by solid objects. Taking the farthest lets particles creep slightly into silhouettes rather than leaving halos around them.
+- **Blend in two parts:** colour as usual onto black, and alpha as the running product of (1 − *a*). The particle buffer then holds the particles' colour and how much of the scene shows through.
+- **Composite** with one full-screen pass: scene × that product + particle colour.
+
+Tick **Particles at half resolution**: the particles shade 208,025 fragments instead of 832,100, the composite adds one per pixel (129,600) and the depth downsample 32,400 more (a small shader that only writes depth, left out of the count), for 543,753 shaded fragments in all, 4.20 per pixel. The cost is blur and blocky edges where particles meet geometry; Cantlay finds those edges with a Sobel filter and draws the particles again at full resolution only there.
+
+**Cheaper shaders.** Fragments × cost per fragment is the bill, and the slider changes the second factor without touching the first: the counts stay the same, only the time moves. Particle shaders grow: lighting, several texture reads, a fade where the particle meets geometry. When the shader is the expensive part, making it cheaper (or moving work to the vertex shader: lighting per vertex is often good enough for smoke) helps as much as fewer fragments.
+
+## Reading the live times
+
+The GPU times are your machine's, so this lesson doesn't quote any; look for how they move as you change things:
+
+- **Compare passes, not machines.** The particles pass against the opaque pass, and the same pass before and after a change.
+- **Two kinds of limit.** With a cheap shader, the time follows the number of fragments, and what limits it is how fast the GPU can blend and write them (its fill rate and memory bandwidth). With an expensive one, it follows fragments × shader cost. Try halving the fragments, then lowering the cost, and see which your GPU cares about.
+- **Small passes read badly.** Chrome rounds WebGPU timestamps to 100 µs, so a pass this small may read 0 or jump between steps. A software adapter (headless browsers, some VMs) is many times slower than any GPU, and its times say little about real hardware.
+
+The [next lesson but one](/rendering/timing-the-gpu/) is about where these numbers come from and why a CPU timer can't produce them.
+
+<Tip title="Fill rate on spec sheets">
+GPU spec sheets quote pixel fill rate as the number of render output units (ROPs) times the clock: how many pixels a second the hardware can test, blend and write. Real frames rarely reach it, because shading or memory bandwidth runs out first, but blended particles on a wide target are where you get close. The [next lesson](/rendering/bandwidth/) is about the memory side.
+</Tip>
+
+## Takeaways
+
+- **Overdraw** is shading a pixel more than once. A heat map that counts fragments (additive 1/255 per fragment) shows where it goes.
+- **Opaque overdraw** goes away with front-to-back sorting or a depth prepass, and on tile-based GPUs largely in hardware.
+- **Blended overdraw** doesn't: every layer is shaded. Particles and foliage are where frames lose their fill rate.
+- The fixes: **fewer and smaller particles**, **trimmed quads** that skip the transparent corners, **half-resolution particle buffers** with a depth downsample and a composite, and **cheaper particle shaders**.
+
+## Further reading
+
+- The [depth lesson](/rendering/depth/#early-z-and-late-z): early and late Z, sorting and the prepass, on the software rasteriser.
+- Iain Cantlay, [*High-Speed, Off-Screen Particles*](https://developer.nvidia.com/gpugems/gpugems3/part-iv-image-effects/chapter-23-high-speed-screen-particles), GPU Gems 3, chapter 23.
+- Emil Persson, [*Particle trimmer*](https://www.humus.name/index.php?ID=266): the tool and its measurements.
+- Apple, [*Tailor your apps for Apple GPUs and tile-based deferred rendering*](https://developer.apple.com/documentation/metal/tailor-your-apps-for-apple-gpus-and-tile-based-deferred-rendering).
+- Arm, [*Killing pixels: a new optimization for shading on Arm Mali GPUs*](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/killing-pixels---a-new-optimization-for-shading-on-arm-mali-gpus) and [*Immortalis-G925: the fragment pre-pass*](https://community.arm.com/arm-community-blogs/b/graphics-gaming-and-vr-blog/posts/immortalis-g925-the-fragment-prepass).
+- RenderDoc's [texture viewer overlays](https://renderdoc.org/docs/window/texture_viewer.html), including Quad Overdraw.

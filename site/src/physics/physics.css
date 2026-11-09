@@ -1,5 +1,46 @@
-/* Physics lesson widgets. Colours come from the theme tokens. */
+/* Physics lesson widgets. Colours come from the theme tokens.
+
+   Sizing rule (view.ts has the JS half: phCanvas(), fitCanvas(), phCtx(), phStage()). The 2D
+   canvases (.ph-fit) are shown at their aspect ratio (--ph-ar), no wider than --ph-max-w, no
+   taller than --ph-max-h and never wider than the column. A .ph-stage puts the canvas beside its
+   .ph-side panel (readouts, secondary controls) once the widget is wide enough, under it
+   otherwise. */
+.ph {
+  container: ph / inline-size;
+  --ph-max-w: 640px;
+  --ph-max-h: 60vh;
+  --ph-side-min: 16rem;
+}
 .ph-canvas,
+.ph-fig {
+  --ph-fig-w: min(var(--ph-max-w), calc(var(--ph-max-h) * var(--ph-ar, 1.5)));
+  width: min(100%, var(--ph-fig-w));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+.ph-fig.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+@container ph (max-width: 560px) {
+  .ph-fig.two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.ph-pane {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.ph-fig .ph-fit {
+  width: 100%;
+}
+.ph-narrow-out .det-sums {
+  overflow-x: auto;
+}
 .ph-chart {
   width: 100%;
   height: auto;
@@ -8,8 +49,49 @@
   border-radius: 8px;
   background: var(--bg);
 }
+.ph-fit {
+  --ph-fig-w: min(var(--ph-max-w), calc(var(--ph-max-h) * var(--ph-ar, 1.5)));
+  width: min(100%, var(--ph-fig-w));
+  box-sizing: border-box;
+}
 .ph-chart {
-  max-height: 120px;
+  aspect-ratio: 4;
+  max-height: 110px;
+}
+.ph-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: start;
+}
+.ph-side {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+.ph [hidden] {
+  display: none !important;
+}
+.ph-side:empty {
+  display: none;
+}
+@container ph (min-width: 880px) {
+  .ph-stage:has(> .ph-side:not(:empty)) {
+    grid-template-columns: min(var(--ph-max-w), calc(var(--ph-max-h) * var(--ph-ar, 1.5)), 100% - var(--ph-side-min) - 14px) minmax(0, 1fr);
+  }
+  .ph-stage:has(> .ph-side:not(:empty)) > .ph-fit,
+  .ph-stage:has(> .ph-side:not(:empty)) > .ph-fig {
+    width: 100%;
+  }
+}
+/* Secondary detail (the step's phase list) folds away. */
+.ph-more > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.ph-more[open] > summary {
+  margin-bottom: 6px;
 }
 .ph-phases {
   margin: 0;

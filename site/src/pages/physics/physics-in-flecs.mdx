@@ -10,7 +10,7 @@ import Tip from '../../components/lesson/Tip.astro';
 
 A physics engine is a database of its own. It stores bodies in its own layout (Box3D in solver sets, Jolt in its body manager), it decides when they sleep, and it hands out ids. An ECS is also a database, with its own layout. Integrating the two is mostly a question of **who owns which data**, and of moving the right data across at the right moment.
 
-The widget below runs real flecs (the same master build as the [flecs lessons](/flecs/)) with the teaching engine from the [concept lessons](/physics/the-step/) as the physics engine. The code in this lesson is the C++ version of what it does.
+The widget below runs real flecs (the same v4.2.0 build as the [flecs lessons](/flecs/)) with the teaching engine from the [concept lessons](/physics/the-step/) as the physics engine. The code in this lesson is the C++ version of what it does.
 
 <PhysicsWidget kind="ecs" />
 

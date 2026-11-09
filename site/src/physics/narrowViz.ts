@@ -8,6 +8,7 @@ import { h, seg } from '../engine/dom';
 import { touchScroll } from '../engine/touch';
 import { type Shape, type ManifoldInfo, box, circle, collide, gjk, minkowskiOutline, polygon, satAxes } from './collide';
 import { type Transform, type V, add, dot, makeRot, rotate, scale, sub, v } from './math';
+import { fitCanvas, logicalSize, phCanvas, phCtx, phStage } from './view';
 
 type Kind = 'box' | 'tri' | 'pent' | 'circle';
 type Mode = 'sat' | 'gjk' | 'manifold';
@@ -26,8 +27,10 @@ function shapeOf(k: Kind): Shape {
 
 export class NarrowViz {
   private root: HTMLElement;
-  private left = h('canvas', { class: 'ph-canvas', width: '640', height: '480', 'aria-label': 'Two shapes' });
-  private right = h('canvas', { class: 'ph-canvas', width: '640', height: '480', 'aria-label': 'Their Minkowski difference' });
+  private left = phCanvas(4 / 3, 'Two shapes');
+  private right = phCanvas(4 / 3, 'Their Minkowski difference');
+  private fig!: HTMLElement;
+  private stage!: HTMLElement;
   private out = h('div', { class: 'ph-narrow-out' });
   private kinds: [Kind, Kind] = ['box', 'pent'];
   private shapes: [Shape, Shape] = [shapeOf('box'), shapeOf('pent')];
@@ -49,19 +52,20 @@ export class NarrowViz {
         this.shapes[i] = shapeOf(k);
         this.redraw();
       }).el;
-    this.rightBtn = h('div', { class: 'ph-right' }, h('div', { class: 'll-h' }, 'Minkowski difference B − A (the origin is where they touch)'), this.right);
+    this.rightBtn = h('div', { class: 'ph-pane' }, h('div', { class: 'll-h' }, 'Minkowski difference B − A (+ is the origin)'), this.right);
+    this.fig = h('div', { class: 'ph-fig ph-narrow-fig' }, h('div', { class: 'ph-pane' }, h('div', { class: 'll-h' }, 'Drag a shape to move it, near its edge to turn it'), this.left), this.rightBtn);
+    this.stage = phStage(this.fig, [this.stepRow, this.out], 4 / 3);
     this.root.append(
       seg<Mode>('Show', [['sat', 'Separating axes'], ['gjk', 'GJK and EPA'], ['manifold', 'Contact manifold']], this.mode, (m) => {
         this.mode = m;
         this.gjkStep = 1e9;
         this.redraw();
       }).el,
-      pick(0, 'Shape A'),
-      pick(1, 'Shape B'),
-      this.stepRow,
-      h('div', { class: 'ph-two' }, h('div', {}, h('div', { class: 'll-h' }, 'Drag a shape to move it; drag near its edge to turn it'), this.left), this.rightBtn),
-      this.out,
+      h('div', { class: 'll-row' }, pick(0, 'Shape A'), pick(1, 'Shape B')),
+      this.stage,
     );
+    fitCanvas(this.left, () => this.redraw());
+    fitCanvas(this.right, () => this.redraw());
     touchScroll(this.left, { grab: (e) => this.hit(this.toWorld(e)) >= 0 });
     this.left.addEventListener('pointerdown', (e) => {
       const p = this.toWorld(e);
@@ -116,12 +120,10 @@ export class NarrowViz {
     const tb = this.xf(1);
     const cs = getComputedStyle(this.left);
     const col = (n: string) => cs.getPropertyValue(n).trim() || '#888';
-    const L = this.left.getContext('2d')!;
-    const W = this.left.width;
-    const H = this.left.height;
+    const L = phCtx(this.left);
+    const { w: W, h: H } = logicalSize(this.left);
     const k = W / (this.view.x1 - this.view.x0);
     const px = (p: V) => v((p.x - this.view.x0) * k, (this.view.y1 - p.y) * k);
-    L.setTransform(1, 0, 0, 1, 0, 0);
     L.fillStyle = col('--bg');
     L.fillRect(0, 0, W, H);
     const shape = (ctx: CanvasRenderingContext2D, s: Shape, t: Transform, c: string, map = px, fill = true) => {
@@ -149,13 +151,22 @@ export class NarrowViz {
     shape(L, A, ta, '--c2');
     shape(L, B, tb, '--c3');
     L.fillStyle = col('--muted');
-    L.font = '18px sans-serif';
+    L.font = '600 15px sans-serif';
+    L.textAlign = 'center';
+    L.textBaseline = 'middle';
     for (const [i, t] of [ta, tb].entries()) {
       const p = px(t.p);
-      L.fillText(i ? 'B' : 'A', p.x - 5, p.y + 6);
+      L.fillText(i ? 'B' : 'A', p.x, p.y);
     }
+    L.textAlign = 'start';
+    L.textBaseline = 'alphabetic';
 
-    this.rightBtn.hidden = this.mode !== 'gjk';
+    const two = this.mode === 'gjk';
+    this.rightBtn.hidden = !two;
+    this.fig.classList.toggle('two', two);
+    // Two panes side by side: a wider, shorter figure (the headings add a little height).
+    this.stage.style.setProperty('--ph-ar', two ? '2.45' : '1.25');
+    this.stage.style.setProperty('--ph-max-w', two ? '860px' : '640px');
     this.stepRow.replaceChildren();
     const outBits: Array<Node | string> = [];
     if (this.mode === 'sat') outBits.push(...this.drawSat(L, px, ta, tb, col));
@@ -267,10 +278,8 @@ export class NarrowViz {
       h('span', { class: 'll-muted' }, `Step ${at + 1} of ${total}`),
       h('button', { type: 'button', class: 'll-btn', onclick: () => ((this.gjkStep = Math.min(total - 1, at + 1)), this.redraw()) }, '▶'),
     );
-    const R = this.right.getContext('2d')!;
-    const W = this.right.width;
-    const H = this.right.height;
-    R.setTransform(1, 0, 0, 1, 0, 0);
+    const R = phCtx(this.right);
+    const { w: W, h: H } = logicalSize(this.right);
     R.fillStyle = col('--bg');
     R.fillRect(0, 0, W, H);
     const outline = minkowskiOutline(A, ta, B, tb);

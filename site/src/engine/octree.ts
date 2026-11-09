@@ -1,4 +1,5 @@
 import { h, seg, fmt } from './dom';
+import { llCanvas, llCtx, llFit, llFont, llStage } from './fit';
 
 /**
  * 3D octree over a small city of box buildings, used to pathfind an airship.
@@ -266,7 +267,7 @@ export class OctreeLab {
   constructor(host: HTMLElement) {
     this.root = h('div', { class: 'll oc' });
     host.replaceChildren(this.root);
-    this.cnv = h('canvas', { class: 'sp-canvas oc-canvas', width: '900', height: '600', 'aria-label': '3D view of the city and the octree; drag to orbit' });
+    this.cnv = llCanvas(900, 600, '3D view of the city and the octree; drag to orbit', 'sp-canvas oc-canvas');
     const min = seg<string>('Smallest cell', ['1', '2', '4'].map((v) => [v, v] as [string, string]), String(this.min), (v) => ((this.min = Number(v)), this.rebuild()));
     const show = seg<Show>(
       'Show',
@@ -288,13 +289,15 @@ export class OctreeLab {
         h('button', { type: 'button', class: 'll-btn', onclick: () => ((this.seed++), this.rebuild()) }, 'New city'),
         h('button', { type: 'button', class: 'll-btn', onclick: () => this.newTrip() }, 'New trip'),
       ),
-      this.cnv,
-      h('div', { class: 'll-h' }, 'Octree'),
-      this.stats,
-      h('div', { class: 'll-h' }, `Uniform voxel grid at the same smallest cell size`),
-      this.gridStats,
-      h('p', { class: 'll-muted sp-note' }, 'Drag to orbit, scroll to zoom. Thin line: A* through cell centres. Thick line: after string pulling.'),
+      llStage(this.cnv, [
+        h('div', { class: 'll-h' }, 'Octree'),
+        this.stats,
+        h('div', { class: 'll-h' }, `Uniform voxel grid at the same smallest cell size`),
+        this.gridStats,
+        h('p', { class: 'll-muted sp-note' }, 'Drag to orbit, scroll to zoom. Thin line: A* through cell centres. Thick line: after string pulling.'),
+      ]),
     );
+    llFit(this.cnv, () => this.draw());
     let drag: [number, number] | null = null;
     this.cnv.addEventListener('pointerdown', (e) => ((drag = [e.clientX, e.clientY]), this.cnv.setPointerCapture(e.pointerId)));
     this.cnv.addEventListener('pointerup', () => (drag = null));
@@ -439,9 +442,10 @@ export class OctreeLab {
   }
 
   private draw(): void {
-    const ctx = this.cnv.getContext('2d')!;
-    const W = this.cnv.width;
-    const H = this.cnv.height;
+    // Drawn in logical 900 × 600 units, scaled to the backing store.
+    const ctx = llCtx(this.cnv);
+    const W = 900;
+    const H = 600;
     const cs = getComputedStyle(this.root);
     const col = (n: string) => cs.getPropertyValue(n).trim() || '#888';
     ctx.fillStyle = col('--bg');
@@ -568,7 +572,7 @@ export class OctreeLab {
       }
     }
     ctx.fillStyle = col('--muted');
-    ctx.font = `12px ${col('--f-mono')}`;
+    ctx.font = `${llFont(this.cnv, 12)}px ${col('--f-mono')}`;
     ctx.fillText('start', P(...(this.start as [number, number, number]))[0] + 8, P(...(this.start as [number, number, number]))[1]);
     ctx.fillText('goal', P(...(this.goal as [number, number, number]))[0] + 8, P(...(this.goal as [number, number, number]))[1]);
   }

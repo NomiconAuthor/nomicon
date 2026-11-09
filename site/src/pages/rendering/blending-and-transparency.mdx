@@ -1,0 +1,100 @@
+---
+layout: ../../layouts/Lesson.astro
+title: Blending and transparency
+order: 5
+part: Pipeline fundamentals
+summary: 'The blend equation, premultiplied alpha and why straight alpha leaves fringes, why transparent things need sorting and what goes wrong when they aren''t, alpha test against alpha to coverage, and order-independent transparency in brief.'
+---
+import RenderWidget from '../../components/RenderWidget.astro';
+import Tip from '../../components/lesson/Tip.astro';
+
+Opaque surfaces have it easy: the depth buffer keeps the nearest one at each pixel, whatever order they're drawn in. A transparent surface has to be **mixed** with what's behind it, so what's behind it must already be there when it's drawn. That one fact is behind every difficulty in this lesson: sorting, the depth buffer's uneasy role, and the tricks that avoid both.
+
+## The blend equation
+
+The mixing happens after the fragment shader, in the output merger. You configure it as fixed state, not code; desktop GPUs do it in dedicated hardware, while some mobile GPUs (Apple's among them) compile it onto the end of the fragment shader. It combines the shader's output (the **source**) with the colour already in the target (the **destination**):
+
+> result = source × *src factor* **op** destination × *dst factor*
+
+You choose the two factors and the operation (add, subtract, reverse subtract, min, max; min and max ignore the factors), with a separate choice for the alpha channel. The common settings:
+
+| Blend | src factor | dst factor | result |
+|---|---|---|---|
+| Opaque | one | zero | src |
+| Alpha ("over") | src α | 1 − src α | src·α + dst·(1 − α) |
+| Premultiplied alpha | one | 1 − src α | src + dst·(1 − α) |
+| Additive | one (or src α) | one | dst + src (or dst + src·α) |
+
+In D3D12 these are the `SrcBlend`, `DestBlend` and `BlendOp` fields of `D3D12_RENDER_TARGET_BLEND_DESC`; in Vulkan `srcColorBlendFactor`, `dstColorBlendFactor` and `colorBlendOp`; in WebGPU a `blend` whose `color` and `alpha` components each have `srcFactor`, `dstFactor` and `operation`. "Over" is Porter and Duff's 1984 compositing operator: the source covers a fraction α of the pixel and lets 1 − α of the destination show through.
+
+## Sorting
+
+"Over" isn't commutative: red over yellow isn't yellow over red. Transparent surfaces have to be drawn **back to front**, each over everything behind it. The widget draws a wall and a floor (opaque, first), then three glass panes at α = 0.5. Step through the draws, then switch **Show** to **Wrong pixels** to compare with the right answer, the panes sorted back to front.
+
+<RenderWidget kind="blend-sort" />
+
+- **Front to back**: 318 of the 1,806 pixels with glass are wrong. Where panes overlap, the far one ends up on top.
+- **Unsorted**, in the order a list might hold them: 150 wrong. Any order but the right one is wrong somewhere.
+- Tick **Panes write depth** and draw front to back: the same pixels are wrong for a different reason. The near pane's depth hides the panes behind it, so they're never drawn there at all. That's why transparent draws keep the **depth test on** (opaque things in front must still hide them) but **depth writes off**.
+
+Engines sort transparent draws by distance every frame, usually by each object's centre, after all the opaque ones. That's an approximation: a large object can be partly in front of and partly behind another, two objects can intersect, and one mesh can overlap itself, so there's no right order for whole objects. Particles get sorted per particle, which is one reason big particle systems are expensive.
+
+**Additive** blending sidesteps the problem: addition doesn't care about order, so all three orders give the same picture as sorted (choose **Additive**; with depth writes off nothing is wrong). It's only right for things that add light, like fire, sparks and glows, never for things that block it, like smoke or glass.
+
+## Premultiplied alpha
+
+A texture with alpha can store colour two ways. **Straight** alpha stores the colour and the alpha separately. **Premultiplied** stores colour × alpha, so a fully transparent texel is 0 in every channel. With premultiplied colour, "over" becomes src + dst·(1 − α), the third row of the table.
+
+The difference shows up as soon as the texture is filtered. A transparent texel still has a colour in straight alpha, often white or black, whatever the paint program left there. Bilinear filtering and mipmapping average that colour with the opaque texels next to it *before* alpha is applied, so it bleeds into the edges. The widget's sprite is a green disc whose transparent texels are white, drawn over a blue wall three times as large as the texture, and at a half and a quarter of its size:
+
+<RenderWidget kind="blend-edges" />
+
+With straight alpha, 304 pixels pick up some white, up to 25% of a pixel's colour: a light halo round the big sprite, and a pale smudge on the small ones, where the mip levels have averaged the white in. Premultiplied, there's no white anywhere. The averages are the right ones because transparent texels contribute nothing: filtering and blending premultiplied colours is just linear maths on light. That's why Tom Forsyth and others argue for premultiplied alpha throughout. It also lets one blend state do "over" and additive at once: a texel with colour and α = 0 adds light, one with α = 1 covers.
+
+The other fix, for straight-alpha art, is to **bleed** (dilate) the colour of the opaque texels out into the transparent ones in the asset pipeline, so whatever filtering pulls in is the right colour.
+
+## Cut-outs: alpha test and alpha to coverage
+
+Fences, foliage and hair are mostly holes, and sorting thousands of leaves isn't practical. The cheap alternative is the **alpha test**: the shader discards the fragment if alpha is below a threshold (`clip(a - 0.5)`, `discard`), and draws the rest as opaque, with depth writes on and no sorting. The price is that each pixel is all or nothing: the edges alias. As the [depth lesson](/rendering/depth/) showed, a shader that discards also delays the depth write until it has run.
+
+There's a worse problem at a distance. The fence's wire covers 23% of its area. Far away, the mip levels average wire and holes into an alpha of about 0.23 everywhere, which is under 0.5, so the test discards everything:
+
+<RenderWidget kind="blend-fence" />
+
+| Cut out with | Wire shown within 4 m | Wire shown beyond 8 m |
+|---|---|---|
+| Alpha blending | 25% | 22% |
+| Alpha test (≥ 0.5) | 15% | 0% |
+| Alpha to coverage | 24% | 24% |
+
+**Alpha to coverage** uses MSAA instead. The fragment's alpha decides how many of the pixel's samples it covers: at 4×, alpha 0.23 covers one sample of four. Each sample is still opaque and depth-tested on its own, so there's still no sorting, but after the resolve a pixel can be a quarter, half or three-quarters wire. The fence keeps its density at every distance, and its edges are antialiased. The widget keeps round(α × 4) samples. Real hardware chooses its own pattern of samples, and some GPUs dither it between neighbouring pixels: Vulkan's spec says only that the number of covered samples is meant to be proportional to alpha. It needs an MSAA target, which deferred renderers often don't have. The usual fix for alpha test instead is in the asset pipeline: scale each mip level's alpha so that the same fraction of it passes the test as at full size.
+
+## Order-independent transparency, in brief
+
+Sorting per object fails for intersecting and self-overlapping geometry. **Order-independent transparency** (OIT) methods give the right result, or close to it, in any order:
+
+- **Depth peeling** (Everitt, 2001) renders the scene several times, peeling off the nearest remaining layer each pass with a second depth test. Exact, but a pass per layer.
+- **Per-pixel lists**: every transparent fragment is appended to a linked list for its pixel (in a storage buffer, with an atomic counter), then a full-screen pass sorts and blends each pixel's list. Exact up to the memory you allow. The A-buffer idea goes back to Carpenter (1984); Yang and others built it on GPUs in 2010.
+- **Weighted blended OIT** (McGuire and Bavoil, 2013) gives up on exactness. It accumulates Σ colour·α and Σ α additively, and the product of (1 − α) separately, then composites their weighted average once. Choose **Weighted blended OIT** in the sorting widget: the picture is the same in every order, but where panes overlap it's an average, not a stack, and 318 pixels differ from the sorted answer, by up to 13%. The paper also weights each layer by its depth so nearer layers count for more; the widget weights them equally. It works best for many thin layers of similar colour, such as smoke.
+
+On GPUs that support them, **rasterizer-ordered views** (D3D11.3/12; fragment shader interlock in Vulkan, raster order groups in Metal) let a pixel shader read and write its pixel's data in submission order, which is what per-pixel methods such as Intel's multi-layer alpha blending build on. Most games still sort per object and avoid the cases where that fails.
+
+<Tip kind="note" title="What the widgets simplify">
+The widgets blend weights over the theme's colours instead of RGB numbers, which is the same linear maths, and don't round to an 8-bit target. Real blending happens on the stored format, so blending in an sRGB target is done in linear space and stored back as sRGB. That's another reason to blend premultiplied, linear colour.
+</Tip>
+
+## Takeaways
+
+- Blending is configured as fixed state: result = src × factor **op** dst × factor. "Over" (src α, 1 − src α) needs whatever is behind to be drawn first.
+- Transparent things are drawn **back to front**, after the opaque ones, with the **depth test on and depth writes off**. Sorting by object is approximate; intersecting and self-overlapping geometry break it.
+- **Premultiplied alpha** makes filtering and blending correct; straight alpha bleeds the colour of transparent texels into edges unless the art is dilated.
+- **Alpha test** needs no sorting but aliases and vanishes in the distance; **alpha to coverage** turns alpha into MSAA coverage and keeps the density.
+- **OIT**: depth peeling and per-pixel lists are exact and costly; weighted blended OIT is cheap, order-independent and approximate.
+
+## Further reading
+
+- Thomas Porter and Tom Duff, [*Compositing Digital Images*](https://doi.org/10.1145/800031.808606) (SIGGRAPH 1984): "over" and premultiplied colour.
+- Tom Forsyth, [*Premultiplied alpha*](https://tomforsyth1000.github.io/blog.wiki.html#%5B%5BPremultiplied%20alpha%5D%5D), on why it should be the default.
+- The [Vulkan specification, Fragment Operations](https://docs.vulkan.org/spec/latest/chapters/fragops.html), on alpha to coverage, and Microsoft's [`D3D12_RENDER_TARGET_BLEND_DESC`](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_render_target_blend_desc).
+- Morgan McGuire and Louis Bavoil, [*Weighted Blended Order-Independent Transparency*](https://jcgt.org/published/0002/02/09/), JCGT 2013.
+- Cass Everitt, *Interactive Order-Independent Transparency* (NVIDIA, 2001), on depth peeling.

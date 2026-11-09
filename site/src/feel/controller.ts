@@ -440,6 +440,15 @@ export class Player {
   }
 }
 
+/**
+ * Screen-shake trauma a landing adds: it scales with how far the player fell beyond a normal
+ * jump (height + 1 tile), so an ordinary jump adds nothing and a long drop adds a lot.
+ */
+export function landingTrauma(drop: number | undefined, s: Settings): number {
+  const fell = drop === undefined ? 0 : drop - s.jumpHeight - 1;
+  return fell > 0 ? fell / 8 : 0;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Camera
 
